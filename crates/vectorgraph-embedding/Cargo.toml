@@ -1,0 +1,12 @@
+[package]
+name = "vectorgraph-embedding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+ureq = { version = "3.4.0", features = ["json"] }
+
+[lints]
+workspace = true

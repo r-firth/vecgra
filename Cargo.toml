@@ -1,0 +1,46 @@
+[workspace]
+members = [
+    "crates/vectorgraph",
+    "crates/vectorgraph-cli",
+    "crates/vectorgraph-embedding",
+    "crates/vectorgraph-studio-core",
+    "crates/vectorgraph-studio-ui",
+    "crates/vectorgraph-studio",
+]
+default-members = [
+    "crates/vectorgraph",
+    "crates/vectorgraph-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.dependencies]
+# gpui-component currently declares Zed's Git source without a revision. These
+# two declarations must use the identical Cargo source ID to avoid two
+# incompatible GPUI type universes; Cargo.lock records the exact Zed commit.
+gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
+
+# GPUI pulls in the macOS graphics stack. Full debug symbols make a clean
+# desktop build several gigabytes larger without improving normal iteration.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+
+[profile.bench]
+codegen-units = 1
+lto = "thin"

@@ -1,0 +1,14 @@
+/target/
+/tmp/
+**/__pycache__/
+*.py[cod]
+
+# Local benchmark tool state and build output.
+/benchmarks/neo4j/.gradle/
+/benchmarks/neo4j/build/
+
+# Editor and macOS metadata.
+.DS_Store
+.idea/
+.vscode/
+*.swp
