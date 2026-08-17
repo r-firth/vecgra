@@ -7,8 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use vectorgraph::{
     BulkLoader, Database, DatabaseOptions, Direction, EdgeFilter, ElementFilter,
     ElementFilterStrategy, ElementRef, ElementSet, GraphRangeSearchOptions, NodeFilter,
-    NumericRangeFilter, NumericRangeStrategy, NumericValue, OneHopQuery, SemanticOneHopQuery,
-    SemanticPathOptions, Similarity, Value, VectorEncoding, VectorSearchStrategy, VectorTarget,
+    NumericRangeFilter, NumericRangeStrategy, NumericValue, OneHopQuery, OneHopStrategy,
+    SemanticOneHopQuery, SemanticPathOptions, Similarity, Value, VectorEncoding,
+    VectorSearchStrategy, VectorTarget,
 };
 
 fn temp_database(name: &str) -> PathBuf {
@@ -148,6 +149,105 @@ fn graph_and_vector_state_survive_reopen() {
     drop(compacted);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_file(compacted_path).unwrap();
+}
+
+#[test]
+fn one_hop_planner_chooses_selective_node_or_edge_access_paths() {
+    let path = temp_database("one-hop-plan");
+    let database = Database::create(&path, options()).unwrap();
+    let mut transaction = database.transaction();
+    let seed = transaction.create_node(
+        "Seed",
+        std::iter::empty::<(&str, Value)>(),
+        &[vec![1.0, 0.0, 0.0, 0.0]],
+    );
+    let target = transaction.create_node(
+        "Target",
+        std::iter::empty::<(&str, Value)>(),
+        &[vec![0.0, 1.0, 0.0, 0.0]],
+    );
+    let unique = transaction.create_edge(
+        seed,
+        target,
+        "UNIQUE",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let mut previous = transaction.create_node("Noise", std::iter::empty::<(&str, Value)>(), &[]);
+    for _ in 0..48 {
+        let next = transaction.create_node("Noise", std::iter::empty::<(&str, Value)>(), &[]);
+        transaction.create_edge(
+            previous,
+            next,
+            "NOISE",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        );
+        previous = next;
+    }
+    transaction.commit().unwrap();
+
+    let read = database.read();
+    let from_seed = OneHopQuery {
+        start: NodeFilter {
+            label: read.label_id("Seed"),
+            properties: Vec::new(),
+        },
+        direction: Direction::Outgoing,
+        limit: 10,
+        ..OneHopQuery::default()
+    };
+    let from_seed_plan = read.one_hop_plan(&from_seed);
+    assert_eq!(from_seed_plan.strategy, OneHopStrategy::StartAdjacency);
+    assert_eq!(from_seed_plan.start_candidate_upper_bound, 1);
+    assert_eq!(read.match_one_hop(&from_seed)[0].edge, unique);
+
+    let into_target = OneHopQuery {
+        end: NodeFilter {
+            label: read.label_id("Target"),
+            properties: Vec::new(),
+        },
+        direction: Direction::Outgoing,
+        limit: 10,
+        ..OneHopQuery::default()
+    };
+    assert_eq!(
+        read.one_hop_plan(&into_target).strategy,
+        OneHopStrategy::EndAdjacency
+    );
+    assert_eq!(read.match_one_hop(&into_target)[0].edge, unique);
+
+    let incoming_from_target = OneHopQuery {
+        start: NodeFilter {
+            label: read.label_id("Target"),
+            properties: Vec::new(),
+        },
+        end: NodeFilter {
+            label: read.label_id("Seed"),
+            properties: Vec::new(),
+        },
+        direction: Direction::Incoming,
+        limit: 10,
+        ..OneHopQuery::default()
+    };
+    let incoming_matches = read.match_one_hop(&incoming_from_target);
+    assert_eq!(incoming_matches.len(), 1);
+    assert_eq!(incoming_matches[0].start, target);
+    assert_eq!(incoming_matches[0].end, seed);
+
+    let unique_edge = OneHopQuery {
+        edge_label: read.label_id("UNIQUE"),
+        limit: 10,
+        ..OneHopQuery::default()
+    };
+    let edge_plan = read.one_hop_plan(&unique_edge);
+    assert_eq!(edge_plan.strategy, OneHopStrategy::EdgeScan);
+    assert_eq!(edge_plan.edge_candidate_upper_bound, 1);
+    assert_eq!(read.match_one_hop(&unique_edge)[0].edge, unique);
+
+    drop(read);
+    drop(database);
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]

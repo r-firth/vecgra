@@ -20,8 +20,8 @@ pub use graph::{
     Direction, EdgeFilter, ElementFilter, ElementFilterPlan, ElementFilterStrategy,
     FilteredVectorSearchResult, GraphRangeSearchOptions, GraphRangeSearchResult, GraphStats,
     NodeFilter, NumericRangeFilter, NumericRangePlan, NumericRangeStrategy, NumericValue,
-    OneHopQuery, PatternMatch, SemanticOneHopQuery, SemanticPathHit, SemanticPathOptions,
-    SemanticPatternMatch,
+    OneHopPlan, OneHopQuery, OneHopStrategy, PatternMatch, SemanticOneHopQuery, SemanticPathHit,
+    SemanticPathOptions, SemanticPatternMatch,
 };
 pub use model::{
     Edge, EdgeId, ElementRef, ElementSet, LabelId, Node, NodeId, Property, PropertyKeyId, Value,

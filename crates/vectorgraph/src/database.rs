@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::graph::{
     Direction, EdgeFilter, ElementFilter, FilteredVectorSearchResult, Graph,
     GraphRangeSearchOptions, GraphRangeSearchResult, GraphStats, Mutation, NumericRangeFilter,
-    NumericRangePlan, OneHopQuery, PatternMatch, SemanticOneHopQuery, SemanticPathHit,
+    NumericRangePlan, OneHopPlan, OneHopQuery, PatternMatch, SemanticOneHopQuery, SemanticPathHit,
     SemanticPathOptions, SemanticPatternMatch,
 };
 use crate::model::{Edge, EdgeId, ElementSet, LabelId, Node, NodeId, Value};
@@ -652,6 +652,12 @@ impl ReadGuard<'_> {
 
     pub fn match_one_hop(&self, query: &OneHopQuery) -> Vec<PatternMatch> {
         self.graph.match_one_hop(query)
+    }
+
+    /// Explains whether a one-hop pattern will scan a relationship posting or
+    /// expand adjacency from its selective start/end node predicate.
+    pub fn one_hop_plan(&self, query: &OneHopQuery) -> OneHopPlan {
+        self.graph.one_hop_plan(query)
     }
 
     pub fn match_semantic_one_hop(

@@ -1636,6 +1636,31 @@ impl Default for OneHopQuery {
     }
 }
 
+/// Physical access path selected for an exact one-hop pattern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OneHopStrategy {
+    /// Scan all relationships, or an exact relationship-label posting.
+    EdgeScan,
+    /// Materialize the start-node predicate, then expand matching adjacency.
+    StartAdjacency,
+    /// Materialize the end-node predicate, then expand reverse adjacency.
+    EndAdjacency,
+}
+
+/// Inspectable cost decision for an exact one-hop pattern.
+///
+/// Candidate bounds come from the same label/property postings used during
+/// execution. `estimated_edge_visits` is a cardinality-weighted average-degree
+/// cost for ordering access paths, not a runtime cardinality promise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OneHopPlan {
+    pub strategy: OneHopStrategy,
+    pub estimated_edge_visits: usize,
+    pub edge_candidate_upper_bound: usize,
+    pub start_candidate_upper_bound: usize,
+    pub end_candidate_upper_bound: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PatternMatch {
     pub start: NodeId,
@@ -3503,55 +3528,173 @@ impl Graph {
         Ok(())
     }
 
+    pub(crate) fn one_hop_plan(&self, query: &OneHopQuery) -> OneHopPlan {
+        let edge_candidate_upper_bound = query.edge_label.map_or(self.edge_count, |label| {
+            self.edges_by_label
+                .get(&label)
+                .map_or(0, |ids| usize::try_from(ids.len()).unwrap_or(usize::MAX))
+        });
+        let start_candidate_upper_bound = self
+            .element_filter_plan(VectorTarget::Nodes, &query.start)
+            .candidate_upper_bound;
+        let end_candidate_upper_bound = self
+            .element_filter_plan(VectorTarget::Nodes, &query.end)
+            .candidate_upper_bound;
+        let average_directional_degree = if self.node_count == 0 {
+            0
+        } else {
+            self.edge_count.div_ceil(self.node_count)
+        };
+        let direction_factor = if query.direction == Direction::Both {
+            2
+        } else {
+            1
+        };
+        let start_edge_visits = start_candidate_upper_bound
+            .saturating_mul(average_directional_degree)
+            .saturating_mul(direction_factor);
+        let end_edge_visits = end_candidate_upper_bound
+            .saturating_mul(average_directional_degree)
+            .saturating_mul(direction_factor);
+        let (estimated_edge_visits, _, strategy) = [
+            (edge_candidate_upper_bound, 0_u8, OneHopStrategy::EdgeScan),
+            (start_edge_visits, 1, OneHopStrategy::StartAdjacency),
+            (end_edge_visits, 2, OneHopStrategy::EndAdjacency),
+        ]
+        .into_iter()
+        .min_by_key(|&(cost, priority, _)| (cost, priority))
+        .expect("one-hop planner always has physical alternatives");
+        OneHopPlan {
+            strategy,
+            estimated_edge_visits,
+            edge_candidate_upper_bound,
+            start_candidate_upper_bound,
+            end_candidate_upper_bound,
+        }
+    }
+
     pub(crate) fn match_one_hop(&self, query: &OneHopQuery) -> Vec<PatternMatch> {
         if query.limit == 0 {
             return Vec::new();
         }
         let mut result = Vec::with_capacity(query.limit.min(1024));
-        let candidates: Box<dyn Iterator<Item = EdgeId> + '_> = match query.edge_label {
-            Some(label) => Box::new(self.edges_by_label.get(&label).into_iter().flatten()),
-            None => Box::new(self.edge_records().map(|edge| edge.id)),
-        };
-        for edge_id in candidates {
-            let Some(edge) = self.edge_record(edge_id) else {
-                continue;
-            };
-            if query.edge_label.is_some_and(|label| edge.label != label) {
-                continue;
-            }
-            let (orientations, orientation_count) = match query.direction {
-                Direction::Outgoing => ([(edge.source, edge.target); 2], 1),
-                Direction::Incoming => ([(edge.target, edge.source); 2], 1),
-                Direction::Both if edge.source != edge.target => {
-                    ([(edge.source, edge.target), (edge.target, edge.source)], 2)
+        match self.one_hop_plan(query).strategy {
+            OneHopStrategy::EdgeScan => {
+                let candidates: Box<dyn Iterator<Item = EdgeId> + '_> = match query.edge_label {
+                    Some(label) => Box::new(self.edges_by_label.get(&label).into_iter().flatten()),
+                    None => Box::new(self.edge_records().map(|edge| edge.id)),
+                };
+                for edge_id in candidates {
+                    let Some(edge) = self.edge_record(edge_id) else {
+                        continue;
+                    };
+                    if query.edge_label.is_some_and(|label| edge.label != label) {
+                        continue;
+                    }
+                    let (orientations, orientation_count) = match query.direction {
+                        Direction::Outgoing => ([(edge.source, edge.target); 2], 1),
+                        Direction::Incoming => ([(edge.target, edge.source); 2], 1),
+                        Direction::Both if edge.source != edge.target => {
+                            ([(edge.source, edge.target), (edge.target, edge.source)], 2)
+                        }
+                        Direction::Both => ([(edge.source, edge.target); 2], 1),
+                    };
+                    for &(start, end) in &orientations[..orientation_count] {
+                        let Some(start_node) = self.node_record(start) else {
+                            continue;
+                        };
+                        let Some(end_node) = self.node_record(end) else {
+                            continue;
+                        };
+                        if stored_node_matches(
+                            &start_node,
+                            &query.start,
+                            self.snapshot_map.as_deref(),
+                            &self.owned_properties,
+                        ) && stored_node_matches(
+                            &end_node,
+                            &query.end,
+                            self.snapshot_map.as_deref(),
+                            &self.owned_properties,
+                        ) {
+                            result.push(PatternMatch {
+                                start,
+                                edge: edge.id,
+                                end,
+                            });
+                            if result.len() == query.limit {
+                                return result;
+                            }
+                        }
+                    }
                 }
-                Direction::Both => ([(edge.source, edge.target); 2], 1),
-            };
-            for &(start, end) in &orientations[..orientation_count] {
-                let Some(start_node) = self.node_record(start) else {
-                    continue;
-                };
-                let Some(end_node) = self.node_record(end) else {
-                    continue;
-                };
-                if stored_node_matches(
-                    &start_node,
-                    &query.start,
-                    self.snapshot_map.as_deref(),
-                    &self.owned_properties,
-                ) && stored_node_matches(
-                    &end_node,
-                    &query.end,
-                    self.snapshot_map.as_deref(),
-                    &self.owned_properties,
-                ) {
-                    result.push(PatternMatch {
+            }
+            OneHopStrategy::StartAdjacency => {
+                let starts = self.elements_matching(VectorTarget::Nodes, &query.start);
+                for start in starts.node_ids() {
+                    self.visit_neighbors(
                         start,
-                        edge: edge.id,
-                        end,
-                    });
+                        query.direction,
+                        EdgeFilter {
+                            label: query.edge_label,
+                        },
+                        |end, edge| {
+                            if result.len() == query.limit {
+                                return;
+                            }
+                            let Some(end_node) = self.node_record(end) else {
+                                return;
+                            };
+                            if stored_node_matches(
+                                &end_node,
+                                &query.end,
+                                self.snapshot_map.as_deref(),
+                                &self.owned_properties,
+                            ) {
+                                result.push(PatternMatch { start, edge, end });
+                            }
+                        },
+                    )
+                    .expect("planned start candidates are existing nodes");
                     if result.len() == query.limit {
-                        return result;
+                        break;
+                    }
+                }
+            }
+            OneHopStrategy::EndAdjacency => {
+                let ends = self.elements_matching(VectorTarget::Nodes, &query.end);
+                let reverse_direction = match query.direction {
+                    Direction::Outgoing => Direction::Incoming,
+                    Direction::Incoming => Direction::Outgoing,
+                    Direction::Both => Direction::Both,
+                };
+                for end in ends.node_ids() {
+                    self.visit_neighbors(
+                        end,
+                        reverse_direction,
+                        EdgeFilter {
+                            label: query.edge_label,
+                        },
+                        |start, edge| {
+                            if result.len() == query.limit {
+                                return;
+                            }
+                            let Some(start_node) = self.node_record(start) else {
+                                return;
+                            };
+                            if stored_node_matches(
+                                &start_node,
+                                &query.start,
+                                self.snapshot_map.as_deref(),
+                                &self.owned_properties,
+                            ) {
+                                result.push(PatternMatch { start, edge, end });
+                            }
+                        },
+                    )
+                    .expect("planned end candidates are existing nodes");
+                    if result.len() == query.limit {
+                        break;
                     }
                 }
             }
