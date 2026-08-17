@@ -1,0 +1,18 @@
+[package]
+name = "vectorgraph-studio-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+petgraph = "0.8"
+petgraph-drawing = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-omega = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-sgd = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-linalg-rdmds = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+rand = "0.8"
+vectorgraph = { path = "../vectorgraph" }
+vectorgraph-embedding = { path = "../vectorgraph-embedding" }
+
+[lints]
+workspace = true
