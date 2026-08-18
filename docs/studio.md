@@ -82,13 +82,17 @@ thread.
 The title-bar input is a maintained Unicode/IME-aware component. `Cmd-K`
 focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
 moves the ranked selection; a second Enter or click selects and frames the
-result. Text retrieval scans properties with a bounded top-K heap rather than
-materializing every match. Semantic retrieval uses the database's adaptive
-native vector index across nodes and relationships. Hybrid retrieval fuses
-normalized lexical and vector signals and deduplicates multiple vector facets
-at the whole-element level. Search failures are visible, and Hybrid can retain
-text results with an explicit warning if its remote embedding provider is
-unavailable.
+result. At widths below 1,120 logical pixels, the single command rail becomes
+two rows so search, layout, pin, and camera controls remain present at the
+760-pixel minimum instead of clipping or silently disappearing. Text retrieval
+scans properties with a bounded top-K heap rather than materializing every
+match. Semantic retrieval uses the database's adaptive native vector index
+across nodes and relationships. Hybrid retrieval fuses normalized lexical and
+vector signals and deduplicates multiple vector facets at the whole-element
+level. The selected result exposes labelled Text and Vector contribution rails,
+so relevance is not encoded by a single opaque score or color alone. Search
+failures are visible, and Hybrid can retain text results with an explicit
+warning if its remote embedding provider is unavailable.
 
 A successful query retargets an interruptible camera spring to frame its
 visible matches and fades in a score-weighted graph lens. Nodes receive ranked
@@ -101,11 +105,73 @@ rings. Double-clicking a node, or pressing Enter after selecting it, opens a
 112-node/168-edge two-hop context lens. Expansion rotates across frontier
 branches and relationship types, reserves capacity for the second hop, and
 places semantic hops in separate radial bands. Child groups retain their
-parent's circular ordering; discovery edges remain prominent while cross-links
+parent’s circular ordering; discovery edges remain prominent while cross-links
 stay visible but quieter. The underlying Auto/Force/Structure/Orbit targets are
 preserved. Escape or the
 Overview row springs positions, camera, and emphasis back to that saved
 presentation. Reduced Motion snaps to the same semantic endpoints.
+
+The relationship and node-label taxonomies are controls rather than a passive
+legend. Activating a relationship row raises every visible relationship of
+that type and both endpoints into the relevance field. Activating a node-label
+row raises matching nodes while retaining quieter incident evidence. The active
+row carries a focusable toggle semantic, a left-edge structural marker, and a
+literal `LENS` label, so state is not encoded by color alone. Selecting it
+again, pressing Escape, or choosing Overview clears the lens. Starting a search
+retires any taxonomy/context lens first, preventing stale emphasis behind empty
+or failed search states. A command-selected label outside the usual top-ten
+summary replaces the last row while active, so the current control never falls
+out of view. `facet node <label>` and
+`facet relationship <label>` provide the same path through the command box and
+deterministic visual harness.
+
+Exact paths are a separate evidence mode rather than another generic filter.
+For direct manipulation, selecting a node exposes `Set as path origin` in the
+Inspector. The origin receives a persistent, text-labelled canvas marker and
+the evidence rail enters an explicit destination-picking state. The same rail
+sets traversal to either direction, outgoing from the origin, or incoming to
+the origin, plus a one-, two-, four-, or six-hop bound. Selected controls,
+literal direction text, and the `≤ N` bound duplicate color state. Selecting a
+different node places its copper `TO` endpoint and the full-width `Trace exact
+path` action directly in the evidence rail. That rail owns execution at every
+supported width; Enter runs the same action from a ready destination, while the
+wide Inspector mirrors it as a convenience. Direction or hop-limit changes
+preserve that destination-ready state, and both endpoint markers remain on the
+canvas while background search is pending. Escape or Overview cancels the
+draft. These are ordinary focusable buttons, so the workflow does not depend
+on pointer precision, color recognition, or a panel that disappears at the
+760-pixel minimum.
+
+`path-start <node> [both|out|in] [max-hops]` drives the same state for the
+command surface and visual harness.
+
+The `path <start> <end> [both|out|in] [relationship-label|-] [max-hops]`
+command searches the complete database off the application thread, then
+hydrates an owned report—including properties and vector counts—after the exact
+engine result is known. Multi-hop searches adapt between the two frontiers and
+expose the selected physical plan. The left panel becomes an ordered evidence
+rail: endpoints, each relationship step, traversal orientation, plan, hop
+bound, elapsed time, and visited/read work map directly to the bright directed
+chain on the canvas. A compact planner ledger splits expanded nodes into
+Celadon `FROM` and Copper `TO` counts connected by a rule, so adaptive work is
+inspectable without relying on color or an ambiguous percentage. Step rows are
+stable, focusable controls; pointer, Enter, or Space selects and frames the
+matching relationship for inspection.
+
+The path state owns both a generation and its held task. A new path, search,
+facet, context, Escape, or Overview retires stale work and prevents a late
+background result from overwriting the current presentation. `Found`,
+`NotFoundWithinHops`, and `ExpansionLimit` have different language: the latter
+is explicitly incomplete and never presented as graph absence. When an exact
+path includes elements outside the bounded snapshot, a background scene step
+injects their fully hydrated records and exact relationships before
+presentation. Existing overview positions and pins are preserved; missing path
+nodes are placed deterministically between the nearest visible anchors. The
+bounded scene may therefore grow by the small path size, but the canvas and
+rail never disagree about found evidence. Evidence framing may use the full
+24× focus-navigation range so a short chain remains readable against a very
+large overview. Overview restores the saved camera and layout, then clears path
+selection and emphasis.
 
 ## Rendering contract
 
@@ -259,8 +325,13 @@ not presented as a finished explorer:
   manipulation, persistent pin/release, animated arrangement, node/edge
   selection, relationship inspection, ranked whole-element search, animated
   result framing, reversible one-hop focus constellations, and the branch-aware
-  two-hop node context lens. The native
-  title-bar component reserves platform window-control space and owns
+  two-hop node context lens. Relationship and node-label rows are focusable,
+  stable-ID taxonomy toggles that drive the same animated graph lens. Ranked
+  rows use stable graph-element identities,
+  list semantics, selected state, and descriptive accessibility labels. The
+  exact-path draft keeps direction, hop limit, destination evidence, and its
+  primary execution action together in the responsive evidence rail. The
+  native title-bar component reserves platform window-control space and owns
   drag/double-click behavior;
 - `vectorgraph-studio` owns application identity, window policy, key bindings,
   assets, and an opt-in Metal offscreen capture harness.
@@ -299,6 +370,23 @@ p50 and 7.905 ms p95/max across four startup draws. This measures the current
 scan-plus-native-vector path on one machine; it is not yet a full-text-index or
 latency-distribution claim.
 
+The responsive search state was also captured from the same fixture at the
+1,340×820 target and exact 760×520 minimum logical bounds on a 2× display. The
+minimum layout retained every search, arrangement, release, and camera control,
+kept the ranked result list scrollable, and left a 466-point-wide graph canvas;
+the selected Hybrid result exposed labelled Text and Vector rails without
+clipping. These are structural visual checks, not cross-platform evidence.
+
+The active `AUTHORED` relationship facet was captured from a deterministic
+193-node/296-edge fixture at the same 1,340×820 target and 760×520 minimum
+logical bounds on a 2× display. Both captures retain the active row’s blue
+structural stroke and `LENS` marker, make all 103 matching directed edges and
+their endpoints legible, keep unrelated topology as dim context, and preserve
+every toolbar control. The release harness recorded 4.538 ms p50 across three
+startup draws at the target size and 3.619 ms p50 at the minimum. The p95/max
+values were 11.158 ms and 9.839 ms respectively; these are visual smoke samples,
+not sustained-frame latency distributions.
+
 With the animated result lens settled on an `AUTHORED` relationship, the
 bounded 11-element constellation capture drew in 2.018 ms p50 and 8.131 ms
 p95/max across four startup draws. The visual harness advances the same spring
@@ -324,6 +412,30 @@ The unoptimized load/layout
 path was 584.5 ms after replacing force layout for this forest-shaped dataset,
 down from 17,970.6 ms. These are local smoke measurements, not sustained-frame
 or cross-machine claims.
+
+The exact path from repository node 0 to sampled-out syntax node 100000 adds
+seven nodes and seven relationships to that 50k scene before presenting the
+complete seven-hop chain. The adaptive either-direction plan reports 129 unique
+visited nodes, 62 expansions, and 188 relationship reads; the former one-sided
+plan reported 22,928, 15,293, and 38,219 respectively for the identical chain.
+The final 24×-framed release captures drew in 3.211 ms p50 at 1,340×840 and
+2.574 ms p50 at the exact 760×520 minimum; their p95/max values were 10.437 ms
+and 7.676 ms.
+Separate origin and destination-candidate captures preserve the explicit
+`ORIGIN` marker and path intent at target width. The configurable
+intent captures drew in 7.598 ms p50 at 1,340×840, 4.551 ms p50 at the exact
+minimum, and 5.902 ms p50 with a destination candidate selected; p95/max was
+9.470 ms, 7.492 ms, and 8.077 ms respectively. After moving destination
+execution into the rail, final candidate captures drew in 5.874 ms p50 and
+9.642 ms p95/max at 1,340×820, and 4.123 ms p50 and 7.676 ms p95/max at the
+exact 760×520 minimum. These remain startup-draw smokes, not
+interaction-latency distributions.
+
+The final planner-ledger captures of the same 27-from/35-to query drew in 3.152
+ms p50 and 10.117 ms p95/max at 1,340×820, and 2.787 ms p50 and 7.623 ms
+p95/max at 760×520. The minimum-width destination draft with persistent
+`ENTER RUNS` guidance drew in 4.198 ms p50 and 7.934 ms p95/max. These are
+also startup-draw smokes rather than interaction-latency distributions.
 
 The repeatable layout benchmark uses visited, bounded graph characterization,
 so it is safe for cyclic graphs and DAGs with shared descendants as well as
@@ -355,11 +467,34 @@ VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-focus.png \
 VG_STUDIO_CAPTURE_COMMAND='memory leak' \
 VG_STUDIO_CAPTURE_RESULT=0 \
   target/release/vg-studio graph.vg
+
+# Exercise the exact minimum supported window geometry.
+VG_STUDIO_WINDOW_WIDTH=760 VG_STUDIO_WINDOW_HEIGHT=520 \
+VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-minimum.png \
+  target/release/vg-studio graph.vg
+
+# Activate a taxonomy row through the same command path as pointer input.
+VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-facet.png \
+VG_STUDIO_CAPTURE_COMMAND='facet relationship AUTHORED' \
+  target/release/vg-studio graph.vg
+
+# Set a path origin, then select a destination candidate without executing it.
+VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-path-origin.png \
+VG_STUDIO_CAPTURE_COMMAND='path-start 0 out 4' \
+VG_STUDIO_CAPTURE_CENTER=1 \
+  target/release/vg-studio graph.vg
+
+# Wait for the complete database path, settle its lens, then capture the
+# evidence rail and its one-for-one directed canvas chain. Sampled-out path
+# records are injected before the frame is drawn.
+VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-path.png \
+VG_STUDIO_CAPTURE_COMMAND='path 0 42 out SUPPORTS 6' \
+  target/release/vg-studio graph.vg
 ```
 
 The next evidence gates are pointer-to-photon interaction-latency distributions,
-pinned and small-window captures, multi-selection and marquee movement,
-bounded hybrid query results, and Windows/Linux native launch evidence. A
+pinned-state captures, multi-selection and marquee movement, and Windows/Linux
+native launch evidence. A
 custom GPUI graph primitive remains contingent on those measurements; the
 current public quad/path pipeline is already fast enough for the fitted
 50k-node overview smoke case.

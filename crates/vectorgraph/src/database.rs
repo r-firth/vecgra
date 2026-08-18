@@ -4,7 +4,7 @@ use crate::graph::{
     Direction, EdgeFilter, ElementFilter, FilteredVectorSearchResult, Graph,
     GraphRangeSearchOptions, GraphRangeSearchResult, GraphStats, Mutation, NumericRangeFilter,
     NumericRangePlan, OneHopPlan, OneHopQuery, PatternMatch, SemanticOneHopQuery, SemanticPathHit,
-    SemanticPathOptions, SemanticPatternMatch,
+    SemanticPathOptions, SemanticPatternMatch, ShortestPathOptions, ShortestPathResult,
 };
 use crate::model::{Edge, EdgeId, ElementSet, LabelId, Node, NodeId, Value};
 use crate::vector::{
@@ -614,6 +614,19 @@ impl ReadGuard<'_> {
             include_seeds,
             node_filter,
         )
+    }
+
+    /// Finds an exact unweighted path with an inspectable adaptive traversal
+    /// strategy while keeping hop and frontier-expansion bounds visible in the
+    /// result. `ExpansionLimit` is reported distinctly from a conclusive
+    /// absence within `max_hops`.
+    pub fn shortest_path(
+        &self,
+        start: crate::NodeId,
+        end: crate::NodeId,
+        options: &ShortestPathOptions,
+    ) -> Result<ShortestPathResult> {
+        self.graph.shortest_path(start, end, options)
     }
 
     /// Adaptive nearest-neighbor search constrained to a bounded graph range.

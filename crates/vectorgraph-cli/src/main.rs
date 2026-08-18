@@ -14,8 +14,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use vectorgraph::{
     Database, Direction, EdgeFilter, ElementFilter, ElementRef, ElementSet,
-    GraphRangeSearchOptions, NumericRangeFilter, NumericValue, SemanticPathOptions, Value,
-    VectorEncoding, VectorTarget,
+    GraphRangeSearchOptions, NumericRangeFilter, NumericValue, SemanticPathOptions,
+    ShortestPathOptions, Value, VectorEncoding, VectorTarget,
 };
 
 fn main() {
@@ -410,6 +410,68 @@ fn run() -> Result<(), Box<dyn Error>> {
                     read.symbol(edge.label).unwrap_or("?"),
                     edge.target
                 );
+            }
+        }
+        "shortest-path" => {
+            let path = required(&mut arguments, "database path")?;
+            let start: u64 = required(&mut arguments, "start node id")?.parse()?;
+            let end: u64 = required(&mut arguments, "end node id")?.parse()?;
+            let max_hops = optional_usize(&mut arguments, "maximum hops")?.unwrap_or(6);
+            let direction = match arguments.next().as_deref() {
+                None | Some("both") => Direction::Both,
+                Some("out") => Direction::Outgoing,
+                Some("in") => Direction::Incoming,
+                Some(other) => return Err(format!("unknown direction {other}").into()),
+            };
+            let edge_label_name = arguments.next().filter(|name| name != "-");
+            let max_expansions =
+                optional_usize(&mut arguments, "maximum expansions")?.unwrap_or(100_000);
+            let database = Database::open(path)?;
+            let read = database.read();
+            let edge_label = edge_label_name
+                .as_deref()
+                .map(|name| {
+                    read.label_id(name)
+                        .ok_or_else(|| format!("unknown relationship label {name:?}"))
+                })
+                .transpose()?;
+            let started = Instant::now();
+            let result = read.shortest_path(
+                start,
+                end,
+                &ShortestPathOptions {
+                    max_hops,
+                    max_expansions,
+                    direction,
+                    edge_filter: EdgeFilter { label: edge_label },
+                },
+            )?;
+            println!("strategy\t{:?}", result.strategy);
+            println!("termination\t{:?}", result.termination);
+            println!("visited_nodes\t{}", result.visited_nodes);
+            println!("start_expanded_nodes\t{}", result.start_expanded_nodes);
+            println!("end_expanded_nodes\t{}", result.end_expanded_nodes);
+            println!("expanded_nodes\t{}", result.expanded_nodes);
+            println!("examined_relationships\t{}", result.examined_relationships);
+            println!("elapsed_ms\t{:.6}", millis(started.elapsed()));
+            if let Some(path) = result.path {
+                println!("hops\t{}", path.edges.len());
+                for (index, (&edge_id, endpoints)) in
+                    path.edges.iter().zip(path.nodes.windows(2)).enumerate()
+                {
+                    let edge = read.edge(edge_id).ok_or("path relationship disappeared")?;
+                    println!(
+                        "step\t{}\t{}\t{}\t{}\t{}",
+                        index + 1,
+                        endpoints[0],
+                        edge_id,
+                        read.symbol(edge.label).unwrap_or("?"),
+                        endpoints[1]
+                    );
+                }
+                if path.edges.is_empty() {
+                    println!("node\t{start}");
+                }
             }
         }
         "search-text" => {
@@ -1216,6 +1278,7 @@ fn print_help() {
            vg numeric-range <database> <nodes|edges|both> <key> <int|float> <inclusive-lower|-> <inclusive-upper|-> [limit]\n\
            vg node <database> <node-id>\n\
            vg neighbors <database> <node-id> [out|in|both]\n\
+           vg shortest-path <database> <start-node-id> <end-node-id> [max-hops] [out|in|both] [edge-label|-] [max-expansions]\n\
            vg search-text <database> <query> [limit] [hash|qwen]\n\
            vg range-text <database> <seed-node-id> <query> [hops] [limit] [hash|qwen] [out|in|both] [edge-label|-] [node-label|-]\n\
            vg search-facets <database> '<facet-1> || <facet-2>' [limit] [hash|qwen] [nodes|edges|both] [label|-] [candidate-elements]\n\

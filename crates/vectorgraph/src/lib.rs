@@ -21,7 +21,8 @@ pub use graph::{
     FilteredVectorSearchResult, GraphRangeSearchOptions, GraphRangeSearchResult, GraphStats,
     NodeFilter, NumericRangeFilter, NumericRangePlan, NumericRangeStrategy, NumericValue,
     OneHopPlan, OneHopQuery, OneHopStrategy, PatternMatch, SemanticOneHopQuery, SemanticPathHit,
-    SemanticPathOptions, SemanticPatternMatch,
+    SemanticPathOptions, SemanticPatternMatch, ShortestPath, ShortestPathOptions,
+    ShortestPathResult, ShortestPathStrategy, ShortestPathTermination,
 };
 pub use model::{
     Edge, EdgeId, ElementRef, ElementSet, LabelId, Node, NodeId, Property, PropertyKeyId, Value,

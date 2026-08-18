@@ -6,7 +6,7 @@ mod view;
 
 pub use theme::apply_studio_theme;
 pub use view::{
-    ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection, FitView,
-    FocusSearch, FocusSelectedContext, NextSearchResult, PreviousSearchResult, ReleaseSelected,
-    StudioView, ZoomIn, ZoomOut,
+    ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
+    FitView, FocusSearch, NextSearchResult, PreviousSearchResult, ReleaseSelected, StudioView,
+    ZoomIn, ZoomOut,
 };

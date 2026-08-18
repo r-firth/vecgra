@@ -195,6 +195,16 @@ between equally similar endpoints, and provides the primitive needed for path
 ranking. Path embeddings themselves should be derived/cacheable query artifacts,
 not a permanently materialized vector for every combinatorial path.
 
+The engine also now exposes an exact bounded shortest-path operator as the
+non-semantic evidence baseline. It normalizes traversal order by stable node
+and relationship IDs, supports outgoing/incoming/undirected and relationship
+label constraints, and reports expansion-budget truncation separately from
+“not found within the hop bound.” Start- and end-side expansion counters expose
+how its costed bidirectional plan spent that budget, and always sum to the total
+expanded count. This gives Studio and retrieval planners a reproducible path
+object to compare against learned or embedding-weighted path ranking without
+confusing an incomplete search with graph absence.
+
 ## Multimodal graphs
 
 [MG²-RAG (2026)](https://arxiv.org/abs/2604.04969) constructs multi-granularity

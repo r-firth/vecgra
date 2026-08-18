@@ -30,6 +30,8 @@ struct PaintNode {
     pinned: bool,
     dragging: bool,
     relevance: f32,
+    path_start: bool,
+    path_end: bool,
 }
 
 struct PaintPath {
@@ -72,12 +74,29 @@ struct ScenePresentation<'a> {
     selection: Option<SceneSelection>,
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
+    path_endpoints: Option<GraphPathEndpoints>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GraphPathEndpoints {
+    pub start: usize,
+    pub end: Option<usize>,
+}
+
+pub(crate) struct GraphCanvasPresentation {
+    pub camera: Camera,
+    pub world_bounds: Rect,
+    pub selection: Option<SceneSelection>,
+    pub dragging: Option<usize>,
+    pub emphasis: Option<GraphEmphasis>,
+    pub path_endpoints: Option<GraphPathEndpoints>,
 }
 
 struct NodePaintContext<'a> {
     selected: Option<usize>,
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
+    path_endpoints: Option<GraphPathEndpoints>,
     bounds: Bounds<Pixels>,
     viewport: Vec2,
 }
@@ -113,11 +132,7 @@ impl GraphEmphasis {
 pub fn graph_canvas(
     snapshot: Arc<SceneSnapshot>,
     workspace: Rc<RefCell<GraphWorkspace>>,
-    camera: Camera,
-    world_bounds: Rect,
-    selection: Option<SceneSelection>,
-    dragging: Option<usize>,
-    emphasis: Option<GraphEmphasis>,
+    presentation: GraphCanvasPresentation,
 ) -> impl IntoElement {
     canvas(
         move |bounds, _window, _cx| {
@@ -125,11 +140,12 @@ pub fn graph_canvas(
                 &snapshot,
                 &workspace.borrow(),
                 ScenePresentation {
-                    camera,
-                    world_bounds,
-                    selection,
-                    dragging,
-                    emphasis: emphasis.as_ref(),
+                    camera: presentation.camera,
+                    world_bounds: presentation.world_bounds,
+                    selection: presentation.selection,
+                    dragging: presentation.dragging,
+                    emphasis: presentation.emphasis.as_ref(),
+                    path_endpoints: presentation.path_endpoints,
                 },
                 bounds,
             )
@@ -410,6 +426,7 @@ fn prepare_scene(
                 selected: selected_node,
                 dragging: presentation.dragging,
                 emphasis,
+                path_endpoints: presentation.path_endpoints,
                 bounds,
                 viewport,
             },
@@ -443,6 +460,13 @@ fn prepare_scene(
                         pinned: workspace.is_pinned(index),
                         dragging: presentation.dragging == Some(index),
                         relevance,
+                        path_start: presentation
+                            .path_endpoints
+                            .is_some_and(|endpoints| endpoints.start == index),
+                        path_end: presentation
+                            .path_endpoints
+                            .and_then(|endpoints| endpoints.end)
+                            == Some(index),
                     }
                 })
             })
@@ -474,6 +498,8 @@ fn aggregate_nodes(
         pinned: bool,
         dragging: bool,
         relevance: f32,
+        path_start: bool,
+        path_end: bool,
     }
 
     let mut bins = BTreeMap::<(i32, i32), Bin>::new();
@@ -494,6 +520,8 @@ fn aggregate_nodes(
             pinned: false,
             dragging: false,
             relevance: 0.0,
+            path_start: false,
+            path_end: false,
         });
         bin.sum += position;
         bin.count += 1;
@@ -503,6 +531,10 @@ fn aggregate_nodes(
         bin.relevance = bin
             .relevance
             .max(context.emphasis.map_or(0.0, |lens| lens.node_score(index)));
+        bin.path_start |= context
+            .path_endpoints
+            .is_some_and(|endpoints| endpoints.start == index);
+        bin.path_end |= context.path_endpoints.and_then(|endpoints| endpoints.end) == Some(index);
     }
 
     bins.into_values()
@@ -525,6 +557,8 @@ fn aggregate_nodes(
                 pinned: bin.pinned,
                 dragging: bin.dragging,
                 relevance: bin.relevance,
+                path_start: bin.path_start,
+                path_end: bin.path_end,
             }
         })
         .collect()
@@ -557,6 +591,38 @@ fn paint_scene(bounds: Bounds<Pixels>, scene: PaintData, window: &mut Window, cx
 
     window.paint_layer(bounds, |window| {
         for node in scene.nodes {
+            if node.path_start || node.path_end {
+                let endpoint_color = match (node.path_start, node.path_end) {
+                    (true, true) => colors.mist,
+                    (true, false) => colors.celadon,
+                    (false, true) => colors.copper,
+                    (false, false) => unreachable!(),
+                };
+                window.paint_quad(circle(
+                    node.point,
+                    node.radius + 11.0,
+                    endpoint_color.opacity(0.13),
+                ));
+                window.paint_quad(quad(
+                    circle_bounds(node.point, node.radius + 3.2),
+                    px(node.radius + 3.2),
+                    node.color,
+                    px(2.0),
+                    endpoint_color,
+                    Default::default(),
+                ));
+                if node.path_start && node.path_end {
+                    window.paint_quad(quad(
+                        circle_bounds(node.point, node.radius + 0.8),
+                        px(node.radius + 0.8),
+                        node.color,
+                        px(1.2),
+                        colors.celadon,
+                        Default::default(),
+                    ));
+                }
+                continue;
+            }
             if node.relevance > 0.08 && !node.selected {
                 window.paint_quad(circle(
                     node.point,

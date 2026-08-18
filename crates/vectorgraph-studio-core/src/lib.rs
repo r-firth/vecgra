@@ -17,10 +17,14 @@ use petgraph_linalg_rdmds::RdMds;
 use rand::SeedableRng as _;
 use rand::rngs::StdRng;
 use vectorgraph::{
-    Database, EdgeId, ElementRef, GraphStats, NodeId, Property, ReadGuard, Value, VectorTarget,
+    Database, Direction, EdgeFilter, EdgeId, ElementRef, GraphStats, NodeId, Property, ReadGuard,
+    ShortestPathOptions, ShortestPathStrategy, ShortestPathTermination, Value, VectorTarget,
 };
 
-pub use vectorgraph::Value as PropertyValue;
+pub use vectorgraph::{
+    Direction as PathDirection, ShortestPathStrategy as EvidencePathStrategy,
+    ShortestPathTermination as EvidencePathTermination, Value as PropertyValue,
+};
 
 /// Which retrieval signals Studio uses for a search.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -87,6 +91,124 @@ pub struct SearchReport {
     /// Hybrid search can still return text results if its semantic provider is
     /// unavailable; the reason remains visible instead of silently degrading.
     pub warning: Option<Arc<str>>,
+}
+
+/// One owned node in an exact evidence path. Keeping presentation data out of
+/// the read guard lets Studio render the result after the database lock and
+/// background task have both been released.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvidenceNode {
+    pub id: NodeId,
+    pub label: Arc<str>,
+    pub title: Arc<str>,
+    pub vector_count: u32,
+    pub properties: Arc<[SceneProperty]>,
+}
+
+/// One directed traversal step. `forward` describes whether the path follows
+/// the relationship's stored source-to-target orientation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvidenceStep {
+    pub edge_id: EdgeId,
+    pub from: NodeId,
+    pub to: NodeId,
+    pub label: Arc<str>,
+    pub title: Arc<str>,
+    pub forward: bool,
+    pub vector_count: u32,
+    pub properties: Arc<[SceneProperty]>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvidencePath {
+    pub nodes: Arc<[EvidenceNode]>,
+    pub steps: Arc<[EvidenceStep]>,
+}
+
+/// A presentation-ready exact path result with the engine's completeness and
+/// work diagnostics preserved. `ExpansionLimit` must never be presented as
+/// proof that no relationship exists.
+#[derive(Clone, Debug)]
+pub struct EvidencePathReport {
+    pub start: EvidenceNode,
+    pub end: EvidenceNode,
+    pub path: Option<EvidencePath>,
+    pub strategy: ShortestPathStrategy,
+    pub termination: ShortestPathTermination,
+    pub direction: Direction,
+    pub relationship_label: Option<Arc<str>>,
+    pub max_hops: usize,
+    pub visited_nodes: usize,
+    pub start_expanded_nodes: usize,
+    pub end_expanded_nodes: usize,
+    pub expanded_nodes: usize,
+    pub examined_relationships: usize,
+    pub elapsed: Duration,
+}
+
+/// Finds and hydrates an exact, bounded evidence path in a read-only database.
+/// The whole operation is synchronous so UI clients can move it onto their
+/// background executor as one cancellable unit.
+pub fn evidence_path_database(
+    path: &Path,
+    start: NodeId,
+    end: NodeId,
+    direction: Direction,
+    relationship_label: Option<&str>,
+    max_hops: usize,
+    max_expansions: usize,
+) -> Result<EvidencePathReport, String> {
+    let started = Instant::now();
+    let database = Database::open_read_only(path)
+        .map_err(|error| format!("could not open database for path search: {error}"))?;
+    let read = database.read();
+    let start_node = hydrate_evidence_node(&read, start)
+        .ok_or_else(|| format!("start node {start} does not exist"))?;
+    let end_node = hydrate_evidence_node(&read, end)
+        .ok_or_else(|| format!("end node {end} does not exist"))?;
+    let relationship_label = relationship_label
+        .map(str::trim)
+        .filter(|label| !label.is_empty());
+    let edge_label = relationship_label
+        .map(|label| {
+            read.label_id(label)
+                .ok_or_else(|| format!("relationship label “{label}” does not exist"))
+        })
+        .transpose()?;
+    let result = read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                max_hops,
+                max_expansions,
+                direction,
+                edge_filter: EdgeFilter { label: edge_label },
+            },
+        )
+        .map_err(|error| format!("path search failed: {error}"))?;
+    let hydrated_path = result
+        .path
+        .as_ref()
+        .map(|path| hydrate_evidence_path(&read, path))
+        .transpose()?;
+
+    Ok(EvidencePathReport {
+        start: start_node,
+        end: end_node,
+        path: hydrated_path,
+        strategy: result.strategy,
+        termination: result.termination,
+        direction,
+        relationship_label: relationship_label.map(Arc::from),
+        max_hops,
+        visited_nodes: result.visited_nodes,
+        start_expanded_nodes: result.start_expanded_nodes,
+        end_expanded_nodes: result.end_expanded_nodes,
+        expanded_nodes: result.expanded_nodes,
+        examined_relationships: result.examined_relationships,
+        elapsed: started.elapsed(),
+    })
 }
 
 /// Searches the complete database without materializing all matching rows.
@@ -391,6 +513,60 @@ fn hydrate_search_hit(
     })
 }
 
+fn hydrate_evidence_node(read: &ReadGuard<'_>, id: NodeId) -> Option<EvidenceNode> {
+    let node = read.node(id)?;
+    let label = read.symbol(node.label).unwrap_or("Unknown");
+    let title =
+        preferred_property(read, &node.properties).unwrap_or_else(|| format!("{label} {id}"));
+    Some(EvidenceNode {
+        id,
+        label: Arc::from(label),
+        title: Arc::from(truncate_text(&title, 92)),
+        vector_count: node.vector_count,
+        properties: owned_properties(read, &node.properties),
+    })
+}
+
+fn hydrate_evidence_path(
+    read: &ReadGuard<'_>,
+    path: &vectorgraph::ShortestPath,
+) -> Result<EvidencePath, String> {
+    let nodes = path
+        .nodes
+        .iter()
+        .copied()
+        .map(|id| {
+            hydrate_evidence_node(read, id)
+                .ok_or_else(|| format!("path node {id} disappeared during hydration"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut steps = Vec::with_capacity(path.edges.len());
+    for (index, &edge_id) in path.edges.iter().enumerate() {
+        let from = path.nodes[index];
+        let to = path.nodes[index + 1];
+        let edge = read
+            .edge(edge_id)
+            .ok_or_else(|| format!("path relationship {edge_id} disappeared during hydration"))?;
+        let label = read.symbol(edge.label).unwrap_or("Unknown");
+        let title =
+            preferred_property(read, &edge.properties).unwrap_or_else(|| label.replace('_', " "));
+        steps.push(EvidenceStep {
+            edge_id,
+            from,
+            to,
+            label: Arc::from(label),
+            title: Arc::from(truncate_text(&title, 92)),
+            forward: edge.source == from && edge.target == to,
+            vector_count: edge.vector_count,
+            properties: owned_properties(read, &edge.properties),
+        });
+    }
+    Ok(EvidencePath {
+        nodes: nodes.into(),
+        steps: steps.into(),
+    })
+}
+
 trait SearchSignals {
     fn lexical(&self) -> Option<f32>;
     fn semantic(&self) -> Option<f32>;
@@ -561,7 +737,7 @@ impl Rect {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SceneProperty {
     pub key: Arc<str>,
     pub value: Value,
@@ -983,6 +1159,121 @@ impl SceneSnapshot {
         self.edges.ids.binary_search(&id).ok()
     }
 
+    /// Returns a scene that retains the current overview and injects every
+    /// fully hydrated element in an exact evidence path that sampling omitted.
+    /// Existing presentation positions are preserved; missing path nodes are
+    /// deterministically interpolated between the nearest visible anchors.
+    ///
+    /// Cloning and reindexing are linear in the bounded scene, so callers
+    /// should run this on a background executor. `None` means the current scene
+    /// already contains the complete path.
+    pub fn including_evidence_path(
+        &self,
+        report: &EvidencePathReport,
+        overview_positions: &[Vec2],
+    ) -> Result<Option<Self>, String> {
+        let Some(path) = &report.path else {
+            return Ok(None);
+        };
+        if overview_positions.len() != self.nodes.ids.len()
+            || overview_positions
+                .iter()
+                .any(|position| !position.x.is_finite() || !position.y.is_finite())
+        {
+            return Err("evidence scene positions do not match the current snapshot".into());
+        }
+        let missing_node = path
+            .nodes
+            .iter()
+            .any(|node| self.node_index(node.id).is_none());
+        let missing_edge = path
+            .steps
+            .iter()
+            .any(|step| self.edge_index(step.edge_id).is_none());
+        if !missing_node && !missing_edge {
+            return Ok(None);
+        }
+
+        let path_positions = evidence_path_positions(self, path, overview_positions);
+        let mut snapshot = self.clone();
+        snapshot.nodes.positions = overview_positions.to_vec();
+        let existing_edge_endpoints: Vec<_> = snapshot
+            .edges
+            .sources
+            .iter()
+            .zip(&snapshot.edges.targets)
+            .map(|(&source, &target)| {
+                (
+                    snapshot.nodes.ids[source as usize],
+                    snapshot.nodes.ids[target as usize],
+                )
+            })
+            .collect();
+
+        let mut included_node_ids: HashSet<_> = snapshot.nodes.ids.iter().copied().collect();
+        for node in path.nodes.iter() {
+            if !included_node_ids.insert(node.id) {
+                continue;
+            }
+            snapshot.nodes.ids.push(node.id);
+            snapshot.nodes.labels.push(node.label.clone());
+            snapshot.nodes.positions.push(path_positions[&node.id]);
+            snapshot.nodes.degrees.push(0);
+            snapshot.nodes.vector_counts.push(node.vector_count);
+            snapshot.nodes.properties.push(node.properties.clone());
+        }
+        sort_scene_nodes(&mut snapshot.nodes);
+        let index_by_id: HashMap<_, _> = snapshot
+            .nodes
+            .ids
+            .iter()
+            .enumerate()
+            .map(|(index, &id)| (id, index as u32))
+            .collect();
+        for (index, &(source, target)) in existing_edge_endpoints.iter().enumerate() {
+            snapshot.edges.sources[index] = index_by_id[&source];
+            snapshot.edges.targets[index] = index_by_id[&target];
+        }
+
+        let mut included_edge_ids: HashSet<_> = snapshot.edges.ids.iter().copied().collect();
+        for step in path.steps.iter() {
+            if !included_edge_ids.insert(step.edge_id) {
+                continue;
+            }
+            let (source, target) = if step.forward {
+                (step.from, step.to)
+            } else {
+                (step.to, step.from)
+            };
+            let (Some(&source), Some(&target)) =
+                (index_by_id.get(&source), index_by_id.get(&target))
+            else {
+                return Err(format!(
+                    "evidence relationship {} references a missing endpoint",
+                    step.edge_id
+                ));
+            };
+            snapshot.edges.ids.push(step.edge_id);
+            snapshot.edges.sources.push(source);
+            snapshot.edges.targets.push(target);
+            snapshot.edges.labels.push(step.label.clone());
+            snapshot.edges.vector_counts.push(step.vector_count);
+            snapshot.edges.properties.push(step.properties.clone());
+        }
+        sort_scene_edges(&mut snapshot.edges);
+        snapshot.nodes.degrees.fill(0);
+        for (&source, &target) in snapshot.edges.sources.iter().zip(&snapshot.edges.targets) {
+            let source = source as usize;
+            let target = target as usize;
+            snapshot.nodes.degrees[source] = snapshot.nodes.degrees[source].saturating_add(1);
+            snapshot.nodes.degrees[target] = snapshot.nodes.degrees[target].saturating_add(1);
+        }
+        snapshot.bounds = Rect::from_points(&snapshot.nodes.positions);
+        snapshot.sampled = snapshot.nodes.ids.len() < snapshot.source_stats.nodes
+            || snapshot.edges.ids.len() < snapshot.source_stats.edges;
+        Ok(Some(snapshot))
+    }
+
     /// Returns a deterministic, bounded one-hop context for a selected graph
     /// element. The selected edge is always retained even at the edge budget.
     pub fn focus_neighborhood(
@@ -1177,6 +1468,111 @@ fn count_labels(labels: &[Arc<str>]) -> Vec<(Arc<str>, usize)> {
     let mut counts: Vec<_> = counts.into_iter().collect();
     counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     counts
+}
+
+fn evidence_path_positions(
+    snapshot: &SceneSnapshot,
+    path: &EvidencePath,
+    overview_positions: &[Vec2],
+) -> HashMap<NodeId, Vec2> {
+    let anchors: Vec<_> = path
+        .nodes
+        .iter()
+        .map(|node| {
+            snapshot
+                .node_index(node.id)
+                .map(|index| overview_positions[index])
+        })
+        .collect();
+    let start = path.nodes.first().map_or(0, |node| node.id);
+    let end = path.nodes.last().map_or(start, |node| node.id);
+    let angle = stable_unit(start ^ end.rotate_left(29)) * std::f32::consts::TAU;
+    let fallback_direction = Vec2::new(angle.cos(), angle.sin());
+    const STEP: f32 = 42.0;
+    let center = snapshot.bounds.center();
+    let middle = (path.nodes.len().saturating_sub(1)) as f32 * 0.5;
+    let mut positions = HashMap::with_capacity(path.nodes.len());
+
+    for (index, node) in path.nodes.iter().enumerate() {
+        let position = if let Some(position) = anchors[index] {
+            position
+        } else {
+            let previous = anchors[..index]
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(index, position)| position.map(|position| (index, position)));
+            let next = anchors[index + 1..]
+                .iter()
+                .enumerate()
+                .find_map(|(offset, position)| {
+                    position.map(|position| (index + 1 + offset, position))
+                });
+            match (previous, next) {
+                (Some((left_index, left)), Some((right_index, right))) => {
+                    let mix = (index - left_index) as f32 / (right_index - left_index) as f32;
+                    left * (1.0 - mix) + right * mix
+                }
+                (Some((left_index, left)), None) => {
+                    let earlier = anchors[..left_index]
+                        .iter()
+                        .rev()
+                        .find_map(|position| *position);
+                    let direction = earlier.map_or(fallback_direction, |earlier| {
+                        unit_or(left - earlier, fallback_direction)
+                    });
+                    left + direction * (STEP * (index - left_index) as f32)
+                }
+                (None, Some((right_index, right))) => {
+                    let later = anchors[right_index + 1..]
+                        .iter()
+                        .find_map(|position| *position);
+                    let direction = later.map_or(fallback_direction * -1.0, |later| {
+                        unit_or(right - later, fallback_direction * -1.0)
+                    });
+                    right + direction * (STEP * (right_index - index) as f32)
+                }
+                (None, None) => center + Vec2::new((index as f32 - middle) * STEP, 0.0),
+            }
+        };
+        positions.insert(node.id, position);
+    }
+    positions
+}
+
+fn unit_or(vector: Vec2, fallback: Vec2) -> Vec2 {
+    let length = vector.length();
+    if length > 0.001 {
+        vector / length
+    } else {
+        fallback
+    }
+}
+
+fn sort_scene_nodes(nodes: &mut SceneNodes) {
+    let mut order: Vec<_> = (0..nodes.ids.len()).collect();
+    order.sort_unstable_by_key(|&index| nodes.ids[index]);
+    nodes.ids = reordered(&nodes.ids, &order);
+    nodes.labels = reordered(&nodes.labels, &order);
+    nodes.positions = reordered(&nodes.positions, &order);
+    nodes.degrees = reordered(&nodes.degrees, &order);
+    nodes.vector_counts = reordered(&nodes.vector_counts, &order);
+    nodes.properties = reordered(&nodes.properties, &order);
+}
+
+fn sort_scene_edges(edges: &mut SceneEdges) {
+    let mut order: Vec<_> = (0..edges.ids.len()).collect();
+    order.sort_unstable_by_key(|&index| edges.ids[index]);
+    edges.ids = reordered(&edges.ids, &order);
+    edges.sources = reordered(&edges.sources, &order);
+    edges.targets = reordered(&edges.targets, &order);
+    edges.labels = reordered(&edges.labels, &order);
+    edges.vector_counts = reordered(&edges.vector_counts, &order);
+    edges.properties = reordered(&edges.properties, &order);
+}
+
+fn reordered<T: Clone>(values: &[T], order: &[usize]) -> Vec<T> {
+    order.iter().map(|&index| values[index].clone()).collect()
 }
 
 fn run_force_layout(
@@ -1755,6 +2151,11 @@ impl GraphWorkspace {
 
     pub fn positions(&self) -> &[Vec2] {
         &self.positions
+    }
+
+    /// Stable overview targets, excluding temporary search/context layouts.
+    pub fn overview_positions(&self) -> &[Vec2] {
+        &self.base_targets
     }
 
     pub fn position(&self, index: usize) -> Option<Vec2> {
@@ -2784,6 +3185,164 @@ mod tests {
             snapshot.relationship_counts(),
             vec![(Arc::from("SUPPORTS"), 1)]
         );
+    }
+
+    #[test]
+    fn evidence_paths_preserve_direction_hydration_and_incomplete_outcomes() {
+        let file = TestFile::new();
+        let database = Database::create(
+            &file.0,
+            DatabaseOptions {
+                vector_dimension: 4,
+                similarity: Similarity::Cosine,
+                vector_encoding: VectorEncoding::F32,
+                sync_on_commit: false,
+            },
+        )
+        .unwrap();
+        let mut transaction = database.transaction();
+        let alpha = transaction.create_node(
+            "Document",
+            [("title", Value::String("Alpha brief".into()))],
+            &[],
+        );
+        let beta =
+            transaction.create_node("Claim", [("name", Value::String("Beta claim".into()))], &[]);
+        let gamma = transaction.create_node(
+            "Source",
+            [("title", Value::String("Gamma source".into()))],
+            &[],
+        );
+        let first = transaction.create_edge(
+            alpha,
+            beta,
+            "SUPPORTS",
+            [("title", Value::String("Primary support".into()))],
+            &[],
+        );
+        let second = transaction.create_edge(
+            beta,
+            gamma,
+            "SUPPORTS",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        );
+        transaction.commit().unwrap();
+
+        let outgoing = evidence_path_database(
+            &file.0,
+            alpha,
+            gamma,
+            Direction::Outgoing,
+            Some("SUPPORTS"),
+            4,
+            32,
+        )
+        .unwrap();
+        assert_eq!(outgoing.termination, ShortestPathTermination::Found);
+        assert_eq!(
+            outgoing.strategy,
+            ShortestPathStrategy::BidirectionalBreadthFirst
+        );
+        assert_eq!(
+            outgoing.start_expanded_nodes + outgoing.end_expanded_nodes,
+            outgoing.expanded_nodes
+        );
+        assert_eq!(outgoing.start.title.as_ref(), "Alpha brief");
+        let path = outgoing.path.as_ref().unwrap();
+        assert_eq!(
+            path.nodes.iter().map(|node| node.id).collect::<Vec<_>>(),
+            vec![alpha, beta, gamma]
+        );
+        assert_eq!(
+            path.steps
+                .iter()
+                .map(|step| step.edge_id)
+                .collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        assert_eq!(path.steps[0].title.as_ref(), "Primary support");
+        assert!(path.steps.iter().all(|step| step.forward));
+        assert_eq!(path.nodes[0].vector_count, 0);
+        assert_eq!(path.steps[0].properties.len(), 1);
+
+        let mut sampled = SceneSnapshot::from_database(
+            &database,
+            SnapshotOptions {
+                max_nodes: 2,
+                max_edges: 1,
+            },
+        )
+        .unwrap();
+        sampled.layout(LayoutOptions::default());
+        assert!(sampled.node_index(gamma).is_none());
+        assert!(sampled.edge_index(second).is_none());
+        let overview_positions = sampled.nodes.positions.clone();
+        let enriched = sampled
+            .including_evidence_path(&outgoing, &overview_positions)
+            .unwrap()
+            .unwrap();
+        assert_eq!(enriched.nodes.ids, vec![alpha, beta, gamma]);
+        assert_eq!(enriched.edges.ids, vec![first, second]);
+        assert_eq!(
+            enriched.nodes.positions[..overview_positions.len()],
+            overview_positions
+        );
+        let gamma_index = enriched.node_index(gamma).unwrap();
+        assert_eq!(enriched.nodes.labels[gamma_index].as_ref(), "Source");
+        assert_eq!(
+            enriched.nodes.properties[gamma_index][0].value,
+            Value::String("Gamma source".into())
+        );
+        let second_index = enriched.edge_index(second).unwrap();
+        assert_eq!(
+            enriched.nodes.ids[enriched.edges.sources[second_index] as usize],
+            beta
+        );
+        assert_eq!(
+            enriched.nodes.ids[enriched.edges.targets[second_index] as usize],
+            gamma
+        );
+        assert!(!enriched.sampled);
+        assert!(
+            enriched
+                .including_evidence_path(&outgoing, &enriched.nodes.positions)
+                .unwrap()
+                .is_none()
+        );
+
+        let incoming =
+            evidence_path_database(&file.0, gamma, alpha, Direction::Incoming, None, 4, 32)
+                .unwrap();
+        assert_eq!(incoming.termination, ShortestPathTermination::Found);
+        assert!(
+            incoming
+                .path
+                .unwrap()
+                .steps
+                .iter()
+                .all(|step| !step.forward)
+        );
+
+        let limited =
+            evidence_path_database(&file.0, alpha, gamma, Direction::Outgoing, None, 4, 0).unwrap();
+        assert_eq!(limited.termination, ShortestPathTermination::ExpansionLimit);
+        assert!(limited.path.is_none());
+        assert_eq!(limited.start_expanded_nodes, 0);
+        assert_eq!(limited.end_expanded_nodes, 0);
+        assert_eq!(limited.expanded_nodes, 0);
+
+        let error = evidence_path_database(
+            &file.0,
+            alpha,
+            gamma,
+            Direction::Outgoing,
+            Some("MISSING"),
+            4,
+            32,
+        )
+        .unwrap_err();
+        assert!(error.contains("relationship label “MISSING” does not exist"));
     }
 
     #[test]

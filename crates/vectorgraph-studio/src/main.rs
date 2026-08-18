@@ -7,15 +7,17 @@ use gpui::{
 use gpui::{Entity, Window};
 use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vectorgraph_studio_ui::{
-    ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection, FitView,
-    FocusSearch, FocusSelectedContext, NextSearchResult, PreviousSearchResult, ReleaseSelected,
-    StudioView, ZoomIn, ZoomOut, apply_studio_theme,
+    ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
+    FitView, FocusSearch, NextSearchResult, PreviousSearchResult, ReleaseSelected, StudioView,
+    ZoomIn, ZoomOut, apply_studio_theme,
 };
 
 actions!(vectorgraph_studio_desktop, [Quit]);
 
 fn main() {
     let database_path = std::env::args_os().nth(1).map(PathBuf::from);
+    let initial_window_width = window_dimension("VG_STUDIO_WINDOW_WIDTH", 1_340.0, 760.0);
+    let initial_window_height = window_dimension("VG_STUDIO_WINDOW_HEIGHT", 820.0, 520.0);
     #[cfg(feature = "visual-test")]
     let capture_path = std::env::var_os("VG_STUDIO_CAPTURE").map(PathBuf::from);
     #[cfg(feature = "visual-test")]
@@ -52,7 +54,7 @@ fn main() {
             KeyBinding::new("cmd-3", ArrangeOrbit, Some("VectorGraphStudio")),
             KeyBinding::new("cmd-4", ArrangeStructure, Some("VectorGraphStudio")),
             KeyBinding::new("cmd-shift-r", ReleaseSelected, Some("VectorGraphStudio")),
-            KeyBinding::new("enter", FocusSelectedContext, Some("VectorGraphStudio")),
+            KeyBinding::new("enter", ActivateSelection, Some("VectorGraphStudio")),
             KeyBinding::new("cmd-k", FocusSearch, Some("VectorGraphStudio")),
             KeyBinding::new("down", NextSearchResult, Some("VectorGraphStudio")),
             KeyBinding::new("up", PreviousSearchResult, Some("VectorGraphStudio")),
@@ -61,7 +63,10 @@ fn main() {
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
 
         let mut window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1_340.0), px(820.0)), cx)),
+            window_bounds: Some(WindowBounds::centered(
+                size(px(initial_window_width), px(initial_window_height)),
+                cx,
+            )),
             window_min_size: Some(size(px(760.0), px(520.0))),
             app_id: Some("dev.vectorgraph.studio".into()),
             ..TitleBar::window_options()
@@ -118,6 +123,14 @@ fn main() {
     });
 }
 
+fn window_dimension(variable: &str, default: f32, minimum: f32) -> f32 {
+    std::env::var(variable)
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| value.is_finite())
+        .map_or(default, |value| value.max(minimum))
+}
+
 #[cfg(feature = "visual-test")]
 fn schedule_capture(
     window: &Window,
@@ -138,6 +151,25 @@ fn schedule_capture(
                 let capture_view = view.clone();
                 view.update(cx, |view, _| {
                     view.set_on_search_ready(move |window, cx| {
+                        window.defer(cx, move |window, cx| {
+                            finish_visual_state(
+                                window,
+                                cx,
+                                capture_path,
+                                capture_view,
+                                capture_result,
+                                capture_zoom,
+                                capture_center,
+                            );
+                        });
+                    });
+                });
+                return;
+            }
+            if view.read(cx).is_finding_path() {
+                let capture_view = view.clone();
+                view.update(cx, |view, _| {
+                    view.set_on_path_ready(move |window, cx| {
                         window.defer(cx, move |window, cx| {
                             finish_visual_state(
                                 window,

@@ -222,7 +222,13 @@ Current native operators include:
   path first, intersects compressed sets, and exposes every scalar plan plus
   the final exact/sketch vector plan in `FilteredVectorSearchResult`;
 - outgoing, incoming, or undirected adjacency expansion;
-- one-hop labelled/property pattern matching;
+- exact unweighted shortest-path search with direction and relationship-label
+  filters, stable-ID tie ordering, a hop bound, a frontier-expansion budget,
+  and an inspectable adaptive choice between one-hop BFS and frontier-balanced
+  bidirectional BFS;
+- one-hop labelled/property pattern matching with an inspectable costed choice
+  between an edge/edge-label scan, start-node adjacency, and reverse adjacency
+  from the end-node predicate;
 - semantic one-hop matching that jointly ranks the seed node, relationship,
   and destination node;
 - semantic seed search followed by bounded best-first traversal.
@@ -232,9 +238,63 @@ separate node/edge weights, path decay, hop and degree penalties, direction and
 label filters, a hop bound, and an expansion budget. This is a database
 operator, not an agent framework feature.
 
-The Cypher-compatible parser is currently a convenience surface for one-hop
-patterns. The internal plan model will remain vector-aware rather than forcing
-all features through Cypher syntax.
+`shortest_path` is the exact evidence-chain primitive beneath higher-level
+path ranking. One-hop work stays on a simple BFS. Deeper work searches from
+both endpoints, reverses traversal direction on the destination side, and
+costs each complete frontier by node expansions plus a conservative adjacency
+read upper bound. The estimate is an O(frontier) view over mapped CSR and WAL
+overlay lengths; correctness does not depend on its accuracy, and relationship
+filters remain exact during expansion. Because the shortest-path proof advances
+only after a complete layer, the planner first prefers the only frontier that
+fits the remaining expansion budget when exactly one does; otherwise the
+lower-cost frontier advances. This preserves the same global hop and expansion
+limits without spending a tight budget on a layer that cannot complete. A path
+is returned only after the sum of completed search depths proves it shortest.
+The result exposes `ShortestPathStrategy`, ordered node and relationship IDs,
+visited-node and examined-relationship counts, plus start-side, end-side, and
+total expanded-node counts. The two endpoint counts always sum to the total;
+one-sided BFS reports zero end-side work. A typed termination reason preserves
+completeness. A zero-hop self path succeeds even with zero work budget; missing
+endpoints remain typed `NotFound` errors. Stable frontier and adjacency ordering
+plus deterministic meeting-path selection make equal-length and parallel-edge
+choices reproducible across WAL state and compacted mapped checkpoints.
+
+The cost regression fixture gives one origin 256 dead ends beside a five-hop
+spine. Cardinality-only bidirectional search examined 261 relationships; the
+work-costed plan starts at the cheap destination frontier and examines five,
+while returning the same path in five expansions.
+
+A separate tight-budget fixture leaves two nodes in the forward layer and one
+in the reverse layer with one expansion remaining. Completing the reverse layer
+finds and proves the two-hop path at exactly the two-expansion limit; partially
+advancing the nominally cheaper forward layer would have returned an
+inconclusive `ExpansionLimit` instead.
+
+On the 110,303-node repository fixture, the same seven-hop `0 → 100000`
+either-direction query changed from 15,293 expanded nodes and 38,219 examined
+relationships to 62 and 188 respectively, with the identical evidence chain.
+A current run exposes that 62-node plan as 27 expansions from the requested
+origin and 35 from the destination, rather than hiding the adaptive split.
+A single local debug smoke changed from 23.94 ms to 2.02 ms; the work counters
+are deterministic, while those timings are not a distribution or
+cross-machine claim.
+
+`vectorgraph-studio-core::evidence_path_database` is the owned presentation
+boundary above that primitive. It opens a read-only view, resolves an optional
+relationship label, executes the bounded exact path, and hydrates node and
+relationship properties, vector counts, titles, labels,
+stored-versus-traversed direction, physical strategy, termination, and work
+diagnostics before releasing the read guard. Native clients can therefore run
+the complete unit on a background executor without leaking mapped records or
+database locks into UI state. It deliberately preserves `ExpansionLimit` as an
+incomplete result rather than collapsing it into absence.
+
+`one_hop_plan` uses the same conservative label/property posting cardinalities
+as scalar filtering, estimates directional adjacency work, and exposes the
+selected physical strategy before execution. This is the first general pattern
+cost boundary; the Cypher-compatible parser remains a convenience surface for
+one-hop patterns. The internal plan model will remain vector-aware rather than
+forcing all features through Cypher syntax.
 
 ## Recovery and compaction
 

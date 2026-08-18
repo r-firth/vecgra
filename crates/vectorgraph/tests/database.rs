@@ -8,8 +8,8 @@ use vectorgraph::{
     BulkLoader, Database, DatabaseOptions, Direction, EdgeFilter, ElementFilter,
     ElementFilterStrategy, ElementRef, ElementSet, GraphRangeSearchOptions, NodeFilter,
     NumericRangeFilter, NumericRangeStrategy, NumericValue, OneHopQuery, OneHopStrategy,
-    SemanticOneHopQuery, SemanticPathOptions, Similarity, Value, VectorEncoding,
-    VectorSearchStrategy, VectorTarget,
+    SemanticOneHopQuery, SemanticPathOptions, ShortestPathOptions, ShortestPathStrategy,
+    ShortestPathTermination, Similarity, Value, VectorEncoding, VectorSearchStrategy, VectorTarget,
 };
 
 fn temp_database(name: &str) -> PathBuf {
@@ -528,6 +528,317 @@ fn graph_candidate_sets_fuse_traversal_labels_and_vector_search() {
         .vector_search_within_adaptive(&[1.0, 0.0, 0.0, 0.0], &eligible, 10)
         .unwrap();
     assert_eq!(adaptive, hits);
+    drop(read);
+    drop(database);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn shortest_path_is_bounded_filtered_deterministic_and_checkpoint_stable() {
+    let path = temp_database("shortest-path");
+    let compacted_path = temp_database("shortest-path-compacted");
+    let database = Database::create(&path, options()).unwrap();
+    let mut transaction = database.transaction();
+    let start = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let left = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let right = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let end = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let isolated = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let start_left = transaction.create_edge(
+        start,
+        left,
+        "ROAD",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let start_right = transaction.create_edge(
+        start,
+        right,
+        "ROAD",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let left_end =
+        transaction.create_edge(left, end, "ROAD", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.create_edge(right, end, "ROAD", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.create_edge(
+        start,
+        left,
+        "ROAD",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let shortcut = transaction.create_edge(
+        start,
+        end,
+        "NOISE",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let read = database.read();
+    let unfiltered = read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                direction: Direction::Outgoing,
+                ..ShortestPathOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(unfiltered.termination, ShortestPathTermination::Found);
+    assert_eq!(unfiltered.path.unwrap().edges, vec![shortcut]);
+
+    let road_options = ShortestPathOptions {
+        max_hops: 4,
+        direction: Direction::Outgoing,
+        edge_filter: EdgeFilter {
+            label: read.label_id("ROAD"),
+        },
+        ..ShortestPathOptions::default()
+    };
+    let road = read.shortest_path(start, end, &road_options).unwrap();
+    assert_eq!(road.termination, ShortestPathTermination::Found);
+    let road_path = road.path.unwrap();
+    assert_eq!(road_path.nodes, vec![start, left, end]);
+    assert_eq!(road_path.edges, vec![start_left, left_end]);
+    assert_eq!(road_path.nodes.len(), road_path.edges.len() + 1);
+
+    let reverse = read
+        .shortest_path(
+            end,
+            start,
+            &ShortestPathOptions {
+                direction: Direction::Incoming,
+                ..road_options
+            },
+        )
+        .unwrap()
+        .path
+        .unwrap();
+    assert_eq!(reverse.nodes, vec![end, left, start]);
+    assert_eq!(reverse.edges, vec![left_end, start_left]);
+
+    let hop_limited = read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                max_hops: 1,
+                ..road_options
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        hop_limited.termination,
+        ShortestPathTermination::NotFoundWithinHops
+    );
+    assert!(hop_limited.path.is_none());
+
+    let work_limited = read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                max_expansions: 1,
+                ..road_options
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        work_limited.termination,
+        ShortestPathTermination::ExpansionLimit
+    );
+    assert_eq!(work_limited.expanded_nodes, 1);
+    assert_eq!(work_limited.start_expanded_nodes, 0);
+    assert_eq!(work_limited.end_expanded_nodes, 1);
+    assert_eq!(work_limited.examined_relationships, 2);
+    assert!(work_limited.path.is_none());
+
+    let self_path = read
+        .shortest_path(
+            isolated,
+            isolated,
+            &ShortestPathOptions {
+                max_hops: 0,
+                max_expansions: 0,
+                ..road_options
+            },
+        )
+        .unwrap();
+    assert_eq!(self_path.path.unwrap().nodes, vec![isolated]);
+    assert!(matches!(
+        read.shortest_path(start, u64::MAX, &road_options),
+        Err(vectorgraph::Error::NotFound("node", u64::MAX))
+    ));
+    assert!(start_right > start_left);
+    drop(read);
+
+    database
+        .compact_to(&compacted_path, VectorEncoding::F32)
+        .unwrap();
+    drop(database);
+    let compacted = Database::open(&compacted_path).unwrap();
+    let compacted_read = compacted.read();
+    let road_label = compacted_read.label_id("ROAD");
+    let compacted_result = compacted_read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                edge_filter: EdgeFilter { label: road_label },
+                ..road_options
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        compacted_result.path.unwrap().edges,
+        vec![start_left, left_end]
+    );
+    drop(compacted_read);
+    drop(compacted);
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(compacted_path).unwrap();
+}
+
+#[test]
+fn shortest_path_adapts_to_the_cheaper_frontier_on_broad_graphs() {
+    let path = temp_database("shortest-path-adaptive");
+    let database = Database::create(&path, options()).unwrap();
+    let mut transaction = database.transaction();
+    let start = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let dead_ends: Vec<_> = (0..256)
+        .map(|_| transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]))
+        .collect();
+    let spine: Vec<_> = (0..5)
+        .map(|_| transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]))
+        .collect();
+    for dead_end in dead_ends {
+        transaction.create_edge(
+            start,
+            dead_end,
+            "LINK",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        );
+    }
+    let mut previous = start;
+    let mut expected_edges = Vec::new();
+    for &node in &spine {
+        expected_edges.push(transaction.create_edge(
+            previous,
+            node,
+            "LINK",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        ));
+        previous = node;
+    }
+    transaction.commit().unwrap();
+
+    let read = database.read();
+    let result = read
+        .shortest_path(
+            start,
+            *spine.last().unwrap(),
+            &ShortestPathOptions {
+                max_hops: 5,
+                direction: Direction::Outgoing,
+                ..ShortestPathOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        result.strategy,
+        ShortestPathStrategy::BidirectionalBreadthFirst
+    );
+    assert_eq!(result.termination, ShortestPathTermination::Found);
+    assert_eq!(result.path.unwrap().edges, expected_edges);
+    assert_eq!(result.expanded_nodes, 5);
+    assert_eq!(result.start_expanded_nodes, 0);
+    assert_eq!(result.end_expanded_nodes, 5);
+    assert_eq!(result.visited_nodes, 6);
+    assert_eq!(result.examined_relationships, 5);
+
+    let direct = read
+        .shortest_path(
+            start,
+            spine[0],
+            &ShortestPathOptions {
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                ..ShortestPathOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(direct.strategy, ShortestPathStrategy::BreadthFirst);
+    assert_eq!(direct.termination, ShortestPathTermination::Found);
+    drop(read);
+    drop(database);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn shortest_path_prefers_a_complete_frontier_within_the_expansion_budget() {
+    let path = temp_database("shortest-path-complete-frontier");
+    let database = Database::create(&path, options()).unwrap();
+    let mut transaction = database.transaction();
+    let start = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let on_path = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let dead_end = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let end = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let start_on_path = transaction.create_edge(
+        start,
+        on_path,
+        "LINK",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.create_edge(
+        start,
+        dead_end,
+        "LINK",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let on_path_end = transaction.create_edge(
+        on_path,
+        end,
+        "LINK",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    for _ in 0..64 {
+        let decoy = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+        transaction.create_edge(decoy, end, "LINK", std::iter::empty::<(&str, Value)>(), &[]);
+    }
+    transaction.commit().unwrap();
+
+    let read = database.read();
+    let result = read
+        .shortest_path(
+            start,
+            end,
+            &ShortestPathOptions {
+                max_hops: 2,
+                max_expansions: 2,
+                direction: Direction::Outgoing,
+                ..ShortestPathOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        result.strategy,
+        ShortestPathStrategy::BidirectionalBreadthFirst
+    );
+    assert_eq!(result.termination, ShortestPathTermination::Found);
+    assert_eq!(result.path.unwrap().edges, vec![start_on_path, on_path_end]);
+    assert_eq!(result.expanded_nodes, 2);
+    assert_eq!(result.start_expanded_nodes, 1);
+    assert_eq!(result.end_expanded_nodes, 1);
+
     drop(read);
     drop(database);
     std::fs::remove_file(path).unwrap();

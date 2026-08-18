@@ -1459,6 +1459,77 @@ pub struct EdgeFilter {
     pub label: Option<LabelId>,
 }
 
+/// Bounds and traversal semantics for an exact unweighted shortest path.
+///
+/// `max_expansions` counts frontier nodes whose adjacency is expanded. This is
+/// deliberately separate from `max_hops`: a shallow search over a broad graph
+/// can still have a finite application-controlled work budget.
+#[derive(Clone, Copy, Debug)]
+pub struct ShortestPathOptions {
+    pub max_hops: usize,
+    pub max_expansions: usize,
+    pub direction: Direction,
+    pub edge_filter: EdgeFilter,
+}
+
+impl Default for ShortestPathOptions {
+    fn default() -> Self {
+        Self {
+            max_hops: 6,
+            max_expansions: 100_000,
+            direction: Direction::Both,
+            edge_filter: EdgeFilter::default(),
+        }
+    }
+}
+
+/// One exact graph path. `edges[index]` connects `nodes[index]` to
+/// `nodes[index + 1]` under the requested traversal direction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShortestPath {
+    pub nodes: Vec<NodeId>,
+    pub edges: Vec<EdgeId>,
+}
+
+/// Physical traversal selected for an exact unweighted path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortestPathStrategy {
+    /// A single start-side frontier, used for one-hop work.
+    BreadthFirst,
+    /// Two complete frontiers with the next side chosen by estimated node and
+    /// adjacency work.
+    BidirectionalBreadthFirst,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortestPathTermination {
+    Found,
+    NotFoundWithinHops,
+    ExpansionLimit,
+}
+
+/// Inspectable result of bounded exact shortest-path search.
+///
+/// A missing `path` is conclusive only when `termination` is
+/// `NotFoundWithinHops`; `ExpansionLimit` reports a deliberately incomplete
+/// search rather than silently looking like graph absence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShortestPathResult {
+    pub path: Option<ShortestPath>,
+    pub strategy: ShortestPathStrategy,
+    pub termination: ShortestPathTermination,
+    pub visited_nodes: usize,
+    /// Nodes expanded from the requested start endpoint.
+    pub start_expanded_nodes: usize,
+    /// Nodes expanded from the requested end endpoint. This is zero for the
+    /// one-sided breadth-first strategy.
+    pub end_expanded_nodes: usize,
+    /// Total nodes expanded across both endpoints. This always equals
+    /// `start_expanded_nodes + end_expanded_nodes`.
+    pub expanded_nodes: usize,
+    pub examined_relationships: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GraphStats {
     pub nodes: usize,
@@ -3376,6 +3447,332 @@ impl Graph {
             result = result.intersection(&matching);
         }
         Ok(result)
+    }
+
+    /// Finds an exact unweighted shortest path within explicit hop and work
+    /// bounds. Frontier and adjacency order are normalized by stable IDs so a
+    /// graph with multiple shortest paths returns the same evidence chain
+    /// before and after checkpoint compaction.
+    pub(crate) fn shortest_path(
+        &self,
+        start: NodeId,
+        end: NodeId,
+        options: &ShortestPathOptions,
+    ) -> Result<ShortestPathResult> {
+        if !self.has_node(start) {
+            return Err(Error::NotFound("node", start));
+        }
+        if !self.has_node(end) {
+            return Err(Error::NotFound("node", end));
+        }
+        if start == end {
+            return Ok(ShortestPathResult {
+                path: Some(ShortestPath {
+                    nodes: vec![start],
+                    edges: Vec::new(),
+                }),
+                strategy: ShortestPathStrategy::BreadthFirst,
+                termination: ShortestPathTermination::Found,
+                visited_nodes: 1,
+                start_expanded_nodes: 0,
+                end_expanded_nodes: 0,
+                expanded_nodes: 0,
+                examined_relationships: 0,
+            });
+        }
+        if options.max_hops == 0 {
+            return Ok(ShortestPathResult {
+                path: None,
+                strategy: ShortestPathStrategy::BreadthFirst,
+                termination: ShortestPathTermination::NotFoundWithinHops,
+                visited_nodes: 1,
+                start_expanded_nodes: 0,
+                end_expanded_nodes: 0,
+                expanded_nodes: 0,
+                examined_relationships: 0,
+            });
+        }
+
+        if options.max_hops == 1 {
+            self.shortest_path_breadth_first(start, end, options)
+        } else {
+            self.shortest_path_bidirectional(start, end, options)
+        }
+    }
+
+    fn shortest_path_breadth_first(
+        &self,
+        start: NodeId,
+        end: NodeId,
+        options: &ShortestPathOptions,
+    ) -> Result<ShortestPathResult> {
+        let mut visited = HashSet::from([start]);
+        let mut parents: HashMap<NodeId, (NodeId, EdgeId)> = HashMap::new();
+        let mut frontier = vec![start];
+        let mut expanded_nodes = 0;
+        let mut examined_relationships = 0;
+
+        for _depth in 0..options.max_hops {
+            frontier.sort_unstable();
+            let mut next = Vec::new();
+            for node in frontier {
+                if expanded_nodes == options.max_expansions {
+                    return Ok(ShortestPathResult {
+                        path: None,
+                        strategy: ShortestPathStrategy::BreadthFirst,
+                        termination: ShortestPathTermination::ExpansionLimit,
+                        visited_nodes: visited.len(),
+                        start_expanded_nodes: expanded_nodes,
+                        end_expanded_nodes: 0,
+                        expanded_nodes,
+                        examined_relationships,
+                    });
+                }
+                expanded_nodes += 1;
+                let mut adjacent = Vec::new();
+                self.visit_neighbors(
+                    node,
+                    options.direction,
+                    options.edge_filter,
+                    |neighbor, edge| adjacent.push((neighbor, edge)),
+                )?;
+                adjacent.sort_unstable();
+                examined_relationships = examined_relationships.saturating_add(adjacent.len());
+                for (neighbor, edge) in adjacent {
+                    if !visited.insert(neighbor) {
+                        continue;
+                    }
+                    parents.insert(neighbor, (node, edge));
+                    if neighbor == end {
+                        let path = reconstruct_shortest_path(start, end, &parents);
+                        return Ok(ShortestPathResult {
+                            path: Some(path),
+                            strategy: ShortestPathStrategy::BreadthFirst,
+                            termination: ShortestPathTermination::Found,
+                            visited_nodes: visited.len(),
+                            start_expanded_nodes: expanded_nodes,
+                            end_expanded_nodes: 0,
+                            expanded_nodes,
+                            examined_relationships,
+                        });
+                    }
+                    next.push(neighbor);
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+
+        Ok(ShortestPathResult {
+            path: None,
+            strategy: ShortestPathStrategy::BreadthFirst,
+            termination: ShortestPathTermination::NotFoundWithinHops,
+            visited_nodes: visited.len(),
+            start_expanded_nodes: expanded_nodes,
+            end_expanded_nodes: 0,
+            expanded_nodes,
+            examined_relationships,
+        })
+    }
+
+    fn shortest_path_bidirectional(
+        &self,
+        start: NodeId,
+        end: NodeId,
+        options: &ShortestPathOptions,
+    ) -> Result<ShortestPathResult> {
+        let mut forward_depths = HashMap::from([(start, 0usize)]);
+        let mut reverse_depths = HashMap::from([(end, 0usize)]);
+        let mut forward_parents: HashMap<NodeId, (NodeId, EdgeId)> = HashMap::new();
+        let mut reverse_next: HashMap<NodeId, (NodeId, EdgeId)> = HashMap::new();
+        let mut forward_frontier = vec![start];
+        let mut reverse_frontier = vec![end];
+        let mut forward_depth = 0usize;
+        let mut reverse_depth = 0usize;
+        let mut best_length = None;
+        let mut expanded_nodes = 0usize;
+        let mut start_expanded_nodes = 0usize;
+        let mut end_expanded_nodes = 0usize;
+        let mut examined_relationships = 0usize;
+
+        loop {
+            let proven_length =
+                best_length.filter(|&length| forward_depth.saturating_add(reverse_depth) >= length);
+            if let Some(length) = proven_length {
+                return Ok(ShortestPathResult {
+                    path: best_bidirectional_path(
+                        start,
+                        end,
+                        length,
+                        &forward_depths,
+                        &reverse_depths,
+                        &forward_parents,
+                        &reverse_next,
+                    ),
+                    strategy: ShortestPathStrategy::BidirectionalBreadthFirst,
+                    termination: ShortestPathTermination::Found,
+                    visited_nodes: visited_union_len(&forward_depths, &reverse_depths),
+                    start_expanded_nodes,
+                    end_expanded_nodes,
+                    expanded_nodes,
+                    examined_relationships,
+                });
+            }
+            if forward_depth.saturating_add(reverse_depth) >= options.max_hops
+                || forward_frontier.is_empty()
+                || reverse_frontier.is_empty()
+            {
+                let path = best_length.and_then(|length| {
+                    best_bidirectional_path(
+                        start,
+                        end,
+                        length,
+                        &forward_depths,
+                        &reverse_depths,
+                        &forward_parents,
+                        &reverse_next,
+                    )
+                });
+                return Ok(ShortestPathResult {
+                    termination: if path.is_some() {
+                        ShortestPathTermination::Found
+                    } else {
+                        ShortestPathTermination::NotFoundWithinHops
+                    },
+                    path,
+                    strategy: ShortestPathStrategy::BidirectionalBreadthFirst,
+                    visited_nodes: visited_union_len(&forward_depths, &reverse_depths),
+                    start_expanded_nodes,
+                    end_expanded_nodes,
+                    expanded_nodes,
+                    examined_relationships,
+                });
+            }
+
+            // A bidirectional proof advances only after a complete layer. If
+            // exactly one frontier fits in the remaining expansion budget,
+            // prefer it even when its adjacency estimate is more expensive;
+            // partially expanding the cheaper layer could otherwise exhaust
+            // the budget without proving a path already visible from the
+            // other side. When both (or neither) fit, score the complete next
+            // layer by node expansions plus a cheap upper bound on adjacency
+            // reads, then retain forward order as the deterministic tie-break.
+            // The estimate is conservative across mapped CSR and WAL overlays;
+            // filters are applied during the actual expansion.
+            let reverse_search_direction = reverse_direction(options.direction);
+            let remaining_expansions = options.max_expansions.saturating_sub(expanded_nodes);
+            let forward_fits = forward_frontier.len() <= remaining_expansions;
+            let reverse_fits = reverse_frontier.len() <= remaining_expansions;
+            let expand_forward = match (forward_fits, reverse_fits) {
+                (true, false) => true,
+                (false, true) => false,
+                (true, true) | (false, false) => {
+                    let forward_work =
+                        self.frontier_work_upper_bound(&forward_frontier, options.direction);
+                    let reverse_work =
+                        self.frontier_work_upper_bound(&reverse_frontier, reverse_search_direction);
+                    forward_work < reverse_work
+                        || (forward_work == reverse_work
+                            && forward_frontier.len() <= reverse_frontier.len())
+                }
+            };
+            let (frontier, own_depths, other_depths, parents, direction) = if expand_forward {
+                (
+                    &mut forward_frontier,
+                    &mut forward_depths,
+                    &reverse_depths,
+                    &mut forward_parents,
+                    options.direction,
+                )
+            } else {
+                (
+                    &mut reverse_frontier,
+                    &mut reverse_depths,
+                    &forward_depths,
+                    &mut reverse_next,
+                    reverse_search_direction,
+                )
+            };
+            frontier.sort_unstable();
+            let mut next = Vec::new();
+            for node in std::mem::take(frontier) {
+                if expanded_nodes == options.max_expansions {
+                    return Ok(ShortestPathResult {
+                        path: None,
+                        strategy: ShortestPathStrategy::BidirectionalBreadthFirst,
+                        termination: ShortestPathTermination::ExpansionLimit,
+                        visited_nodes: visited_union_len(&forward_depths, &reverse_depths),
+                        start_expanded_nodes,
+                        end_expanded_nodes,
+                        expanded_nodes,
+                        examined_relationships,
+                    });
+                }
+                expanded_nodes += 1;
+                if expand_forward {
+                    start_expanded_nodes += 1;
+                } else {
+                    end_expanded_nodes += 1;
+                }
+                let mut adjacent = Vec::new();
+                self.visit_neighbors(node, direction, options.edge_filter, |neighbor, edge| {
+                    adjacent.push((neighbor, edge));
+                })?;
+                adjacent.sort_unstable();
+                examined_relationships = examined_relationships.saturating_add(adjacent.len());
+                let next_depth = own_depths[&node] + 1;
+                for (neighbor, edge) in adjacent {
+                    if own_depths.contains_key(&neighbor) {
+                        continue;
+                    }
+                    own_depths.insert(neighbor, next_depth);
+                    parents.insert(neighbor, (node, edge));
+                    if let Some(&other_depth) = other_depths.get(&neighbor) {
+                        let length = next_depth.saturating_add(other_depth);
+                        if length <= options.max_hops {
+                            best_length = Some(best_length.map_or(length, |best| best.min(length)));
+                        }
+                    }
+                    next.push(neighbor);
+                }
+            }
+            *frontier = next;
+            if expand_forward {
+                forward_depth += 1;
+            } else {
+                reverse_depth += 1;
+            }
+        }
+    }
+
+    fn frontier_work_upper_bound(&self, frontier: &[NodeId], direction: Direction) -> usize {
+        frontier.iter().fold(0usize, |work, &node| {
+            work.saturating_add(1)
+                .saturating_add(self.adjacency_len_upper_bound(node, direction))
+        })
+    }
+
+    fn adjacency_len_upper_bound(&self, node: NodeId, direction: Direction) -> usize {
+        let mut count = 0usize;
+        if matches!(direction, Direction::Outgoing | Direction::Both) {
+            count = count.saturating_add(
+                self.base_outgoing
+                    .as_ref()
+                    .map_or(0, |adjacency| adjacency.get(node).len()),
+            );
+            count = count.saturating_add(self.outgoing.get(node).len());
+        }
+        if matches!(direction, Direction::Incoming | Direction::Both) {
+            count = count.saturating_add(
+                self.base_incoming
+                    .as_ref()
+                    .map_or(0, |adjacency| adjacency.get(node).len()),
+            );
+            count = count.saturating_add(self.incoming.get(node).len());
+        }
+        count
     }
 
     pub(crate) fn vector_search_graph_range_adaptive(
@@ -5856,6 +6253,90 @@ fn validate_vectors(
         }
     }
     Ok(())
+}
+
+fn reconstruct_shortest_path(
+    start: NodeId,
+    end: NodeId,
+    parents: &HashMap<NodeId, (NodeId, EdgeId)>,
+) -> ShortestPath {
+    let mut nodes = vec![end];
+    let mut edges = Vec::new();
+    let mut cursor = end;
+    while cursor != start {
+        let &(parent, edge) = parents
+            .get(&cursor)
+            .expect("every discovered non-root node has one parent");
+        edges.push(edge);
+        nodes.push(parent);
+        cursor = parent;
+    }
+    nodes.reverse();
+    edges.reverse();
+    ShortestPath { nodes, edges }
+}
+
+const fn reverse_direction(direction: Direction) -> Direction {
+    match direction {
+        Direction::Outgoing => Direction::Incoming,
+        Direction::Incoming => Direction::Outgoing,
+        Direction::Both => Direction::Both,
+    }
+}
+
+fn visited_union_len(
+    forward_depths: &HashMap<NodeId, usize>,
+    reverse_depths: &HashMap<NodeId, usize>,
+) -> usize {
+    forward_depths.len() + reverse_depths.len()
+        - forward_depths
+            .keys()
+            .filter(|node| reverse_depths.contains_key(node))
+            .count()
+}
+
+fn best_bidirectional_path(
+    start: NodeId,
+    end: NodeId,
+    length: usize,
+    forward_depths: &HashMap<NodeId, usize>,
+    reverse_depths: &HashMap<NodeId, usize>,
+    forward_parents: &HashMap<NodeId, (NodeId, EdgeId)>,
+    reverse_next: &HashMap<NodeId, (NodeId, EdgeId)>,
+) -> Option<ShortestPath> {
+    forward_depths
+        .iter()
+        .filter_map(|(&meeting, &forward_depth)| {
+            let reverse_depth = *reverse_depths.get(&meeting)?;
+            (forward_depth + reverse_depth == length).then(|| {
+                reconstruct_bidirectional_path(start, end, meeting, forward_parents, reverse_next)
+            })
+        })
+        .min_by(|left, right| {
+            left.nodes
+                .cmp(&right.nodes)
+                .then_with(|| left.edges.cmp(&right.edges))
+        })
+}
+
+fn reconstruct_bidirectional_path(
+    start: NodeId,
+    end: NodeId,
+    meeting: NodeId,
+    forward_parents: &HashMap<NodeId, (NodeId, EdgeId)>,
+    reverse_next: &HashMap<NodeId, (NodeId, EdgeId)>,
+) -> ShortestPath {
+    let mut path = reconstruct_shortest_path(start, meeting, forward_parents);
+    let mut cursor = meeting;
+    while cursor != end {
+        let &(next, edge) = reverse_next
+            .get(&cursor)
+            .expect("every reverse-discovered non-root node has one next step");
+        path.edges.push(edge);
+        path.nodes.push(next);
+        cursor = next;
+    }
+    path
 }
 
 fn validate_semantic_options(options: &SemanticPathOptions) -> Result<()> {

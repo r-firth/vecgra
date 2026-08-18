@@ -18,6 +18,10 @@ The current build is an end-to-end engine, not yet a production release. It has:
 - compressed typed candidate sets with union/intersection/difference, one-hop
   and bounded multi-hop expansion, plus pre-budget graph filtering for both
   vector and MaxSim search;
+- exact bounded shortest paths with direction and relationship-label filters,
+  an inspectable work-costed, expansion-budget-aware bidirectional plan for
+  multi-hop work, per-endpoint expansion counters, deterministic evidence
+  chains, and explicit hop/work-limit diagnostics;
 - bounded semantic path retrieval in which node and relationship embeddings
   both affect path score;
 - graph-range vector search that evaluates bounded reachability and ordinary
@@ -34,8 +38,10 @@ The current build is an end-to-end engine, not yet a production release. It has:
   block checksums, and an F32 write delta;
 - an atomic direct bulk loader that builds the indexed checkpoint without an
   intermediate in-memory graph or transaction-log copy;
-- a small Cypher-compatible one-hop surface, a hybrid semantic-pattern
-  operator that ranks nodes and relationships together, plus a native Rust API;
+- a small Cypher-compatible one-hop surface with an inspectable costed choice
+  between relationship scans and selective endpoint adjacency, a hybrid
+  semantic-pattern operator that ranks nodes and relationships together, plus
+  a native Rust API;
 - generic atomic JSONL graph/multivector ingestion, streaming fbin plus typed
   node-metadata ingestion, a resumable GitHub engineering-history crawler,
   Tree-sitter Rust repository ingestion, and batched OpenRouter/Qwen embeddings;
@@ -95,6 +101,7 @@ target/release/vg plan-search repo.vg both
 target/release/vg numeric-range repo.vg nodes start_line int 100 200 10
 target/release/vg search-text repo.vg "where is retry policy configured" 10 hash
 target/release/vg range-text repo.vg 42 "nearby retry behavior" 2 10 hash both
+target/release/vg shortest-path repo.vg 42 84 6 both HAS_SYNTAX 100000
 target/release/vg search-facets repo.vg \
   'retry policy || exponential backoff' 10 hash both
 target/release/vg semantic-text repo.vg "where is retry policy configured" 20 2 hash
@@ -131,19 +138,40 @@ aggregation, GPU-painted nodes and type-aware directed relationships,
 pointer-anchored deep zoom through 102,400% with individual-element recovery,
 pan/pinch, direct node dragging with persistent pins
 and bounded neighbor physics, interruptible spring transitions between Force,
-resistance-distance Structure, and Orbit arrangements, node/edge selection, relationship taxonomy and
-inspection, and ranked Text, Semantic, and Hybrid search over both nodes and
-relationships. Press `Cmd-K`, type a query, and press Enter; a second Enter or
-a result click animates into its bounded one-hop context. Search itself frames
-and highlights all visible matches through a relevance lens; unrelated
-structure recedes without leaving the graph. Escape or Overview springs the
-saved arrangement and camera back into place. Double-clicking a node (or
-pressing Enter on a selected node) opens a branch-balanced, relationship-diverse
+resistance-distance Structure, and Orbit arrangements, node/edge selection,
+clickable node/relationship taxonomy lenses, relationship inspection, and
+ranked Text, Semantic, and Hybrid search over both nodes and relationships.
+An exact evidence-path workbench turns a selected node into a path origin and
+promotes a second selected node into a copper destination card and focusable
+`Trace exact path` action in the evidence rail at every supported width,
+without requiring either ID to be memorized. The wide Inspector mirrors that
+action as a convenience rather than owning the workflow; Enter runs it from a
+ready destination. Endpoint markers remain visible while the complete database
+search runs on a background worker, hydrates the full node/relationship
+records, and injects any sampled-out evidence into an ordered one-for-one
+directed canvas chain. Stored direction, the selected physical plan, split
+start/end expansion work, relationship filters, visited/read work, hop bounds,
+and incomplete work-limit outcomes stay visible.
+Facet lenses promote a chosen label directly into the canvas relevance field,
+with a structural active marker and an exact Escape/Overview return. Hybrid
+results expose separate Text and Vector contribution
+rails instead of hiding retrieval behind one score, and title-bar controls
+reflow into a two-tier instrument rail at narrow window widths. Press `Cmd-K`,
+type a query, and press Enter; a second Enter or a result click animates into
+its bounded one-hop context. Search itself frames and highlights all visible
+matches through a relevance lens; unrelated structure recedes without leaving
+the graph. Escape or Overview springs the saved arrangement and camera back
+into place. With no exact-path draft active, double-clicking a node (or pressing
+Enter on a selected node) opens a branch-balanced, relationship-diverse
 two-hop context and keeps the overview available as an exact animated return.
 The same box retains the
 `node <id>`, `edge <id>`, `zoom <level>`, `layout auto`, `layout force`,
 `layout structure`, `layout orbit`, `focus <node-id>`, `release`, `fit`, and
-`clear` command surface. See
+`clear` command surface, plus `facet node <label>` and
+`facet relationship <label>`, plus
+`path-start <node> [both|out|in] [max-hops]` and
+`path <start> <end>` with optional direction, relationship-label, and max-hop
+arguments. See
 [`docs/studio.md`](docs/studio.md) for the architecture, interaction contract,
 measured scope, and remaining release gates.
 
