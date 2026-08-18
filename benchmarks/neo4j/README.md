@@ -1,6 +1,6 @@
 # Neo4j comparison harness
 
-This directory contains two reproducible Neo4j baselines for VectorGraph's
+This directory contains two reproducible Neo4j baselines for Vecgra's
 public benchmark corpora:
 
 - a same-process Neo4j Community 2026.06 baseline that deliberately avoids
@@ -13,7 +13,7 @@ dependencies:
 
 ```sh
 JAVA_HOME=/path/to/jdk-25 ./gradlew installDist
-export NEO4J_BENCH=build/install/vectorgraph-neo4j-benchmark/bin/vectorgraph-neo4j-benchmark
+export NEO4J_BENCH=build/install/vecgra-neo4j-benchmark/bin/vecgra-neo4j-benchmark
 ```
 
 The embedded application has a 1 GiB Neo4j page cache, a 2--4 GiB ZGC heap, and enables

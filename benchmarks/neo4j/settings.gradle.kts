@@ -1,1 +1,1 @@
-rootProject.name = "vectorgraph-neo4j-benchmark"
+rootProject.name = "vecgra-neo4j-benchmark"

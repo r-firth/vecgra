@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Convert the public MoReVec movie workload to VectorGraph interchange files.
+"""Convert the public MoReVec movie workload to Vecgra interchange files.
 
 The output deliberately uses ordinary fbin/ibin plus JSONL rather than a
-benchmark-specific database loader.  `vg import-node-fbin` can therefore ingest
+benchmark-specific database loader.  `vecgra import-node-fbin` can therefore ingest
 the same files used by other ANN systems while retaining typed movie metadata.
 """
 

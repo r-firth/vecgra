@@ -1,34 +1,62 @@
 [workspace]
 members = [
-    "crates/vectorgraph",
-    "crates/vectorgraph-cli",
-    "crates/vectorgraph-embedding",
-    "crates/vectorgraph-studio-core",
-    "crates/vectorgraph-studio-ui",
-    "crates/vectorgraph-studio",
+    "crates/vecgra",
+    "crates/vecgra-cli",
+    "crates/vecgra-embedding",
+    "crates/vecgra-studio-core",
+    "crates/vecgra-studio-ui",
+    "crates/vecgra-studio",
 ]
 default-members = [
-    "crates/vectorgraph",
-    "crates/vectorgraph-cli",
+    "crates/vecgra",
+    "crates/vecgra-cli",
+]
+exclude = [
+    "fuzz",
+    "third-party/block",
+    "third-party/noop-ztracing",
+    "third-party/noop-ztracing-macro",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.97"
 license = "Apache-2.0"
+repository = "https://github.com/r-firth/vecgra"
+homepage = "https://github.com/r-firth/vecgra"
+authors = ["Ryan Firth"]
+publish = false
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [workspace.dependencies]
 # gpui-component currently declares Zed's Git source without a revision. These
 # two declarations must use the identical Cargo source ID to avoid two
 # incompatible GPUI type universes; Cargo.lock records the exact Zed commit.
-gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] }
+gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
+
+# GPUI uses Zed's GPL tracing facade even when tracing is compiled as a no-op.
+# Vecgra does not enable ZTRACING, so replace that disabled surface with a small
+# Apache-2.0 compatibility implementation rather than pulling GPL code into the
+# distributed Studio binary.
+[patch."https://github.com/zed-industries/zed"]
+ztracing = { path = "third-party/noop-ztracing" }
+ztracing_macro = { path = "third-party/noop-ztracing-macro" }
+
+# GPUI's macOS stack still uses block 0.1.6. The crates.io release declares an
+# extern static as an uninhabited type, which future Rust versions will reject.
+# This source-compatible MIT patch changes only that FFI declaration.
+[patch.crates-io]
+block = { path = "third-party/block" }
 
 # GPUI pulls in the macOS graphics stack. Full debug symbols make a clean
 # desktop build several gigabytes larger without improving normal iteration.

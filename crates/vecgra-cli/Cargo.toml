@@ -1,0 +1,38 @@
+[package]
+name = "vecgra-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "Command-line interface and importers for the Vecgra graph database"
+
+[[bin]]
+name = "vecgra"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+chrono = { version = "0.4.42", default-features = false, features = ["std"] }
+dirs = "6.0.0"
+regex = "1.12.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+tree-sitter = "0.26.12"
+tree-sitter-rust = "0.24.2"
+ureq = { version = "3.4.0", features = ["json"] }
+vecgra = { path = "../vecgra" }
+vecgra-embedding = { path = "../vecgra-embedding" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
+[dev-dependencies]
+# Used only by the retained IVF design probe example, never by the CLI binary.
+gemm = { version = "0.19.0", default-features = false, features = ["std", "rayon"] }
+
+[lints]
+workspace = true

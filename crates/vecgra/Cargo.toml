@@ -1,0 +1,18 @@
+[package]
+name = "vecgra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "Vector-native embedded labelled property graph database"
+
+[dependencies]
+memmap2 = "0.9.8"
+roaring = "=0.11.3"
+
+[lints]
+workspace = true

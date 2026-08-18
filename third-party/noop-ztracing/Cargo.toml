@@ -1,0 +1,12 @@
+[package]
+name = "ztracing"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+description = "No-op compatibility facade for GPUI's disabled tracing surface"
+
+[dependencies]
+tracing = "0.1"
+ztracing_macro = { path = "../noop-ztracing-macro" }

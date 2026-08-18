@@ -1,0 +1,24 @@
+[package]
+name = "vecgra-studio-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "Headless search, layout, and scene model for Vecgra Studio"
+
+[dependencies]
+petgraph = "0.8"
+petgraph-drawing = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-omega = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-sgd = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-linalg-rdmds = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+rand = "0.8"
+vecgra = { path = "../vecgra" }
+vecgra-embedding = { path = "../vecgra-embedding" }
+
+[lints]
+workspace = true

@@ -12,3 +12,17 @@
 .idea/
 .vscode/
 *.swp
+
+# Maintainer-only brand notes are not part of the public source tree.
+/.agents/
+
+# Local fuzzing corpus and crash artifacts. Seed cases live under
+# fuzz/corpus-seed and remain versioned.
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/target/
+
+# Local compatibility crates are libraries; their standalone lock files are
+# generated only when checking those manifests directly.
+/third-party/*/Cargo.lock
+/third-party/*/target/

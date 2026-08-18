@@ -1,0 +1,11 @@
+[package]
+name = "ztracing_macro"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+description = "Passthrough instrument attribute for disabled GPUI tracing"
+
+[lib]
+proc-macro = true

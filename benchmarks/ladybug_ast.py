@@ -2,7 +2,7 @@
 """Load and benchmark the ripgrep AST export in LadybugDB.
 
 This is intentionally outside the product crates. It compares ordinary graph
-pattern execution on exactly the topology exported by `vg export-ladybug`.
+pattern execution on exactly the topology exported by `vecgra export-ladybug`.
 """
 
 from __future__ import annotations

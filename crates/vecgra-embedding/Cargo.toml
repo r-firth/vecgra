@@ -1,0 +1,18 @@
+[package]
+name = "vecgra-embedding"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "Embedding adapters shared by Vecgra tools and Studio"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+ureq = { version = "3.4.0", features = ["json"] }
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure an IVF partition tier before committing it to VectorGraph's format.
+"""Measure an IVF partition tier before committing it to Vecgra's format.
 
 This is deliberately an engineering probe, not a product benchmark.  It uses
 Faiss as a convenient oracle for the clustering/search shape, reports recall

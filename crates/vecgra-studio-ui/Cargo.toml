@@ -1,0 +1,22 @@
+[package]
+name = "vecgra-studio-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "GPUI interface and graph canvas for Vecgra Studio"
+
+[dependencies]
+gpui.workspace = true
+gpui-component.workspace = true
+vecgra-studio-core = { path = "../vecgra-studio-core" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

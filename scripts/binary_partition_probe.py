@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe binary IVF partitions over VectorGraph's persisted 512-bit sketches.
+"""Probe binary IVF partitions over Vecgra's persisted 512-bit sketches.
 
 The important metric is partition coverage: if exact vector scoring visited all
 rows in the selected partitions, what fraction of supplied true neighbors
@@ -25,7 +25,7 @@ def align(value: int, alignment: int) -> int:
 def mapped_sketches(path: Path) -> np.memmap:
     raw = np.memmap(path, dtype=np.uint8, mode="r")
     if bytes(raw[:8]) != b"VGRPHDB\0":
-        raise ValueError(f"{path}: not a VectorGraph database")
+        raise ValueError(f"{path}: not a Vecgra database")
     metadata_length = struct.unpack_from("<Q", raw, 24)[0]
     metadata = raw[64 : 64 + metadata_length]
     if bytes(metadata[:8]) not in (b"VGSNAP04", b"VGSNAP05"):

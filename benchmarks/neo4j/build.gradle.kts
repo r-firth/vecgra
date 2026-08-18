@@ -19,7 +19,7 @@ java {
 }
 
 application {
-    mainClass = "dev.vectorgraph.bench.Neo4jBenchmark"
+    mainClass = "dev.vecgra.bench.Neo4jBenchmark"
     applicationDefaultJvmArgs = listOf(
         "--add-modules=jdk.incubator.vector",
         "--enable-native-access=ALL-UNNAMED",

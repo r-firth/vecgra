@@ -1,0 +1,43 @@
+[package]
+name = "vecgra-studio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "Native desktop explorer for Vecgra databases"
+
+[package.metadata.cargo-machete]
+# The visual-test feature needs `image`'s PNG encoder for the concrete image
+# value returned by GPUI, but method-call syntax does not name the crate.
+ignored = ["image"]
+
+[features]
+default = []
+visual-test = ["gpui/test-support", "gpui_platform/test-support", "dep:image"]
+
+[[bin]]
+name = "vecgra-studio"
+path = "src/main.rs"
+
+[dependencies]
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+vecgra-studio-ui = { path = "../vecgra-studio-ui" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_platform = { workspace = true, features = ["font-kit"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+gpui_platform = { workspace = true, features = ["wayland", "x11"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_platform.workspace = true
+
+[lints]
+workspace = true
