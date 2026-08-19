@@ -1,0 +1,109 @@
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "bincode is a transitive syntect dependency in GPUI Component; no maintained compatible release is available" },
+    { id = "RUSTSEC-2024-0384", reason = "instant is transitive through GPUI Component and notify; no maintained compatible release is available" },
+    { id = "RUSTSEC-2024-0436", reason = "paste is confined to the IVF probe dev dependency and GPUI; no maintained compatible upstream release is available" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through GPUI SVG rendering; migration must happen upstream" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through GPUI text/SVG rendering; migration must happen upstream" },
+]
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+    "bzip2-1.0.6",
+]
+
+[[licenses.clarify]]
+crate = "petgraph-drawing"
+expression = "MIT"
+license-files = [
+    { path = "../../LICENSE", hash = 0x333ebabd },
+]
+
+[[licenses.clarify]]
+crate = "petgraph-algorithm-shortest-path"
+expression = "MIT"
+license-files = [
+    { path = "../../../LICENSE", hash = 0x333ebabd },
+]
+
+[[licenses.clarify]]
+crate = "petgraph-layout-omega"
+expression = "MIT"
+license-files = [
+    { path = "../../../LICENSE", hash = 0x333ebabd },
+]
+
+[[licenses.clarify]]
+crate = "petgraph-layout-sgd"
+expression = "MIT"
+license-files = [
+    { path = "../../../LICENSE", hash = 0x333ebabd },
+]
+
+[[licenses.clarify]]
+crate = "petgraph-linalg-rdmds"
+expression = "MIT"
+license-files = [
+    { path = "../../../LICENSE", hash = 0x333ebabd },
+]
+
+[[licenses.clarify]]
+crate = "gpui_shared_string"
+expression = "Apache-2.0"
+license-files = [
+    { path = "LICENSE-APACHE", hash = 0x076d9a33 },
+]
+
+[[licenses.clarify]]
+crate = "gpui_util"
+expression = "Apache-2.0"
+license-files = [
+    { path = "LICENSE-APACHE", hash = 0x076d9a33 },
+]
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "simplest-path"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/likr/egraph-rs",
+    "https://github.com/longbridge/gpui-component",
+    "https://github.com/proptest-rs/proptest",
+    "https://github.com/zed-industries/zed",
+    "https://github.com/zed-industries/font-kit",
+    "https://github.com/zed-industries/xim-rs",
+]

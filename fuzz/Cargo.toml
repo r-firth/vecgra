@@ -1,0 +1,27 @@
+[package]
+name = "vecgra-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+tempfile = "3.27.0"
+vecgra = { path = "../crates/vecgra" }
+
+[[bin]]
+name = "database_file"
+path = "fuzz_targets/database_file.rs"
+test = false
+doc = false
+bench = false
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
