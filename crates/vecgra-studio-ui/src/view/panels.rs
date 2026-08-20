@@ -6,7 +6,6 @@ impl StudioView {
         database_name: SharedString,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let colors = palette();
         h_flex()
             .w(px(166.0))
             .flex_shrink_0()
@@ -14,16 +13,16 @@ impl StudioView {
             .items_center()
             .child(
                 div()
-                    .size(px(22.0))
+                    .size(px(24.0))
+                    .flex_none()
                     .rounded(px(6.0))
-                    .bg(colors.cobalt)
-                    .text_color(rgb(0xf7fbfd))
-                    .text_xs()
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child("V"),
+                    .overflow_hidden()
+                    .child(
+                        gpui::img(vecgra_logo_image())
+                            .size(px(38.0))
+                            .ml(px(-7.0))
+                            .mt(px(-7.0)),
+                    ),
             )
             .child(
                 v_flex()
@@ -1622,6 +1621,21 @@ impl StudioView {
                 this.child(format!("{load_ms:.1} ms load+layout"))
             })
     }
+}
+
+fn vecgra_logo_image() -> Arc<gpui::Image> {
+    static LOGO: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
+    LOGO.get_or_init(|| {
+        Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Png,
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/logo.png"
+            ))
+            .to_vec(),
+        ))
+    })
+    .clone()
 }
 
 fn search_signal(
