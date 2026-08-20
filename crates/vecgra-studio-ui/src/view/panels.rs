@@ -320,8 +320,8 @@ impl StudioView {
                                 .child(
                                     h_flex()
                                         .flex_1()
-                                        .w_full()
-                                        .gap_2()
+                                        .min_w_0()
+                                        .gap_1()
                                         .items_center()
                                         .child(
                                             div()
@@ -342,13 +342,17 @@ impl StudioView {
                                                     .child("LENS"),
                                             )
                                         })
-                                        .child(
-                                            div()
-                                                .font_family(cx.theme().mono_font_family.clone())
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(format_count(*count)),
-                                        ),
+                                        .when(!active, |this| {
+                                            this.child(
+                                                div()
+                                                    .font_family(
+                                                        cx.theme().mono_font_family.clone(),
+                                                    )
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(format_count(*count)),
+                                            )
+                                        }),
                                 )
                         })),
                 )
@@ -386,7 +390,7 @@ impl StudioView {
                                 .child(
                                     h_flex()
                                         .flex_1()
-                                        .w_full()
+                                        .min_w_0()
                                         .items_center()
                                         .child(div().flex_1())
                                         .when(active, |this| {
@@ -402,13 +406,17 @@ impl StudioView {
                                                     .child("LENS"),
                                             )
                                         })
-                                        .child(
-                                            div()
-                                                .font_family(cx.theme().mono_font_family.clone())
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(format_count(*count)),
-                                        ),
+                                        .when(!active, |this| {
+                                            this.child(
+                                                div()
+                                                    .font_family(
+                                                        cx.theme().mono_font_family.clone(),
+                                                    )
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(format_count(*count)),
+                                            )
+                                        }),
                                 )
                         })),
                 )
