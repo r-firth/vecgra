@@ -41,7 +41,9 @@ use panels::visible_facet_counts;
 use crate::graph_canvas::{
     GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, graph_canvas,
 };
-use crate::graph_navigator::{graph_navigator, navigator_world_position};
+use crate::graph_navigator::{
+    GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
+};
 use crate::theme::{palette, relationship_color};
 
 actions!(
@@ -260,6 +262,7 @@ pub struct StudioView {
     state: LoadState,
     database_path: Option<PathBuf>,
     workspace: Option<Rc<RefCell<GraphWorkspace>>>,
+    graph_navigator_cache: Rc<RefCell<GraphNavigatorCache>>,
     node_label_counts: Arc<[(Arc<str>, usize)]>,
     relationship_counts: Arc<[(Arc<str>, usize)]>,
     camera: Camera,
@@ -349,6 +352,7 @@ impl StudioView {
             state,
             database_path: path.clone(),
             workspace,
+            graph_navigator_cache: Rc::new(RefCell::new(GraphNavigatorCache::default())),
             node_label_counts,
             relationship_counts,
             camera: Camera::default(),
@@ -533,6 +537,7 @@ impl StudioView {
                         this.world_bounds = snapshot.bounds;
                         this.workspace =
                             Some(Rc::new(RefCell::new(GraphWorkspace::new(&snapshot))));
+                        this.graph_navigator_cache.borrow_mut().clear();
                         this.node_label_counts = Arc::from(snapshot.label_counts());
                         this.relationship_counts = Arc::from(snapshot.relationship_counts());
                         this.selection = None;

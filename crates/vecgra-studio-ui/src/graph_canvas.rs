@@ -7,6 +7,9 @@ use gpui::{
     App, Bounds, FontWeight, Hsla, IntoElement, PaintQuad, Path, PathBuilder, Pixels, Point,
     SharedString, Styled, TextAlign, TextRun, Window, canvas, fill, point, px, quad, rgb, size,
 };
+use lyon_geom::{
+    Line, Point as LyonPoint, Vector as LyonVector, point as lyon_point, vector as lyon_vector,
+};
 use vecgra_studio_core::{
     Camera, DetailLevel, GraphWorkspace, Rect, SceneSelection, SceneSnapshot, Vec2, detail_level,
 };
@@ -37,6 +40,149 @@ struct PaintNode {
 struct PaintPath {
     path: Path<Pixels>,
     color: Hsla,
+}
+
+/// A specialised tessellator for the canvas's disconnected straight strokes.
+/// GPUI's general PathBuilder delegates to Lyon; for this common case Lyon
+/// emits the same two triangles per segment, with butt caps and no joins.
+struct LinePathBuilder {
+    path: Option<Path<Pixels>>,
+    half_width: f32,
+    square_merge_threshold: f32,
+}
+
+impl LinePathBuilder {
+    fn stroke(width: Pixels) -> Self {
+        let width = f32::from(width);
+        Self {
+            path: None,
+            half_width: width * 0.5,
+            square_merge_threshold: (0.1_f32 * 0.1 * 0.5).min(width * width * 0.05).max(1e-8),
+        }
+    }
+
+    fn segment(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
+        let lyon_from = lyon_point(f32::from(from.x), f32::from(from.y));
+        let lyon_to = lyon_point(f32::from(to.x), f32::from(to.y));
+        let edge = lyon_to - lyon_from;
+        let square_length = edge.square_length();
+        if square_length < self.square_merge_threshold || !square_length.is_finite() {
+            return;
+        }
+        let length = square_length.sqrt();
+        // Match Lyon's fixed-width fast path exactly. It derives both side
+        // attachments from a normalized tangent; butt caps then intersect the
+        // side lines in f64 before converting back to f32.
+        let tangent = edge / length;
+        let normal = lyon_vector(-tangent.y, tangent.x) * self.half_width;
+        let from_positive = lyon_from + normal;
+        let from_negative = lyon_from - normal;
+        let to_positive = lyon_to + normal;
+        let to_negative = lyon_to - normal;
+        let start_normal = (lyon_from - lyon_to).normalize();
+        let end_normal = (lyon_to - lyon_from).normalize();
+        let start_cap_vector = lyon_vector(-start_normal.y, start_normal.x);
+        let end_cap_vector = lyon_vector(-end_normal.y, end_normal.x);
+        let capped_from_positive = line_intersection_f64(
+            lyon_from + start_normal * 0.0,
+            start_cap_vector,
+            from_positive,
+            from_positive - to_positive,
+        )
+        .unwrap_or(from_positive);
+        let capped_from_negative = line_intersection_f64(
+            lyon_from + start_normal * 0.0,
+            start_cap_vector,
+            from_negative,
+            from_negative - to_negative,
+        )
+        .unwrap_or(from_negative);
+        let capped_to_positive = line_intersection_f64(
+            lyon_to + end_normal * 0.0,
+            end_cap_vector,
+            to_positive,
+            to_positive - from_positive,
+        )
+        .unwrap_or(to_positive);
+        let capped_to_negative = line_intersection_f64(
+            lyon_to + end_normal * 0.0,
+            end_cap_vector,
+            to_negative,
+            to_negative - from_negative,
+        )
+        .unwrap_or(to_negative);
+        let capped_from_positive = gpui_point(stroke_vertex_position(
+            lyon_from,
+            capped_from_positive,
+            self.half_width,
+        ));
+        let capped_from_negative = gpui_point(stroke_vertex_position(
+            lyon_from,
+            capped_from_negative,
+            self.half_width,
+        ));
+        let capped_to_positive = gpui_point(stroke_vertex_position(
+            lyon_to,
+            capped_to_positive,
+            self.half_width,
+        ));
+        let capped_to_negative = gpui_point(stroke_vertex_position(
+            lyon_to,
+            capped_to_negative,
+            self.half_width,
+        ));
+        let path = self
+            .path
+            .get_or_insert_with(|| Path::new(capped_from_negative));
+        path.push_triangle(
+            (
+                capped_from_negative,
+                capped_from_positive,
+                capped_to_positive,
+            ),
+            (point(0.0, 1.0), point(0.0, 1.0), point(0.0, 1.0)),
+        );
+        path.push_triangle(
+            (capped_from_negative, capped_to_positive, capped_to_negative),
+            (point(0.0, 1.0), point(0.0, 1.0), point(0.0, 1.0)),
+        );
+    }
+
+    fn build(self) -> Option<Path<Pixels>> {
+        self.path
+    }
+}
+
+fn gpui_point(value: lyon_geom::Point<f32>) -> Point<Pixels> {
+    point(px(value.x), px(value.y))
+}
+
+fn stroke_vertex_position(
+    position_on_path: LyonPoint<f32>,
+    side_position: LyonPoint<f32>,
+    half_width: f32,
+) -> LyonPoint<f32> {
+    let normal = (side_position - position_on_path) / half_width;
+    position_on_path + normal * half_width
+}
+
+fn line_intersection_f64(
+    line_point: LyonPoint<f32>,
+    line_vector: LyonVector<f32>,
+    other_point: LyonPoint<f32>,
+    other_vector: LyonVector<f32>,
+) -> Option<LyonPoint<f32>> {
+    let line = Line {
+        point: line_point,
+        vector: line_vector,
+    };
+    let other = Line {
+        point: other_point,
+        vector: other_vector,
+    };
+    line.to_f64()
+        .intersection(&other.to_f64())
+        .map(|intersection| intersection.to_f32())
 }
 
 struct PaintArrow {
@@ -196,8 +342,8 @@ fn prepare_scene(
             } else {
                 0.74
             };
-            let mut builders: [PathBuilder; RELATIONSHIP_COLOR_COUNT] =
-                std::array::from_fn(|_| PathBuilder::stroke(px(width)));
+            let mut builders: [LinePathBuilder; RELATIONSHIP_COLOR_COUNT] =
+                std::array::from_fn(|_| LinePathBuilder::stroke(px(width)));
             let mut segment_counts = [0_usize; RELATIONSHIP_COLOR_COUNT];
             for edge_index in (start..end).step_by(edge_stride) {
                 let source = snapshot.edges.sources[edge_index] as usize;
@@ -219,8 +365,8 @@ fn prepare_scene(
                     continue;
                 }
                 let color_index = relationship_color_index(&snapshot.edges.labels[edge_index]);
-                builders[color_index].move_to(absolute_point(bounds, from));
-                builders[color_index].line_to(absolute_point(bounds, to));
+                builders[color_index]
+                    .segment(absolute_point(bounds, from), absolute_point(bounds, to));
                 segment_counts[color_index] += 1;
 
                 let length_squared = (to - from).length_squared();
@@ -245,7 +391,7 @@ fn prepare_scene(
                 builders.into_iter().zip(segment_counts).enumerate()
             {
                 if segments > 0
-                    && let Ok(path) = builder.build()
+                    && let Some(path) = builder.build()
                 {
                     let lens_dim = emphasis.map_or(0.0, |lens| lens.dim);
                     edge_paths.push(PaintPath {
@@ -278,10 +424,9 @@ fn prepare_scene(
             }
             let label = &snapshot.edges.labels[edge_index];
             let color = relationship_color(label).opacity(0.42 + score * 0.58);
-            let mut builder = PathBuilder::stroke(px(1.2 + score * 1.5));
-            builder.move_to(absolute_point(bounds, from));
-            builder.line_to(absolute_point(bounds, to));
-            if let Ok(path) = builder.build() {
+            let mut builder = LinePathBuilder::stroke(px(1.2 + score * 1.5));
+            builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
+            if let Some(path) = builder.build() {
                 emphasis_edge_paths.push(PaintPath { path, color });
             }
             if arrows.len() < LOCAL_ARROW_BUDGET
@@ -314,8 +459,8 @@ fn prepare_scene(
     if let Some(node_index) = selected_node
         && emphasis.is_none_or(|lens| lens.dim < 0.35)
     {
-        let mut builders: [PathBuilder; RELATIONSHIP_COLOR_COUNT] =
-            std::array::from_fn(|_| PathBuilder::stroke(px(1.65)));
+        let mut builders: [LinePathBuilder; RELATIONSHIP_COLOR_COUNT] =
+            std::array::from_fn(|_| LinePathBuilder::stroke(px(1.65)));
         let mut segment_counts = [0_usize; RELATIONSHIP_COLOR_COUNT];
         for edge_index in 0..snapshot.edges.ids.len() {
             let source = snapshot.edges.sources[edge_index] as usize;
@@ -330,8 +475,7 @@ fn prepare_scene(
             }
             let label = &snapshot.edges.labels[edge_index];
             let color_index = relationship_color_index(label);
-            builders[color_index].move_to(absolute_point(bounds, from));
-            builders[color_index].line_to(absolute_point(bounds, to));
+            builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
             segment_counts[color_index] += 1;
             if arrows.len() < LOCAL_ARROW_BUDGET
                 && let Some(path) = arrowhead(bounds, from, to)
@@ -357,7 +501,7 @@ fn prepare_scene(
             builders.into_iter().zip(segment_counts).enumerate()
         {
             if segments > 0
-                && let Ok(path) = builder.build()
+                && let Some(path) = builder.build()
             {
                 incident_edge_paths.push(PaintPath {
                     path,
@@ -374,9 +518,8 @@ fn prepare_scene(
         let to = projected[target];
         let label = &snapshot.edges.labels[edge_index];
         let color = relationship_color(label);
-        let mut builder = PathBuilder::stroke(px(2.5));
-        builder.move_to(absolute_point(bounds, from));
-        builder.line_to(absolute_point(bounds, to));
+        let mut builder = LinePathBuilder::stroke(px(2.5));
+        builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
         if let Some(path) = arrowhead(bounds, from, to) {
             arrows.push(PaintArrow {
                 path,
@@ -391,7 +534,7 @@ fn prepare_scene(
             color,
             true,
         );
-        builder.build().ok().map(|path| PaintPath { path, color })
+        builder.build().map(|path| PaintPath { path, color })
     });
 
     if level != DetailLevel::Overview {
@@ -828,5 +971,70 @@ pub(crate) fn label_color(label: &str) -> Hsla {
         2 => colors.celadon,
         3 => rgb(0x9b8cf2).into(),
         _ => rgb(0xd6c56b).into(),
+    }
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::*;
+
+    #[test]
+    fn straight_line_builder_matches_lyon_vertices_bit_for_bit() {
+        let mut segments = vec![
+            (point(px(10.0), px(20.0)), point(px(110.0), px(70.0))),
+            (point(px(-33.25), px(400.5)), point(px(912.75), px(-8.0))),
+            (point(px(81.0), px(17.0)), point(px(81.0), px(617.0))),
+            (
+                point(px(516.249_76), px(415.681_4)),
+                point(px(0.439_453_13), px(1_959.137)),
+            ),
+            (point(px(2.0), px(3.0)), point(px(2.001), px(3.001))),
+        ];
+        let mut state = 0x5645_4347_5241_4c49_u64;
+        let mut sample = || {
+            state = state
+                .wrapping_add(0x9e37_79b9_7f4a_7c15)
+                .wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            ((state >> 32) as u32 as f32 / u32::MAX as f32) * 4_000.0 - 2_000.0
+        };
+        for _ in 0..4_000 {
+            let from = point(px(sample()), px(sample()));
+            let mut to = point(px(sample()), px(sample()));
+            if to == from {
+                to.x += px(0.25);
+            }
+            segments.push((from, to));
+        }
+        for width in [0.74, 0.95, 1.2, 1.65, 2.5] {
+            let mut lyon = PathBuilder::stroke(px(width));
+            let mut direct = LinePathBuilder::stroke(px(width));
+            for &(from, to) in &segments {
+                lyon.move_to(from);
+                lyon.line_to(to);
+                direct.segment(from, to);
+            }
+            let lyon = lyon.build().unwrap();
+            let direct = direct.build().unwrap();
+            assert_eq!(direct.vertices.len(), lyon.vertices.len());
+            for (vertex_index, (direct, lyon)) in
+                direct.vertices.iter().zip(&lyon.vertices).enumerate()
+            {
+                let (from, to) = segments[vertex_index / 6];
+                assert_eq!(
+                    f32::from(direct.xy_position.x).to_bits(),
+                    f32::from(lyon.xy_position.x).to_bits(),
+                    "width {width}, vertex {vertex_index}, segment {from:?}->{to:?}, x: direct {}, lyon {}",
+                    f32::from(direct.xy_position.x),
+                    f32::from(lyon.xy_position.x),
+                );
+                assert_eq!(
+                    f32::from(direct.xy_position.y).to_bits(),
+                    f32::from(lyon.xy_position.y).to_bits(),
+                    "width {width}, vertex {vertex_index}, segment {from:?}->{to:?}, y: direct {}, lyon {}",
+                    f32::from(direct.xy_position.y),
+                    f32::from(lyon.xy_position.y),
+                );
+            }
+        }
     }
 }

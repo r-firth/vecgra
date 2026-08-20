@@ -401,6 +401,25 @@ fn workspace_drag_is_direct_pinned_and_degree_bounded() {
 }
 
 #[test]
+fn workspace_position_revision_tracks_only_presented_coordinate_changes() {
+    let snapshot = SceneSnapshot::demo();
+    let mut workspace = GraphWorkspace::new(&snapshot);
+    let initial_revision = workspace.position_revision();
+
+    workspace.set_pinned(3, true);
+    assert_eq!(workspace.position_revision(), initial_revision);
+
+    workspace.drag_to(3, Vec2::new(120.0, -45.0), 48.0);
+    let dragged_revision = workspace.position_revision();
+    assert_ne!(dragged_revision, initial_revision);
+
+    workspace.restore_pin(3, false);
+    assert_eq!(workspace.position_revision(), dragged_revision);
+    workspace.step(1.0 / 60.0, true);
+    assert_ne!(workspace.position_revision(), dragged_revision);
+}
+
+#[test]
 fn focus_neighborhood_retargets_and_restores_the_base_layout() {
     let snapshot = SceneSnapshot::demo();
     let selection = SceneSelection::Node(7);

@@ -1464,11 +1464,14 @@ impl StudioView {
                         graph_navigator(
                             snapshot,
                             workspace,
-                            self.camera,
-                            self.world_bounds,
-                            main_viewport,
-                            self.selection,
-                            self.lens.as_ref().map(LensTransition::emphasis),
+                            self.graph_navigator_cache.clone(),
+                            GraphNavigatorPresentation {
+                                camera: self.camera,
+                                world_bounds: self.world_bounds,
+                                main_viewport,
+                                selection: self.selection,
+                                emphasis: self.lens.as_ref().map(LensTransition::emphasis),
+                            },
                         )
                         .into_any_element()
                     })

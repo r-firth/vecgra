@@ -538,6 +538,7 @@ impl LayoutUnionFind {
 #[derive(Debug)]
 pub struct GraphWorkspace {
     positions: Vec<Vec2>,
+    position_revision: u64,
     base_targets: Vec<Vec2>,
     targets: Vec<Vec2>,
     pub(crate) velocities: Vec<Vec2>,
@@ -570,12 +571,20 @@ impl GraphWorkspace {
             pinned: vec![false; positions.len()],
             adjacency,
             positions,
+            position_revision: 0,
             moving: false,
         }
     }
 
     pub fn positions(&self) -> &[Vec2] {
         &self.positions
+    }
+
+    /// Monotonically identifies the currently presented node coordinates.
+    /// Renderers can use this to retain camera-independent presentation data
+    /// without coupling caches to layout implementation details.
+    pub fn position_revision(&self) -> u64 {
+        self.position_revision
     }
 
     /// Stable overview targets, excluding temporary search/context layouts.
@@ -622,6 +631,7 @@ impl GraphWorkspace {
             return;
         }
         self.positions[index] = position;
+        self.position_revision = self.position_revision.wrapping_add(1);
         self.targets[index] = position;
         self.velocities[index] = Vec2::ZERO;
 
@@ -870,6 +880,7 @@ impl GraphWorkspace {
                 }
                 self.velocities[index] = Vec2::ZERO;
             }
+            self.position_revision = self.position_revision.wrapping_add(1);
             self.moving = false;
             return false;
         }
@@ -894,6 +905,7 @@ impl GraphWorkspace {
                 self.positions[index] += self.velocities[index] * dt;
             }
         }
+        self.position_revision = self.position_revision.wrapping_add(1);
 
         let mut moving = false;
         for index in 0..self.positions.len() {

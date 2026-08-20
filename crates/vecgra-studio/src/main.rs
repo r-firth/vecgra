@@ -203,7 +203,16 @@ fn finish_visual_state(
 
 #[cfg(feature = "visual-test")]
 fn capture_frame(window: &mut Window, cx: &mut App, capture_path: PathBuf) {
-    let arena = window.draw(cx);
+    let redraws = std::env::var("VECGRA_STUDIO_CAPTURE_REDRAWS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 120);
+    let mut arena = window.draw(cx);
+    for _ in 1..redraws {
+        arena.clear(cx);
+        arena = window.draw(cx);
+    }
     match window.render_to_image() {
         Ok(image) => image
             .save(&capture_path)
