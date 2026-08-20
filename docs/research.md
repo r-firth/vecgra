@@ -31,7 +31,7 @@ cross at roughly 12M floats for 512+-D vectors and 32M for narrower vectors.
 Correlation and partition locality are the missing inputs to that policy.
 
 [Filtered Approximate Nearest Neighbor Search in Vector Databases
-(2026)](https://arxiv.org/abs/2602.11443) introduces the MoReVec corpus, which
+(2026)](https://arxiv.org/abs/2602.11443) introduces the MoReVec dataset, which
 couples 768-dimensional text embeddings to real scalar
 filters, and its Global-Local Selectivity metric distinguishes global predicate
 cardinality from the predicate density near a query. Its experiments also find
@@ -80,7 +80,7 @@ Vecgra, that means a fast mapped scan, frontier, and pull API. Algorithms and
 hybrid retrieval plans should compose from those operations rather than require
 a separate analytics export.
 
-The official Graphalytics wiki-Talk corpus exercises three physical access
+The official Graphalytics wiki-Talk dataset exercises three physical access
 patterns against complete supplied outputs: directed frontier
 BFS, undirected WCC, and iterative incoming-pull PageRank with dangling-mass
 redistribution. Semantic candidate sets use the same machinery as graph
@@ -100,9 +100,10 @@ matter as much as the ANN graph.
 Vecgra v6 uses a simpler measured first tier: two
 structured randomized Hadamard rotations followed by up to a 512-bit sign
 sketch (earlier 256-bit v5 files remain readable).
-The sketch is scanned sequentially. On one-vector corpora, a query-only
-confidence mask gives above-mean rotated coordinates twice the mismatch weight;
-source F16/F32 vectors are then reranked exactly. This asymmetric score raised
+The sketch is scanned sequentially. On datasets with one vector per element, a
+query-only confidence mask gives above-mean rotated coordinates twice the
+mismatch weight; source F16/F32 vectors are then reranked exactly. This
+asymmetric score raised
 official VIBE recall from 0.9938 at 20k reranks to 0.9967 at only 12k while
 reducing p50 from 5.963 to 5.419 ms, with no format or file-size change. It is
 not presented as RaBitQ and has no equivalent theoretical error bound; exact

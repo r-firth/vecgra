@@ -81,7 +81,7 @@ def main() -> None:
     train_seconds = time.perf_counter() - started
 
     # Add in bounded blocks: this matches the intended second pass over a
-    # vector spool and avoids owning a normalized copy of the full corpus.
+    # vector spool and avoids owning a normalized copy of the full dataset.
     started = time.perf_counter()
     block_rows = 25_000
     for start in range(0, len(train), block_rows):

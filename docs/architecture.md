@@ -133,7 +133,7 @@ before materialization.
 
 For one-vector-per-element, unfiltered search ranks the signature stream
 without touching owner columns until the bounded winners are known. On the
-million-vector VIBE corpus this simultaneously lowered stats-only private
+million-vector VIBE dataset this simultaneously lowered stats-only private
 footprint from 15.8 MB to 2.7 MB and improved ANN latency.
 
 ## Vector tiers
@@ -316,7 +316,7 @@ At finalization, fixed records, CSR columns, property postings, sketch owner
 columns, and the already-built signature rows stream through a 1 MiB writer
 directly into the new destination; CRC32C is accumulated during that one pass,
 then vectors are copied and the header is patched and synced. A failed partial
-destination is removed. On the million-vector VIBE corpus this keeps peak build
+destination is removed. On the million-vector VIBE dataset this keeps peak build
 RSS to about 203 MB on the million-vector VIBE build. The v8 writer adds the
 ordered numeric section without changing the streamed vector/sketch path.
 

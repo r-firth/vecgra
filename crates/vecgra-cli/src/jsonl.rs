@@ -117,7 +117,7 @@ pub(crate) fn import_jsonl(
 }
 
 /// Streams one fbin vector and one JSON metadata record into each node. This
-/// keeps vector corpora in their ordinary ANN interchange format while still
+/// keeps vector datasets in their standard ANN interchange format while still
 /// preserving a typed property graph schema. Blank metadata lines are ignored.
 pub(crate) fn import_node_fbin(
     vectors_path: &Path,

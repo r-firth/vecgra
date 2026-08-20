@@ -5,9 +5,9 @@ claims. They were collected on the same Apple Silicon development machine with
 the Rust release profile (`thin` LTO, one codegen unit). Files were generally in
 the OS cache unless a result explicitly says otherwise.
 
-## Real graph corpora
+## Real graph datasets
 
-The corpus is a shallow checkout of `BurntSushi/ripgrep`. The original Qwen
+The dataset is a shallow checkout of `BurntSushi/ripgrep`. The original Qwen
 build uses one vector on every node and edge:
 
 | Item | Count |
@@ -88,7 +88,7 @@ an exact overlay scan. The unique-value number is a hot repeated lookup, not a
 cold storage latency claim.
 
 The 100-query approximate result uses deterministic 85/15 mixtures of stored
-Qwen vectors, with the exact engine as ground truth. It is a regression corpus,
+Qwen vectors, with the exact engine as ground truth. It is a regression dataset,
 not a substitute for an external query distribution or ANN-Benchmarks. A 10k
 budget measured 3.7 ms p50 but only 0.90 mean recall@10, which is why latency is
 never reported without recall and why the adaptive planner uses a larger budget.
@@ -159,7 +159,7 @@ target/release/vecgra plan-search graph.vg both
 Vector recall is always reported against the exact engine; a latency number
 without recall is not accepted as an optimization.
 
-## External held-out vector corpora
+## External held-out vector datasets
 
 ### Partition-tier design probes (not shipped paths)
 
@@ -202,7 +202,7 @@ writer took 5.15 s and about 537 MB: direct buffered record serialization plus
 streaming the already-built sketch signatures cut construction memory by about
 62% without changing a byte of the resulting vector representation.
 Both are about 13 MB larger than v5 because owner/kind/label columns are durable
-and directly mapped; v7 adds only 272 bytes on this property-free corpus.
+and directly mapped; v7 adds only 272 bytes on this property-free dataset.
 
 On all 1,000 held-out queries at `k=10` and 12,000 exact reranks:
 
@@ -254,7 +254,7 @@ clean and OS-reclaimable. F16 remains the better default: it is smaller and its
 sparse rerank is faster; F32 mapping is useful when exact latency matters and
 an 800 MB owned cache is undesirable.
 
-The same corpus now exercises graph-derived candidate sets. IDs divisible by
+The same dataset now exercises graph-derived candidate sets. IDs divisible by
 the filter stride form a deterministic compressed prefilter; recall is measured
 against exact search within that set, never against unfiltered truth.
 
@@ -353,7 +353,7 @@ result, while Vecgra fed an ordered metadata range into its exact or ANN choice.
 
 ### ANN-Benchmarks COCO text-to-image
 
-The COCO-I2I/T2I angular corpus distributed by ANN-Benchmarks supplies 113,287
+The COCO-I2I/T2I angular dataset distributed by ANN-Benchmarks supplies 113,287
 image vectors, 10,000 held-out text-query vectors, dimension 512, and official
 top-100 neighbors. This distribution exposed a weakness that the derived Qwen
 queries did not: the original 256-bit sketch reached only 0.683 / 0.812 / 0.897
@@ -373,7 +373,7 @@ difference from the supplied F32 ground truth is quantization/normalization.
 The query-confidence score improves every measured budget and makes approximate
 search faster than exact even at 30k candidates. Adaptive search nevertheless
 remains exact through roughly 64 million scalar comparisons (about 131k vectors
-at 512 dimensions or 262k at 256 dimensions), because this 113k-row corpus can
+at 512 dimensions or 262k at 256 dimensions), because this 113k-row dataset can
 still return the exact engine's higher 0.993 official recall cheaply. Callers
 who knowingly accept a lower recall target can request an explicit approximate
 budget. The unchanged 512-bit direct build took 1.23 s and about 62 MiB peak RSS
@@ -389,7 +389,7 @@ target/release/vecgra bench-fbin /tmp/coco.vg /tmp/coco.test.fbin \
   /tmp/coco.neighbors.ibin 200 5000 10
 ```
 
-## Official Graphalytics traversal corpus
+## Official Graphalytics traversal dataset
 
 The [LDBC Graphalytics wiki-Talk
 dataset](https://ldbcouncil.org/benchmarks/graphalytics/datasets/) contains
@@ -669,7 +669,7 @@ measured about 3.3x faster and used about 3.3x less disk, excluding Neo4j's
 transaction logs. The first Community run overstated both margins because it
 stored vectors as lists. `neo4j-admin` and GDS also reduce the import and BFS
 margins to roughly 2--3x for import and 1.26x against four-thread GDS. Neo4j
-uses less disk for the graph-only corpus.
+uses less disk for the graph-only dataset.
 
 The measured design case is narrow. Sequential binary coarse search plus exact
 rerank works at one million vectors, typed postings belong inside the vector

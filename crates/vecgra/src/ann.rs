@@ -344,7 +344,7 @@ impl BinarySketchIndex {
             && target_covers_all_owners
             && self.element_count == owners.len()
         {
-            // Common one-vector-per-element corpora need only the sequential
+            // Datasets with one vector per element need only the sequential
             // signature stream during coarse ranking. Distances are bounded
             // by 1024, so a tiny histogram finds the exact budget cutoff. This
             // stores two bytes per row and avoids partially sorting an

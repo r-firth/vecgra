@@ -33,7 +33,7 @@ CLI do not depend on the desktop stack.
   latency. A faster approximate result with unreported quality is a regression.
 - Keep refactors behavior-preserving and separate from feature changes where
   practical.
-- Do not commit API keys, benchmark corpora, generated databases, or local
+- Do not commit API keys, benchmark datasets, generated databases, or local
   provider caches.
 
 Database parsing also has a libFuzzer target. With nightly Rust and
@@ -42,7 +42,7 @@ fixed crash into a stable regression test. See [`fuzz/README.md`](fuzz/README.md
 
 When a change affects the on-disk container, update `docs/architecture.md` and
 add reopen, corruption, or torn-write coverage as appropriate. When it affects
-a published benchmark, include the exact corpus, command, hardware, build
+a published benchmark, include the exact dataset, command, hardware, build
 profile, latency distribution, and quality measurement.
 
 ## Pull requests

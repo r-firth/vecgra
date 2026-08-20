@@ -1,7 +1,7 @@
 # Neo4j comparison
 
 This directory contains two reproducible Neo4j baselines for Vecgra's
-public benchmark corpora:
+public benchmark datasets:
 
 - a same-process Neo4j Community 2026.06 baseline with no
   Bolt and client serialization; and
@@ -45,9 +45,10 @@ $NEO4J_BENCH bench-fbin /tmp/neo4j-morevec morevec/query-6.fbin \
   morevec/truth-6.ibin 500 10 8.1 50
 ```
 
-Every result includes recall against the corpus truth, the filter cardinality,
-warm open time, p50/p95/max latency, and recursive store size. One transaction
-is opened per measured vector query, matching ordinary embedded Neo4j usage.
+Every result includes recall against the supplied ground truth, the filter
+cardinality, warm open time, p50/p95/max latency, and recursive store size. One
+transaction is opened per measured vector query, matching ordinary embedded
+Neo4j usage.
 
 ## Graphalytics BFS
 

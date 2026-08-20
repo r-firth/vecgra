@@ -11,6 +11,6 @@ cargo install cargo-fuzz --locked
 cargo +nightly fuzz run database_file
 ```
 
-Keep generated corpora and crash artifacts local. A minimized crashing input
+Keep generated fuzz inputs and crash artifacts local. A minimized crashing input
 should become a deterministic regression test in `crates/vecgra/tests` before
 the fix is merged.

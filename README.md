@@ -177,7 +177,7 @@ native filtered search, and 1.26× faster on BFS than four-thread GDS. Its
 vector-bearing files were 3.3–3.4× smaller; Neo4j's pure graph store was 28%
 smaller.
 
-Those are development-machine measurements, not universal claims. Corpus
+Those are development-machine measurements, not universal claims. Dataset
 details, exact configurations, recall methodology, memory policy, and caveats
 are in [the reproducible benchmark notes](docs/benchmarks.md). A latency number
 without recall is not accepted as an optimization.
