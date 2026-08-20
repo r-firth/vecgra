@@ -525,6 +525,10 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(cx.debug_bounds("bezel-graph-controls").is_none());
     assert!(cx.debug_bounds("bezel-search-modes").is_some());
     assert!(cx.debug_bounds("bezel-layout-modes").is_some());
+    assert_eq!(
+        cx.debug_bounds("bezel-search-modes").unwrap().center().y,
+        cx.debug_bounds("bezel-layout-modes").unwrap().center().y
+    );
 
     let semantic = cx
         .debug_bounds("bezel-search-semantic")
@@ -552,6 +556,37 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(cx.debug_bounds("bezel-graph-controls").is_some());
     assert!(cx.debug_bounds("bezel-layout-modes").is_none());
     assert!(cx.debug_bounds("bezel-sidebar-tabs").is_some());
+
+    let search = cx
+        .debug_bounds("wide-search-field")
+        .expect("wide search field should render");
+    let canvas = cx
+        .debug_bounds("graph-canvas")
+        .expect("graph canvas should render");
+    assert_eq!(search.left(), canvas.left());
+    assert_eq!(
+        search.center().y,
+        cx.debug_bounds("bezel-search-modes")
+            .expect("wide search modes should render")
+            .center()
+            .y
+    );
+
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.execute_command("text graph", window, cx);
+        });
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let detailed_search = cx
+        .debug_bounds("wide-search-field")
+        .expect("wide search field should remain visible for search results");
+    let detailed_canvas = cx
+        .debug_bounds("graph-canvas")
+        .expect("graph canvas should remain visible for search results");
+    assert_eq!(detailed_search.left(), detailed_canvas.left());
 
     let zoom_before = cx.read(|cx| view.read(cx).camera.zoom);
     let zoom_in = cx

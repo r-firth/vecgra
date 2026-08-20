@@ -1,13 +1,22 @@
 use super::*;
 
+#[cfg(target_os = "macos")]
+const TITLE_BAR_PLATFORM_INSET: f32 = 80.0;
+#[cfg(not(target_os = "macos"))]
+const TITLE_BAR_PLATFORM_INSET: f32 = 12.0;
+const TOOLBAR_GAP: f32 = 8.0;
+const OVERVIEW_SIDEBAR_WIDTH: f32 = 218.0;
+const DETAIL_SIDEBAR_WIDTH: f32 = 306.0;
+
 impl StudioView {
     pub(super) fn render_brand(
         &self,
         database_name: SharedString,
+        width: f32,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         h_flex()
-            .w(px(166.0))
+            .w(px(width))
             .flex_shrink_0()
             .gap_2()
             .items_center()
@@ -26,7 +35,8 @@ impl StudioView {
             )
             .child(
                 v_flex()
-                    .w(px(132.0))
+                    .flex_1()
+                    .min_w_0()
                     .overflow_hidden()
                     .line_height(px(15.0))
                     .child(
@@ -51,22 +61,27 @@ impl StudioView {
             LoadState::Loading { name } => name.clone(),
             LoadState::Failed(_) => "No database".into(),
         };
+        let brand_width =
+            (self.left_panel_width() - TITLE_BAR_PLATFORM_INSET - TOOLBAR_GAP).max(120.0);
         if compact {
             return TitleBar::new()
+                .pl_0()
                 .h(px(88.0))
                 .child(
                     v_flex()
                         .size_full()
-                        .pr_3()
                         .child(
                             h_flex()
                                 .debug_selector(|| "compact-toolbar-primary".into())
                                 .h(px(48.0))
+                                .pl(px(TITLE_BAR_PLATFORM_INSET))
+                                .pr_3()
                                 .gap_2()
                                 .items_center()
-                                .child(self.render_brand(database_name, cx))
+                                .child(self.render_brand(database_name, brand_width, cx))
                                 .child(
                                     div()
+                                        .debug_selector(|| "compact-search-field".into())
                                         .flex_1()
                                         .min_w(px(180.0))
                                         .child(Input::new(&self.query_input).small()),
@@ -77,7 +92,7 @@ impl StudioView {
                             h_flex()
                                 .debug_selector(|| "compact-toolbar-secondary".into())
                                 .h(px(40.0))
-                                .pl_2()
+                                .px_3()
                                 .gap_2()
                                 .items_center()
                                 .border_t_1()
@@ -90,17 +105,20 @@ impl StudioView {
                 .into_any_element();
         }
         TitleBar::new()
+            .pl_0()
             .h(px(52.0))
             .child(
                 h_flex()
                     .debug_selector(|| "wide-toolbar".into())
                     .size_full()
+                    .pl(px(TITLE_BAR_PLATFORM_INSET))
                     .pr_3()
                     .gap_2()
                     .items_center()
-                    .child(self.render_brand(database_name, cx))
+                    .child(self.render_brand(database_name, brand_width, cx))
                     .child(
                         div()
+                            .debug_selector(|| "wide-search-field".into())
                             .flex_1()
                             .min_w(px(180.0))
                             .max_w(px(620.0))
@@ -130,11 +148,8 @@ impl StudioView {
         let showing_context = self.context_focus_active && !showing_search && !showing_path;
         let showing_facet = self.active_facet.is_some() && !showing_search && !showing_path;
         v_flex()
-            .w(if showing_search || showing_path {
-                px(306.0)
-            } else {
-                px(218.0)
-            })
+            .debug_selector(|| "left-panel".into())
+            .w(px(self.left_panel_width()))
             .h_full()
             .flex_shrink_0()
             .border_r_1()
@@ -169,7 +184,7 @@ impl StudioView {
                         .id("relationship-facets")
                         .role(Role::List)
                         .aria_label("Relationship type facets")
-                        .px_2()
+                        .px(px(10.0))
                         .children(relationship_facets.iter().map(|(label, count)| {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::Relationship(label.clone()));
@@ -239,7 +254,7 @@ impl StudioView {
                         .id("node-label-facets")
                         .role(Role::List)
                         .aria_label("Node label facets")
-                        .px_2()
+                        .px(px(10.0))
                         .children(node_label_facets.iter().map(|(label, count)| {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::NodeLabel(label.clone()));
@@ -294,6 +309,16 @@ impl StudioView {
                         })),
                 )
             })
+    }
+
+    fn left_panel_width(&self) -> f32 {
+        if matches!(self.search_state, SearchState::Idle)
+            && matches!(self.path_state, PathState::Idle)
+        {
+            OVERVIEW_SIDEBAR_WIDTH
+        } else {
+            DETAIL_SIDEBAR_WIDTH
+        }
     }
 
     pub(super) fn render_evidence_path(&self, cx: &Context<Self>) -> gpui::AnyElement {
@@ -1087,7 +1112,7 @@ impl StudioView {
 
     pub(super) fn render_inspector(&self, cx: &Context<Self>) -> impl IntoElement {
         let colors = palette();
-        let header = section_label("INSPECTOR");
+        let header = inspector_header_label("INSPECTOR");
         let content = match (self.snapshot(), self.selection) {
             (Some(snapshot), Some(SceneSelection::Node(index))) => {
                 let properties = snapshot.nodes.properties[index].clone();
@@ -1343,6 +1368,7 @@ impl StudioView {
                 .into_any_element(),
         };
         v_flex()
+            .debug_selector(|| "inspector-panel".into())
             .w(px(296.0))
             .h_full()
             .flex_shrink_0()
@@ -1414,6 +1440,7 @@ impl StudioView {
         };
         div()
             .id("graph-canvas")
+            .debug_selector(|| "graph-canvas".into())
             .role(Role::Group)
             .aria_label("Interactive graph canvas")
             .relative()
@@ -1789,6 +1816,17 @@ const fn path_strategy_label(strategy: EvidencePathStrategy) -> &'static str {
 fn section_label(label: &'static str) -> impl IntoElement {
     div()
         .px_4()
+        .pt_4()
+        .pb_2()
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(0x70838e))
+        .child(label)
+}
+
+fn inspector_header_label(label: &'static str) -> impl IntoElement {
+    div()
+        .px_3()
         .pt_4()
         .pb_2()
         .text_xs()

@@ -18,6 +18,7 @@ impl StudioView {
 
         theme
             .toggle_group()
+            .self_center()
             .id("bezel-search-modes")
             .debug_selector(|| "bezel-search-modes".into())
             .role(Role::Group)
@@ -160,6 +161,7 @@ impl StudioView {
             .child(
                 theme
                     .toggle_group()
+                    .self_center()
                     .id("bezel-layout-modes")
                     .debug_selector(|| "bezel-layout-modes".into())
                     .role(Role::Group)
@@ -209,7 +211,7 @@ impl StudioView {
             .tab_bar()
             .id("bezel-sidebar-tabs")
             .debug_selector(|| "bezel-sidebar-tabs".into())
-            .mx(px(10.0))
+            .mx(px(6.0))
             .mt(px(10.0))
             .role(Role::Group)
             .aria_label("Graph view")
