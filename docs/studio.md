@@ -1,23 +1,23 @@
-# VectorGraph Studio
+# Vecgra Studio
 
-VectorGraph Studio is the native explorer for VectorGraph. It lives in this
+Vecgra Studio is the native explorer for Vecgra. It lives in this
 workspace, opens the same portable `.vg` container directly, and treats graph
 structure and vector relevance as two views of one result rather than two
 separate products.
 
-This document is the initial product, interaction, rendering, and visual
-contract. It deliberately distinguishes the first vertical slice from release
+This document defines the current product, interaction, rendering, and visual
+contract, then records the local evidence behind performance and platform
 claims.
 
 ## Product contract
 
 | Surface | Decision |
 |---|---|
-| Product name | VectorGraph Studio |
-| Binary | `vg-studio` |
-| Application ID | `dev.vectorgraph.studio` (provisional; release blocker) |
+| Product name | Vecgra Studio |
+| Binary | `vecgra-studio` |
+| Application ID | `dev.vecgra.studio` |
 | Workspace | Sibling crates beside the headless database and CLI |
-| Database access | Direct, in-process, read-only open for the first slice |
+| Database access | Direct, in-process, read-only open |
 | Initial platform | macOS 26 on Apple Silicon, verified locally |
 | Intended platforms | macOS, Windows, and Linux after native launch evidence |
 | Distribution | Unresolved; raw development binary is not a package |
@@ -31,6 +31,13 @@ Zed's GPUI Git source without a revision, so the application uses the identical
 source declaration and pins the resolved Zed commit in `Cargo.lock`. Using a
 separate `rev` declaration creates two incompatible GPUI type universes. An
 upstream revision-pinning mechanism remains a release-hardening item.
+
+GPUI also resolves disabled GPL tracing facades and the obsolete `block` 0.1.6
+FFI declaration. The workspace replaces the disabled tracing surface with
+Apache-2.0 no-op compatibility crates and applies a narrow MIT-licensed source
+patch to `block`; neither changes Studio behavior. The exact provenance,
+licence boundary, and removal conditions are in
+[the dependency policy](dependencies.md).
 
 The database crate remains headless. Building the database and CLI must not
 require the desktop stack, so they remain the workspace default members.
@@ -179,7 +186,7 @@ The app chrome uses ordinary GPUI elements and GPUI Component behavior. The
 graph is one custom canvas/custom element, not one retained UI element per
 node or edge.
 
-The first renderer groups visible edges into a small number of `Path` batches
+The renderer groups visible edges into a small number of `Path` batches
 by a stable relationship-type palette and emits visible nodes as quads inside
 one paint layer. GPUI uploads and draws those primitives on the GPU. The
 application thread only performs bounded projection, culling, hit-region
@@ -216,17 +223,17 @@ does not introduce a GPU-to-CPU texture copy.
 ## Architecture
 
 ```text
-vectorgraph                       vectorgraph-embedding
+vecgra                       vecgra-embedding
 durable graph/vector truth        selected query embedding adapter
 and query execution               (hash or Qwen/OpenRouter)
               \                    /
-vectorgraph-studio-core
+vecgra-studio-core
     bounded search, owned snapshots, layout, LOD, projection, hit testing
         |
-vectorgraph-studio-ui
+vecgra-studio-ui
     GPUI entities, canvas, command surface, inspector, themes
         |
-vectorgraph-studio
+vecgra-studio
     process startup, platform policy, menus, windows, diagnostics
 ```
 
@@ -260,7 +267,7 @@ carry hierarchy; cards, outlines, and uppercase labels do not.
 
 ```text
 +-----------------------------------------------------------------------+
-| VG / database       semantic + graph command                     4.8ms |
+| Vecgra / database   semantic + graph command                     4.8ms |
 +--------------+--------------------------------------+-----------------+
 | views        |                                      | inspector       |
 | labels       |          GPU GRAPH SCENE             | identity        |
@@ -276,7 +283,7 @@ The signature element is the **semantic lens**. Relationship types use a
 restrained stable palette with caption and direction redundancy; vector
 relevance appears as a Cobalt field around the current result or selection. At
 distance it becomes a density contour; close up it becomes ranked halos and
-score marks. This makes VectorGraph's native fusion visible without decorating
+score marks. This makes Vecgra's native fusion visible without decorating
 every node.
 
 ## Design self-critique
@@ -302,12 +309,12 @@ customization, not the default information architecture.
 - Performance: application-thread preparation, draw/present time, primitive
   count, memory, first useful scene, and interaction latency at each LOD.
 
-## Current vertical-slice evidence
+## Current implementation and evidence
 
-The first end-to-end slice is implemented in this repository. It is deliberately
-not presented as a finished explorer:
+The end-to-end explorer is implemented in this repository, with these current
+boundaries:
 
-- `vectorgraph-studio-core` opens the portable file read-only, takes a bounded
+- `vecgra-studio-core` opens the portable file read-only, takes a bounded
   owned snapshot, and chooses a topology-aware Auto layout. Small directed
   forests use a radial hierarchy; large forests use an O(V+E) top-level
   subtree analysis to seed a packed constellation before sampled refinement.
@@ -318,7 +325,7 @@ not presented as a finished explorer:
   epoch and no spatial grid to leak a lattice into the drawing. It also owns
   deterministic Auto/Force/Structure/Orbit targets and the tested presentation
   spring/pin/neighbor-physics model;
-- `vectorgraph-studio-ui` swaps the completed scene on the application thread,
+- `vecgra-studio-ui` swaps the completed scene on the application thread,
   paints the graph as one canvas, aggregates fitted large scenes into density
   bins, batches edges by relationship type, and adds bounded captions and
   arrowheads. It supports pointer/trackpad navigation, direct node
@@ -333,7 +340,7 @@ not presented as a finished explorer:
   primary execution action together in the responsive evidence rail. The
   native title-bar component reserves platform window-control space and owns
   drag/double-click behavior;
-- `vectorgraph-studio` owns application identity, window policy, key bindings,
+- `vecgra-studio` owns application identity, window policy, key bindings,
   assets, and an opt-in Metal offscreen capture harness.
 
 The primary product-shaped fixture now comes from the GitHub engineering-history
@@ -393,7 +400,7 @@ p95/max across four startup draws. The visual harness advances the same spring
 math deterministically before capture; interactive motion remains driven by
 display frames in the normal application.
 
-The larger structural stress fixture was generated from VectorGraph's own Rust
+The larger structural stress fixture was generated from Vecgra's own Rust
 source using the Tree-sitter importer and deterministic hash embedder. It contains
 110,303 nodes, 110,302 relationships, and 441,157 node/relationship vectors.
 Studio's bounded view loaded and laid out 50,000 nodes plus 49,999 relationships
@@ -442,54 +449,54 @@ so it is safe for cyclic graphs and DAGs with shared descendants as well as
 forests:
 
 ```sh
-cargo run --release -p vectorgraph-studio-core \
+cargo run --release -p vecgra-studio-core \
   --example layout_bench -- graph.vg
 
-cargo run --release -p vectorgraph-studio-core \
+cargo run --release -p vecgra-studio-core \
   --example layout_bench -- graph.vg structure
 ```
 
 The repeatable visual path is:
 
 ```sh
-cargo build --release -p vectorgraph-studio --features visual-test
+cargo build --release -p vecgra-studio --features visual-test
 
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio.png \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio.png \
+  target/release/vecgra-studio graph.vg
 
 # Capture a deterministic inspection state.
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-edge.png \
-VG_STUDIO_CAPTURE_COMMAND='edge 0' \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-edge.png \
+VECGRA_STUDIO_CAPTURE_COMMAND='edge 0' \
+  target/release/vecgra-studio graph.vg
 
 # Wait for search, activate ranked result 0, settle every spring, then capture.
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-focus.png \
-VG_STUDIO_CAPTURE_COMMAND='memory leak' \
-VG_STUDIO_CAPTURE_RESULT=0 \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-focus.png \
+VECGRA_STUDIO_CAPTURE_COMMAND='memory leak' \
+VECGRA_STUDIO_CAPTURE_RESULT=0 \
+  target/release/vecgra-studio graph.vg
 
 # Exercise the exact minimum supported window geometry.
-VG_STUDIO_WINDOW_WIDTH=760 VG_STUDIO_WINDOW_HEIGHT=520 \
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-minimum.png \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_WINDOW_WIDTH=760 VECGRA_STUDIO_WINDOW_HEIGHT=520 \
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-minimum.png \
+  target/release/vecgra-studio graph.vg
 
 # Activate a taxonomy row through the same command path as pointer input.
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-facet.png \
-VG_STUDIO_CAPTURE_COMMAND='facet relationship AUTHORED' \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-facet.png \
+VECGRA_STUDIO_CAPTURE_COMMAND='facet relationship AUTHORED' \
+  target/release/vecgra-studio graph.vg
 
 # Set a path origin, then select a destination candidate without executing it.
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-path-origin.png \
-VG_STUDIO_CAPTURE_COMMAND='path-start 0 out 4' \
-VG_STUDIO_CAPTURE_CENTER=1 \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-path-origin.png \
+VECGRA_STUDIO_CAPTURE_COMMAND='path-start 0 out 4' \
+VECGRA_STUDIO_CAPTURE_CENTER=1 \
+  target/release/vecgra-studio graph.vg
 
 # Wait for the complete database path, settle its lens, then capture the
 # evidence rail and its one-for-one directed canvas chain. Sampled-out path
 # records are injected before the frame is drawn.
-VG_STUDIO_CAPTURE=/tmp/vectorgraph-studio-path.png \
-VG_STUDIO_CAPTURE_COMMAND='path 0 42 out SUPPORTS 6' \
-  target/release/vg-studio graph.vg
+VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-path.png \
+VECGRA_STUDIO_CAPTURE_COMMAND='path 0 42 out SUPPORTS 6' \
+  target/release/vecgra-studio graph.vg
 ```
 
 The next evidence gates are pointer-to-photon interaction-latency distributions,

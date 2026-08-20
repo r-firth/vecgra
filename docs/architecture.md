@@ -2,7 +2,7 @@
 
 ## Mental model
 
-VectorGraph has two durable layers in one file:
+Vecgra has two durable layers in one file:
 
 1. A checkpoint is the compact, read-optimized state of the graph. Most of it
    is used directly through a read-only memory map; opening a database does not
@@ -99,7 +99,7 @@ structural fields. Vectors use 4 MiB block checksums in addition to a global
 checksum. A selective query verifies only blocks containing its candidates;
 full scans, hydration, and compaction eventually verify every block. Older
 checkpoints without the block table fall back to the global checksum.
-`verify_integrity`/`vg check` eagerly touches every remaining vector block
+`verify_integrity`/`vecgra check` eagerly touches every remaining vector block
 without decoding it; all metadata, records, indexes, CSR, and WAL frames have
 already been structurally and checksum-validated by `Database::open`.
 
@@ -279,7 +279,7 @@ A single local debug smoke changed from 23.94 ms to 2.02 ms; the work counters
 are deterministic, while those timings are not a distribution or
 cross-machine claim.
 
-`vectorgraph-studio-core::evidence_path_database` is the owned presentation
+`vecgra-studio-core::evidence_path_database` is the owned presentation
 boundary above that primitive. It opens a read-only view, resolves an optional
 relationship label, executes the bounded exact path, and hydrates node and
 relationship properties, vector counts, titles, labels,

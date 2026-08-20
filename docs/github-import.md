@@ -1,13 +1,13 @@
 # GitHub engineering-history import
 
-`vg import-github` turns a GitHub repository's collaboration history into a
-portable VectorGraph database. It is deliberately not a code AST: the graph
+`vecgra import-github` turns a GitHub repository's collaboration history into a
+portable Vecgra database. It is deliberately not a code AST: the graph
 captures work, decisions, evidence, authorship, review, discussion, and the
 files and commits those activities affected.
 
 ```sh
 # Uses GITHUB_TOKEN, GH_TOKEN, or the token from `gh auth login`.
-target/release/vg import-github OWNER/REPOSITORY graph.vg \
+target/release/vecgra import-github OWNER/REPOSITORY graph.vg \
   [issues] [pulls] [discussions] [releases] \
   [dimension] [hash|qwen] [batch-size]
 ```
@@ -57,26 +57,28 @@ counts, and pagination cursor. `Issue` and `PullRequest` nodes expose
 `detail_complete`: `false` identifies a cross-reference stub or lite fallback
 that a later sync may enrich.
 
-Successful GraphQL pages are cached beside the destination under
-`<database>.github-cache`. Cache filenames fingerprint the query and all
-variables, preventing a page fetched with one cursor/limit from being reused
-for another. Set `VG_GITHUB_CACHE` to choose a reusable cache directory. Tokens
-are used only for requests and are never written into the cache or database.
+Successful GraphQL pages are cached in the platform cache directory under
+`vecgra/github`. Cache filenames fingerprint the query and all variables,
+preventing a page fetched with one cursor/limit from being reused for another.
+Set `VECGRA_GITHUB_CACHE` to choose a different cache directory. If the platform
+does not expose a cache directory, Vecgra falls back to
+`<database>.github-cache`. Tokens are used only for requests and are never
+written into the cache or database.
 
 ## Queries
 
 ```sh
-target/release/vg query graph.vg \
+target/release/vecgra query graph.vg \
   'MATCH (p:PullRequest)-[r:CLOSES]->(i:Issue) RETURN p,r,i LIMIT 20'
 
-target/release/vg query graph.vg \
+target/release/vecgra query graph.vg \
   'MATCH (r:Review)-[v:REVIEWS]->(p:PullRequest) RETURN r,v,p LIMIT 20'
 
-target/release/vg query-text graph.vg \
+target/release/vecgra query-text graph.vg \
   'MATCH (p:PullRequest)-[c:CHANGES]->(f:File) RETURN p,c,f LIMIT 20' \
   'language server performance diagnostics' qwen
 
-target/release/vg semantic-text graph.vg \
+target/release/vecgra semantic-text graph.vg \
   'regressions fixed after reviewer feedback' 20 3 qwen
 ```
 

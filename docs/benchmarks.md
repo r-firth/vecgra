@@ -122,7 +122,7 @@ The identical AST topology was exported to typed CSV and loaded into
 LadybugDB 0.19.1 (formerly Kuzu) through its Python package. Ladybug stored the
 non-vector graph in about 18 MB and measured:
 
-| Operation | LadybugDB | VectorGraph |
+| Operation | LadybugDB | Vecgra |
 |---|---:|---:|
 | Open | 11.77 ms | ~20 ms |
 | `File-HAS_SYNTAX-Syntax`, limit 100 | 1.160 ms | ~0.003 ms |
@@ -130,10 +130,10 @@ non-vector graph in about 18 MB and measured:
 | Point degree/property query | 0.428 ms | ~0.000083 ms adjacency API |
 
 This is directional, not a publishable head-to-head: Ladybug was called through
-Python and a declarative query engine, VectorGraph through a release Rust CLI
+Python and a declarative query engine, Vecgra through a release Rust CLI
 and native operators; Ladybug's file contains no vectors; and the schemas are
 not byte-equivalent. The clean conclusion is narrower: Ladybug still opens
-faster, while VectorGraph's current warm adjacency/operator path is extremely
+faster, while Vecgra's current warm adjacency/operator path is extremely
 cheap. A fair Rust binding and LSQB/LDBC harness remain required.
 
 ## Reproduce
@@ -145,15 +145,15 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release
 
-target/release/vg bench-neighbors graph.vg NODE_ID 100000
-target/release/vg bench-pattern graph.vg \
+target/release/vecgra bench-neighbors graph.vg NODE_ID 100000
+target/release/vecgra bench-pattern graph.vg \
   'MATCH (a:File)-[e:HAS_SYNTAX]->(b:Syntax) RETURN a,e,b LIMIT 100' 1000
-target/release/vg bench-search graph.vg 'regex configuration builder' \
+target/release/vecgra bench-search graph.vg 'regex configuration builder' \
   25 hash both
-target/release/vg bench-search graph.vg 'regex configuration builder' \
+target/release/vecgra bench-search graph.vg 'regex configuration builder' \
   25 hash nodes File
-target/release/vg bench-ann graph.vg 100 20000 both
-target/release/vg plan-search graph.vg both
+target/release/vecgra bench-ann graph.vg 100 20000 both
+target/release/vecgra plan-search graph.vg both
 ```
 
 Vector recall is always reported against the exact engine; a latency number
@@ -217,7 +217,7 @@ On all 1,000 held-out queries at `k=10` and 12,000 exact reranks:
 | Exact p50 / p95, explicit hot F32 | 16.269 / 16.406 ms |
 | Full F32 cache / compressed-run private peak | 800.0 / 9.8 MB |
 | Stats-only private footprint, v7 / v5 | 2.7 / 15.8 MB |
-| Eager `vg check`, 400 MB vector column | 85.3 ms / 2.9 MB private peak |
+| Eager `vecgra check`, 400 MB vector column | 85.3 ms / 2.9 MB private peak |
 
 The earlier 256-bit sketch reached only 0.9585 recall at a 20k budget; widening
 the projection was a measured quality change, not cosmetic metadata. Equal
@@ -279,10 +279,10 @@ Reproduction:
 ```sh
 uv run --with h5py --with numpy scripts/hdf5_to_fbin.py \
   yandex-200-cosine.hdf5 /tmp/yandex
-target/release/vg import-fbin /tmp/yandex.train.fbin /tmp/yandex.vg
-target/release/vg bench-fbin /tmp/yandex.vg /tmp/yandex.test.fbin \
+target/release/vecgra import-fbin /tmp/yandex.train.fbin /tmp/yandex.vg
+target/release/vecgra bench-fbin /tmp/yandex.vg /tmp/yandex.test.fbin \
   /tmp/yandex.neighbors.ibin 1000 12000 10 compressed
-target/release/vg bench-filtered-fbin /tmp/yandex.vg \
+target/release/vecgra bench-filtered-fbin /tmp/yandex.vg \
   /tmp/yandex.test.fbin 200 5 20000 10
 ```
 
@@ -321,9 +321,9 @@ Reproduction:
 ```sh
 uv run --with h5py --with numpy scripts/morevec_to_interchange.py \
   movies.hdf5 movies_filters.hdf5 /tmp/morevec
-target/release/vg import-node-fbin /tmp/morevec/train.fbin \
+target/release/vecgra import-node-fbin /tmp/morevec/train.fbin \
   /tmp/morevec/metadata.jsonl /tmp/morevec.vg f16
-target/release/vg bench-range-fbin /tmp/morevec.vg \
+target/release/vecgra bench-range-fbin /tmp/morevec.vg \
   /tmp/morevec/query-6.fbin /tmp/morevec/truth-6.ibin \
   avg_rating 8.1 500 5000 10
 ```
@@ -336,7 +336,7 @@ HNSW index. One thread and 500 `avg_rating >= 8.1`, k=10 queries were used.
 DuckDB's physical plan was HNSW index scan followed by the rating filter—not a
 prefiltered vector search.
 
-| Measurement | DuckDB VSS | VectorGraph |
+| Measurement | DuckDB VSS | Vecgra |
 |---|---:|---:|
 | Indexed file | 798,765,056 bytes | 186,446,572 bytes (F16) |
 | Table + index build | 1.01 s + 57.45 s | 1.60 s total |
@@ -348,7 +348,7 @@ prefiltered vector search.
 
 This is directional, not a general DuckDB claim: DuckDB was called through
 Python with a 768-value bound parameter, retained F32, used extension defaults,
-and is a general analytical SQL engine; VectorGraph's benchmark runs inside
+and is a general analytical SQL engine; Vecgra's benchmark runs inside
 Rust, stores F16, and has a purpose-built prefilter path. The useful conclusion
 is architectural and independently visible in `EXPLAIN`: postfiltering an
 unfiltered HNSW result is unsuitable at 20.7% selectivity, while an ordered
@@ -387,8 +387,8 @@ Reproduction:
 ```sh
 uv run --with h5py --with numpy scripts/hdf5_to_fbin.py \
   coco-t2i-512-angular.hdf5 /tmp/coco
-target/release/vg import-fbin /tmp/coco.train.fbin /tmp/coco.vg
-target/release/vg bench-fbin /tmp/coco.vg /tmp/coco.test.fbin \
+target/release/vecgra import-fbin /tmp/coco.train.fbin /tmp/coco.vg
+target/release/vecgra bench-fbin /tmp/coco.vg /tmp/coco.test.fbin \
   /tmp/coco.neighbors.ibin 200 5000 10
 ```
 
@@ -457,11 +457,11 @@ supplied floating-point ranks. Its measured private peak footprint was about
 owned heap.
 
 ```sh
-target/release/vg import-graphalytics wiki-Talk.v wiki-Talk.e wiki-talk.vg
-target/release/vg bench-bfs wiki-talk.vg 2 wiki-Talk-BFS 10
-target/release/vg bench-wcc wiki-talk.vg wiki-Talk-WCC 3
-target/release/vg bench-pagerank wiki-talk.vg wiki-Talk-PR 5
-target/release/vg bench-expand wiki-talk.vg 2 2 10 out
+target/release/vecgra import-graphalytics wiki-Talk.v wiki-Talk.e wiki-talk.vg
+target/release/vecgra bench-bfs wiki-talk.vg 2 wiki-Talk-BFS 10
+target/release/vecgra bench-wcc wiki-talk.vg wiki-Talk-WCC 3
+target/release/vecgra bench-pagerank wiki-talk.vg wiki-Talk-PR 5
+target/release/vecgra bench-expand wiki-talk.vg 2 2 10 out
 ```
 
 ## Neo4j comparison
@@ -484,7 +484,7 @@ is relevant to the whole-store size comparison.
 
 This comparison is intentionally narrower than "which database is better".
 Neo4j has a much larger mutable, transactional, server, language, and tooling
-surface. VectorGraph exploits an immutable indexed base and direct native API.
+surface. Vecgra exploits an immutable indexed base and direct native API.
 Conversely, embedding Neo4j removes network and driver overhead. Vector search
 uses the supported Cypher 25 `SEARCH` path with one transaction per query; BFS
 uses Neo4j's embedded relationship API because Community does not ship the GDS
@@ -495,7 +495,7 @@ not measured.
 
 Neo4j's default scalar-quantized HNSW import stored all 1,000,000 200-D vectors
 in 6.461 s and populated the index in 41.708 s. The process peaked at about
-5.36 GB and the resulting store was 3,107,186,279 bytes. VectorGraph's current
+5.36 GB and the resulting store was 3,107,186,279 bytes. Vecgra's current
 v7 build takes 5.45 s, peaks at about 203 MB, and is 545,000,992 bytes. The
 Neo4j build result is its normal embedded transactional loader, not its offline
 admin importer.
@@ -505,7 +505,7 @@ default knob:
 
 | Engine / index configuration | Recall@10 | p50 | p95 | Store |
 |---|---:|---:|---:|---:|
-| VectorGraph, confidence-weighted 512-bit + 12k F16 rerank | 0.9967 | 5.419 ms | 5.659 ms | 545.0 MB |
+| Vecgra, confidence-weighted 512-bit + 12k F16 rerank | 0.9967 | 5.419 ms | 5.659 ms | 545.0 MB |
 | Neo4j scalar, default expansion 1.5 | 0.8301 | 7.959 ms | 12.156 ms | 3.107 GB |
 | Neo4j scalar, expansion 100 | 0.9892 | 15.722 ms | 18.717 ms | 3.108 GB |
 | Neo4j scalar, expansion 200 | 0.9958 | 20.502 ms | 23.492 ms | 3.108 GB |
@@ -524,20 +524,20 @@ will dominate HNSW or partitioned indexes at every scale.
 
 Neo4j used its 2026.06 vector provider's indexed additional-property filter,
 not a postfilter. Its best measured configuration here was unquantized HNSW
-with M=16, efConstruction=100, and search expansion 6. VectorGraph used the
-same typed `avg_rating` thresholds and official truth files. The VectorGraph
+with M=16, efConstruction=100, and search expansion 6. Vecgra used the
+same typed `avg_rating` thresholds and official truth files. The Vecgra
 latency is the complete adaptive call, including numeric-posting lookup;
 Neo4j's includes its Cypher transaction and `SEARCH` execution.
 
-| Threshold | Eligible | VectorGraph recall / p50 | Neo4j recall / p50 | VG speedup |
+| Threshold | Eligible | Vecgra recall / p50 | Neo4j recall / p50 | Vecgra speedup |
 |---|---:|---:|---:|---:|
 | `avg_rating >= 9.6` | 519 | 0.9994 / 0.056 ms | 0.9998 / 0.542 ms | 9.68x |
 | `avg_rating >= 9.2` | 2,192 | 0.9994 / 0.245 ms | 1.0000 / 0.753 ms | 3.07x |
 | `avg_rating >= 8.5` | 10,712 | 0.9986 / 1.351 ms | 1.0000 / 4.277 ms | 3.17x |
 | `avg_rating >= 8.1` | 20,588 | 0.9992 / 2.062 ms | 0.9998 / 6.693 ms | 3.25x |
 
-The 99,560 x 768-D VectorGraph file is 186,446,572 bytes. The final
-unquantized Neo4j store was about 1.035 GB, 5.55x larger. A fresh VectorGraph
+The 99,560 x 768-D Vecgra file is 186,446,572 bytes. The final
+unquantized Neo4j store was about 1.035 GB, 5.55x larger. A fresh Vecgra
 build took 1.15 s and 99 MB maximum RSS. Neo4j's initial default-scalar load
 took 2.241 s for data plus 8.494 s for index population and peaked at about
 4.25 GB maximum RSS; the scalar store was 1.111 GB. Query and build settings
@@ -548,21 +548,21 @@ was both faster and smaller for this workload.
 
 Both engines imported the same dense Graphalytics text files, then BFS from
 official source 2 validated every one of the 2,394,385 supplied distances.
-VectorGraph's fresh rerun includes its complete direct checkpoint builder;
+Vecgra's fresh rerun includes its complete direct checkpoint builder;
 Neo4j's uses batched embedded transactions and its normal relationship store.
 
-| Metric | VectorGraph | Neo4j | Ratio |
+| Metric | Vecgra | Neo4j | Ratio |
 |---|---:|---:|---:|
-| Import wall time | 2.03 s | 34.674 s | VG 17.1x faster |
-| Store bytes | 584,617,440 | 1,289,647,007 | VG 2.21x smaller |
-| BFS p50 | 69.221 ms | 946.753 ms | VG 13.7x faster |
-| BFS p95 | 77.829 ms | 1,004.580 ms | VG 12.9x faster |
+| Import wall time | 2.03 s | 34.674 s | Vecgra 17.1x faster |
+| Store bytes | 584,617,440 | 1,289,647,007 | Vecgra 2.21x smaller |
+| BFS p50 | 69.221 ms | 946.753 ms | Vecgra 13.7x faster |
+| BFS p95 | 77.829 ms | 1,004.580 ms | Vecgra 12.9x faster |
 | Reached / maximum distance | 2,354,316 / 6 | 2,354,316 / 6 | identical |
 
 The traversal result is the clearest payoff from persisted bidirectional CSR:
 the hot loop projects compact endpoint columns, while Neo4j follows general
 relationship records and entity proxies. It is also the least transferable
-result to an update-heavy workload: VectorGraph pays for this layout at
+result to an update-heavy workload: Vecgra pays for this layout at
 checkpoint construction and has not yet demonstrated Neo4j-like sustained
 mutation behavior.
 
@@ -579,22 +579,22 @@ excluded from query samples. GDS 2026.07 and `neo4j-admin` are the versions
 installed by Desktop.
 
 This is the primary product-path comparison. It is less favorable to
-VectorGraph than the first pass in several places, as a fair audit should be.
+Vecgra than the first pass in several places, as a fair audit should be.
 The generated databases were isolated from the default `neo4j` database.
 
 #### VIBE/Yandex with native vectors
 
 All one million 200-D vectors use Neo4j's native vector property and an
 unquantized HNSW index with M=16 and efConstruction=100. Expansion 160 cleared
-VectorGraph's previous 0.9938 result. After query-confidence weighting, even
-Neo4j's highest measured expansion-200 point remains below VectorGraph's 0.9967
+Vecgra's previous 0.9938 result. After query-confidence weighting, even
+Neo4j's highest measured expansion-200 point remains below Vecgra's 0.9967
 official recall. An auto-commit query is the normal product path; the
 one-transaction rows are lower bounds that reuse one transaction for all 1,000
 requests.
 
 | Engine / path | Recall@10 | p50 | p95 | Live database bytes |
 |---|---:|---:|---:|---:|
-| VectorGraph, confidence-weighted 512-bit + 12k F16 rerank | 0.9967 | 5.419 ms | 5.659 ms | 545,000,992 |
+| Vecgra, confidence-weighted 512-bit + 12k F16 rerank | 0.9967 | 5.419 ms | 5.659 ms | 545,000,992 |
 | Neo4j Enterprise, expansion 160, one transaction | 0.9944 | 16.137 ms | 18.657 ms | 1,788,661,939 |
 | Neo4j Enterprise, expansion 160, auto-commit | 0.9944 | 17.273 ms | 21.017 ms | 1,788,661,939 |
 | Neo4j Enterprise, expansion 200, one transaction | 0.9961 | 17.546 ms | 20.315 ms | 1,788,661,939 |
@@ -612,24 +612,24 @@ primary block records plus small metadata. Its retained transaction logs add
 
 Loading over Bolt took 76.489 s and expansion-200 index population took
 40.019 s. That is a real ingestion path, but it is not compared with
-VectorGraph's offline build as an optimized-import claim because Neo4j's admin
+Vecgra's offline build as an optimized-import claim because Neo4j's admin
 importer also accepts vector columns and was not exercised on this 200-D source.
 
 #### MoReVec native prefiltered search
 
 Neo4j's vector index includes `avg_rating` as an additional indexed property,
 so these are native prefilters rather than postfilters. To avoid favoring
-VectorGraph through transient server load, the table uses Neo4j's best measured
+Vecgra through transient server load, the table uses Neo4j's best measured
 auto-commit pass; a later repetition was slower at every threshold.
 
-| Threshold | Eligible | VectorGraph recall / p50 | Neo4j Enterprise recall / p50 | VG speedup |
+| Threshold | Eligible | Vecgra recall / p50 | Neo4j Enterprise recall / p50 | Vecgra speedup |
 |---|---:|---:|---:|---:|
 | `avg_rating >= 9.6` | 519 | 0.9994 / 0.056 ms | 0.9998 / 1.463 ms | 26.1x |
 | `avg_rating >= 9.2` | 2,192 | 0.9994 / 0.245 ms | 1.0000 / 1.788 ms | 7.30x |
 | `avg_rating >= 8.5` | 10,712 | 0.9986 / 1.351 ms | 1.0000 / 6.963 ms | 5.15x |
 | `avg_rating >= 8.1` | 20,588 | 0.9992 / 2.062 ms | 0.9994 / 9.805 ms | 4.75x |
 
-Neo4j's live database directory is 630,625,939 bytes versus VectorGraph's
+Neo4j's live database directory is 630,625,939 bytes versus Vecgra's
 186,446,572-byte file, a 3.38x ratio. Retained Neo4j transaction logs add
 312,344,840 bytes. The narrow-filter lead is not evidence that HNSW is bad; it
 is evidence that an ordered scalar posting feeding a cardinality-sensitive
@@ -644,19 +644,19 @@ contains the same 2,394,385 nodes and 5,021,410 directed relationships. It took
 587 ms to project and occupies 79,406,959 bytes (reported as 75 MiB) of
 additional in-memory graph state.
 
-| Metric | VectorGraph | Neo4j Enterprise best path | Result |
+| Metric | Vecgra | Neo4j Enterprise best path | Result |
 |---|---:|---:|---:|
-| Import engine / complete process wall | 2.21 / 2.21 s | 4.778 / 6.27 s | VG 2.16x / 2.84x faster |
-| Import maximum RSS | 840 MB | 2.65 GB | VG 3.16x lower |
+| Import engine / complete process wall | 2.21 / 2.21 s | 4.778 / 6.27 s | Vecgra 2.16x / 2.84x faster |
+| Import maximum RSS | 840 MB | 2.65 GB | Vecgra 3.16x lower |
 | Durable graph bytes | 584,617,440 | 423,290,781 | Neo4j 27.6% smaller |
-| BFS p50, concurrency 1 | 80.286 ms | 236 ms server compute | VG 2.94x faster |
-| BFS p50, GDS concurrency 4 | 80.286 ms (one thread) | 101 ms server / 111 ms client | VG 1.26x / 1.38x faster |
+| BFS p50, concurrency 1 | 80.286 ms | 236 ms server compute | Vecgra 2.94x faster |
+| BFS p50, GDS concurrency 4 | 80.286 ms (one thread) | 101 ms server / 111 ms client | Vecgra 1.26x / 1.38x faster |
 | Reached nodes | 2,354,316 | 2,354,316 | identical |
 
-The four-thread BFS and VectorGraph latency rows use alternating warm batches
+The four-thread BFS and Vecgra latency rows use alternating warm batches
 from the same audit session; the one-thread GDS row is its best 20-run warm
-batch. VectorGraph's earlier unloaded 69.221 ms result is retained in the
-first-pass table but is not used for these ratios. VectorGraph validates every one of the
+batch. Vecgra's earlier unloaded 69.221 ms result is retained in the
+first-pass table but is not used for these ratios. Vecgra validates every one of the
 2,394,385 official distance values and maximum distance 6. GDS BFS exposes the
 visited node list rather than the distance vector, so this pass validates its
 reachable-set cardinality; the first-pass Neo4j implementation separately

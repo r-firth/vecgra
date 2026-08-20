@@ -7,7 +7,7 @@ implemented.
 
 [TigerVector (2025)](https://arxiv.org/abs/2501.11216) makes embeddings a graph
 attribute type and composes distributed vector search with graph query blocks.
-It validates the unified-system direction, but VectorGraph goes further at the
+It validates the unified-system direction, but Vecgra goes further at the
 local storage level: nodes and relationships both own vectors, the checkpoint
 physically co-designs graph and vector access, and semantic traversal can score
 relationships rather than retrieving vertices then joining.
@@ -15,7 +15,7 @@ relationships rather than retrieving vertices then joining.
 [NaviX (2025)](https://arxiv.org/abs/2506.23397) is the most directly relevant
 ANN work. It stores HNSW through graph-DB primitives, pre-evaluates an arbitrary
 predicate into a candidate subset, and adapts filtered search using local
-selectivity. VectorGraph now has that execution contract: compressed typed
+selectivity. Vecgra now has that execution contract: compressed typed
 candidate sets can come from labels, traversal, or application subplans; exact,
 binary-sketch, and MaxSim execution all consume them before scoring/candidate
 budgeting. v8 adds automatic typed equality and ordered numeric-range postings
@@ -39,7 +39,7 @@ the MoReVec corpus couples 768-dimensional text embeddings to real scalar
 filters, and its Global-Local Selectivity metric distinguishes global predicate
 cardinality from the predicate density near a query. Its experiments also find
 that hybrid exact/approximate execution avoids optimizer mistakes and that IVF
-can beat HNSW for low-selectivity filtered search. VectorGraph now runs the
+can beat HNSW for low-selectivity filtered search. Vecgra now runs the
 official 99,560-row Movies/medium workload through ordinary fbin + typed JSONL.
 It exactly matches all tested filter cardinalities. At 10.8% selectivity the
 planner retains exact search; at 20.7% it switches to a 5,147-row sketch rerank,
@@ -53,7 +53,7 @@ judged on MoReVec rather than justified by unfiltered recall alone.
 nearest-neighbor search constrained to the `r`-hop neighborhood of a query
 node. Its DLH design converts distance-aware graph labels into a small number
 of set intersections, compresses large sets with Bloom filters, and memoizes
-intermediate state for repeated query nodes. VectorGraph already exposes the
+intermediate state for repeated query nodes. Vecgra already exposes the
 exact prefilter version of this contract: a node-only compressed bounded range
 is intersected with an optional label/property predicate, and only then does
 the engine choose exact gather or persisted sketch/rerank. The result reports
@@ -74,7 +74,7 @@ deterministic base on which observed correlation can later refine choices.
 [AkasicDB (2026)](https://arxiv.org/abs/2608.09214) independently validates
 unified vector, graph, and relational execution, composing ANN as an iterator
 inside a traversal/join plan. It uses dedicated vector, graph, and PostgreSQL
-stores coordinated by one execution layer. VectorGraph's differentiator is
+stores coordinated by one execution layer. Vecgra's differentiator is
 physical rather than merely logical integration: one local file, native node
 and relationship multivectors, shared candidate sets, and no separate service
 or relational runtime. Its lesson is still important: native operators must be
@@ -108,7 +108,7 @@ with useful error bounds and fast bitwise kernels. [VSAG
 cache-friendly organization, low-precision distance computation, and automatic
 parameter selection matter as much as the high-level ANN graph.
 
-VectorGraph v6 persists a deliberately simpler measured first tier: two
+Vecgra v6 persists a deliberately simpler measured first tier: two
 structured randomized Hadamard rotations followed by up to a 512-bit sign
 sketch (earlier 256-bit v5 files remain readable).
 The sketch is scanned sequentially. On one-vector corpora, a query-only
@@ -153,7 +153,7 @@ page and SSD-range locality, not object-store RPC, but it reinforces that a
 future partition directory must point to contiguous independently searchable
 blocks rather than merely adding an in-memory centroid graph.
 
-VectorGraph already implements the immutable F16 base, persisted binary coarse
+Vecgra already implements the immutable F16 base, persisted binary coarse
 index, exact F32 delta, explicit inspectable hot promotion, and block-ranged
 verification.
 The next scale tier should compare an SPFresh-like contiguous partition layer
@@ -172,7 +172,7 @@ engine API.
 A reproducible Faiss IVF design probe (`scripts/ivf_frontier_probe.py`) gives a
 more constructive result. With 4,096 centroids, 512 probes inspect about 118k
 VIBE rows and reach 0.998 official recall@10 at 1.76 ms in Faiss; 256 probes
-inspect 59k but fall to 0.989. This is not a VectorGraph performance claim.
+inspect 59k but fall to 0.989. This is not a Vecgra performance claim.
 It narrows the durable design: train a compact centroid directory, physically
 co-locate vectors/sketches and filter postings by partition, probe enough
 contiguous partitions to meet measured recall, then scan the exact WAL delta.
@@ -211,7 +211,7 @@ confusing an incomplete search with graph absence.
 multimodal graphs with unified textual and visual nodes, then propagates dense
 relevance over the graph. The storage implication is not separate image tables;
 it is multiple vectors per element in one shared embedding space, plus typed
-provenance in ordinary properties and edges. VectorGraph's multivector model
+provenance in ordinary properties and edges. Vecgra's multivector model
 supports both a single query's “best matching view” and weighted late
 interaction: each text/image/query facet selects its best stored facet, their
 scores are averaged, and the result exposes the matched facet indices. The
