@@ -12,13 +12,13 @@ description = "Headless search, layout, and scene model for Vecgra Studio"
 
 [dependencies]
 petgraph = "0.8"
-petgraph-drawing = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
-petgraph-layout-omega = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
-petgraph-layout-sgd = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
-petgraph-linalg-rdmds = { git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-drawing = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-omega = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-layout-sgd = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
+petgraph-linalg-rdmds = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
 rand = "0.8"
-vecgra = { path = "../vecgra" }
-vecgra-embedding = { path = "../vecgra-embedding" }
+vecgra = { version = "=0.1.0", path = "../vecgra" }
+vecgra-embedding = { version = "=0.1.0", path = "../vecgra-embedding" }
 
 [lints]
 workspace = true

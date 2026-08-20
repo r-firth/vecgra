@@ -2,6 +2,7 @@ use bezel_theme::Theme;
 use bezel_ui::{
     control_bar::{self, Shape},
     focus,
+    tooltip::Tooltip,
     widgets::{ButtonStyle, Buttons as _, Controls as _, Layout as _},
 };
 use gpui::prelude::FluentBuilder as _;
@@ -10,7 +11,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, div, px,
 };
 
-use super::{LayoutKind, SceneSelection, SearchMode, StudioView};
+use super::{DetailLevel, LayoutKind, SceneSelection, SearchMode, StudioView, detail_level};
 
 impl StudioView {
     pub(super) fn render_bezel_search_modes(&self, cx: &Context<Self>) -> gpui::AnyElement {
@@ -94,6 +95,7 @@ impl StudioView {
                 .id("compact-zoom-out")
                 .role(Role::Button)
                 .aria_label("Zoom out")
+                .tooltip(|window, cx| Tooltip::with_keystroke("Zoom out", "⌘−", window, cx))
                 .on_click(cx.listener(|this, _, _, cx| this.zoom(0.82, cx)))
                 .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                     this.zoom(0.82, cx);
@@ -108,6 +110,9 @@ impl StudioView {
                 .id("compact-fit-view")
                 .role(Role::Button)
                 .aria_label("Fit graph to view")
+                .tooltip(|window, cx| {
+                    Tooltip::with_keystroke("Fit graph to view", "⌘0", window, cx)
+                })
                 .on_click(cx.listener(|this, _, _, cx| this.fit(cx)))
                 .on_action(cx.listener(|this, _: &focus::Activate, _, cx| this.fit(cx))),
             )
@@ -120,6 +125,7 @@ impl StudioView {
                 .id("compact-zoom-in")
                 .role(Role::Button)
                 .aria_label("Zoom in")
+                .tooltip(|window, cx| Tooltip::with_keystroke("Zoom in", "⌘+", window, cx))
                 .on_click(cx.listener(|this, _, _, cx| this.zoom(1.22, cx)))
                 .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                     this.zoom(1.22, cx);
@@ -141,6 +147,9 @@ impl StudioView {
                 .id("compact-release-node")
                 .role(Role::Button)
                 .aria_label("Release selected node from its pinned position")
+                .tooltip(|window, cx| {
+                    Tooltip::with_keystroke("Release pinned node", "⌘⇧R", window, cx)
+                })
                 .on_click(cx.listener(|this, _, _, cx| this.release_selected(cx)))
                 .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                     this.release_selected(cx);
@@ -168,14 +177,14 @@ impl StudioView {
                     .aria_label("Graph layout")
                     .children(
                         [
-                            ("Auto", LayoutKind::Auto),
-                            ("Force", LayoutKind::Force),
-                            ("Structure", LayoutKind::Structure),
-                            ("Orbit", LayoutKind::Orbit),
+                            ("Auto", LayoutKind::Auto, "⌘1"),
+                            ("Force", LayoutKind::Force, "⌘2"),
+                            ("Structure", LayoutKind::Structure, "⌘4"),
+                            ("Orbit", LayoutKind::Orbit, "⌘3"),
                         ]
                         .into_iter()
                         .enumerate()
-                        .map(|(index, (label, kind))| {
+                        .map(|(index, (label, kind, shortcut))| {
                             focus::focusable(
                                 &theme,
                                 &self.bezel_layout_focus[index],
@@ -185,6 +194,14 @@ impl StudioView {
                             .role(Role::Button)
                             .aria_label(format!("Use {label} graph layout"))
                             .aria_selected(self.layout_kind == kind)
+                            .tooltip(move |window, cx| {
+                                Tooltip::with_keystroke(
+                                    format!("Use {label} layout"),
+                                    shortcut,
+                                    window,
+                                    cx,
+                                )
+                            })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.arrange(kind, window, cx);
                             }))
@@ -256,6 +273,9 @@ impl StudioView {
                 theme.button("−", ghost, Some("bezel-zoom-out".into())),
             )
             .id("bezel-zoom-out")
+            .role(Role::Button)
+            .aria_label("Zoom out")
+            .tooltip(|window, cx| Tooltip::with_keystroke("Zoom out", "⌘−", window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.zoom(0.82, cx)))
             .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                 this.zoom(0.82, cx);
@@ -267,6 +287,9 @@ impl StudioView {
                 theme.button("Fit", ghost, Some("bezel-fit-view".into())),
             )
             .id("bezel-fit-view")
+            .role(Role::Button)
+            .aria_label("Fit graph to view")
+            .tooltip(|window, cx| Tooltip::with_keystroke("Fit graph to view", "⌘0", window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.fit(cx)))
             .on_action(cx.listener(|this, _: &focus::Activate, _, cx| this.fit(cx)))
             .into_any_element(),
@@ -277,6 +300,9 @@ impl StudioView {
             )
             .debug_selector(|| "bezel-zoom-in".into())
             .id("bezel-zoom-in")
+            .role(Role::Button)
+            .aria_label("Zoom in")
+            .tooltip(|window, cx| Tooltip::with_keystroke("Zoom in", "⌘+", window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.zoom(1.22, cx)))
             .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                 this.zoom(1.22, cx);
@@ -284,21 +310,32 @@ impl StudioView {
             .into_any_element(),
         ];
         let layout_buttons = [
-            ("Auto", LayoutKind::Auto, "bezel-layout-auto"),
-            ("Force", LayoutKind::Force, "bezel-layout-force"),
-            ("Structure", LayoutKind::Structure, "bezel-layout-structure"),
-            ("Orbit", LayoutKind::Orbit, "bezel-layout-orbit"),
+            ("Auto", LayoutKind::Auto, "bezel-layout-auto", "⌘1"),
+            ("Force", LayoutKind::Force, "bezel-layout-force", "⌘2"),
+            (
+                "Structure",
+                LayoutKind::Structure,
+                "bezel-layout-structure",
+                "⌘4",
+            ),
+            ("Orbit", LayoutKind::Orbit, "bezel-layout-orbit", "⌘3"),
         ];
         let mut trailing = layout_buttons
             .into_iter()
             .enumerate()
-            .map(|(index, (label, kind, id))| {
+            .map(|(index, (label, kind, id, shortcut))| {
                 focus::focusable(
                     &theme,
                     &self.bezel_layout_focus[index],
                     theme.button(label, layout_style(kind), Some(id.into())),
                 )
                 .id(id)
+                .role(Role::Button)
+                .aria_label(format!("Use {label} graph layout"))
+                .aria_selected(self.layout_kind == kind)
+                .tooltip(move |window, cx| {
+                    Tooltip::with_keystroke(format!("Use {label} layout"), shortcut, window, cx)
+                })
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.arrange(kind, window, cx);
                 }))
@@ -319,6 +356,9 @@ impl StudioView {
                 .id("bezel-release-node")
                 .role(Role::Button)
                 .aria_label("Release selected node from its pinned position")
+                .tooltip(|window, cx| {
+                    Tooltip::with_keystroke("Release pinned node", "⌘⇧R", window, cx)
+                })
                 .on_click(cx.listener(|this, _, _, cx| this.release_selected(cx)))
                 .on_action(cx.listener(|this, _: &focus::Activate, _, cx| {
                     this.release_selected(cx);
@@ -333,14 +373,47 @@ impl StudioView {
                 .cursor_default()
                 .into_any_element()
         });
+        let (active_depth, level_label) = self.semantic_depth();
+        let depth_ticks = (0..3).map(|index| {
+            div()
+                .w(px(15.0))
+                .h(px(2.0))
+                .rounded_full()
+                .bg(if index <= active_depth {
+                    theme.success
+                } else {
+                    theme.border
+                })
+        });
         let centre = div()
-            .font_family(theme.font_mono.clone())
-            .text_size(px(12.0))
-            .text_color(theme.text_muted)
-            .child(format!("{:.0}%", self.camera.zoom * 100.0))
+            .debug_selector(|| "semantic-depth-readout".into())
+            .min_w(px(78.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(4.0))
+            .child(div().flex().gap(px(3.0)).children(depth_ticks))
+            .child(
+                div()
+                    .font_family(theme.font_mono.clone())
+                    .text_size(px(10.0))
+                    .text_color(theme.text_muted)
+                    .child(format!("{level_label}  {:.0}%", self.camera.zoom * 100.0)),
+            )
             .into_any_element();
 
         control_bar::control_bar(&theme, Shape::Pill, leading, Some(centre), trailing)
+    }
+
+    pub(super) fn semantic_depth(&self) -> (usize, &'static str) {
+        let level = self.snapshot().map_or(DetailLevel::Overview, |snapshot| {
+            detail_level(self.camera, snapshot.nodes.ids.len())
+        });
+        match level {
+            DetailLevel::Overview => (0, "OVERVIEW"),
+            DetailLevel::Communities => (1, "COMMUNITIES"),
+            DetailLevel::Elements => (2, "ELEMENTS"),
+        }
     }
 
     fn selected_node_is_pinned(&self) -> bool {

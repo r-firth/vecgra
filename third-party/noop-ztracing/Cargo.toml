@@ -9,4 +9,4 @@ description = "No-op compatibility facade for GPUI's disabled tracing surface"
 
 [dependencies]
 tracing = "0.1"
-ztracing_macro = { path = "../noop-ztracing-macro" }
+ztracing_macro = { version = "0.1.0", path = "../noop-ztracing-macro" }

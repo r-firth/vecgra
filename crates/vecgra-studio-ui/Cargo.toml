@@ -15,7 +15,7 @@ bezel-theme.workspace = true
 bezel-ui.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
-vecgra-studio-core = { path = "../vecgra-studio-core" }
+vecgra-studio-core = { version = "=0.1.0", path = "../vecgra-studio-core" }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

@@ -41,6 +41,7 @@ use panels::visible_facet_counts;
 use crate::graph_canvas::{
     GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, graph_canvas,
 };
+use crate::graph_navigator::{graph_navigator, navigator_world_position};
 use crate::theme::{palette, relationship_color};
 
 actions!(
@@ -270,6 +271,7 @@ pub struct StudioView {
     world_bounds: Rect,
     selection: Option<SceneSelection>,
     canvas_bounds: Option<Bounds<Pixels>>,
+    navigator_bounds: Option<Bounds<Pixels>>,
     drag: Option<DragState>,
     query_input: Entity<InputState>,
     focus_handle: FocusHandle,
@@ -358,6 +360,7 @@ impl StudioView {
             world_bounds,
             selection: None,
             canvas_bounds: None,
+            navigator_bounds: None,
             drag: None,
             query_input,
             focus_handle,
@@ -1702,6 +1705,26 @@ impl StudioView {
             });
         }
         cx.notify();
+    }
+
+    fn on_navigator_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        let Some(bounds) = self.navigator_bounds else {
+            return;
+        };
+        let center = navigator_world_position(bounds, self.world_bounds, event.position);
+        self.camera_motion.retarget(Camera {
+            center,
+            zoom: self.camera.zoom,
+        });
+        self.status = "Navigator · recentering graph view".into();
+        window.focus(&self.focus_handle, cx);
+        self.begin_presentation_motion(window, cx);
     }
 
     fn on_mouse_move(

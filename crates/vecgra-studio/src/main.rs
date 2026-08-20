@@ -14,26 +14,33 @@ use vecgra_studio_ui::{
 
 actions!(vecgra_studio_desktop, [Quit]);
 
+#[cfg(feature = "visual-test")]
+struct CaptureOptions {
+    path: PathBuf,
+    command: Option<String>,
+    result: Option<usize>,
+    zoom: Option<f32>,
+    center: Option<u64>,
+}
+
 fn main() {
     let database_path = std::env::args_os().nth(1).map(PathBuf::from);
     let initial_window_width = window_dimension("VECGRA_STUDIO_WINDOW_WIDTH", 1_340.0, 760.0);
     let initial_window_height = window_dimension("VECGRA_STUDIO_WINDOW_HEIGHT", 820.0, 520.0);
     #[cfg(feature = "visual-test")]
-    let capture_path = std::env::var_os("VECGRA_STUDIO_CAPTURE").map(PathBuf::from);
-    #[cfg(feature = "visual-test")]
-    let capture_command = std::env::var("VECGRA_STUDIO_CAPTURE_COMMAND").ok();
-    #[cfg(feature = "visual-test")]
-    let capture_result = std::env::var("VECGRA_STUDIO_CAPTURE_RESULT")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok());
-    #[cfg(feature = "visual-test")]
-    let capture_zoom = std::env::var("VECGRA_STUDIO_CAPTURE_ZOOM")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok());
-    #[cfg(feature = "visual-test")]
-    let capture_center = std::env::var("VECGRA_STUDIO_CAPTURE_CENTER")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
+    let capture = std::env::var_os("VECGRA_STUDIO_CAPTURE").map(|path| CaptureOptions {
+        path: PathBuf::from(path),
+        command: std::env::var("VECGRA_STUDIO_CAPTURE_COMMAND").ok(),
+        result: std::env::var("VECGRA_STUDIO_CAPTURE_RESULT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok()),
+        zoom: std::env::var("VECGRA_STUDIO_CAPTURE_ZOOM")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok()),
+        center: std::env::var("VECGRA_STUDIO_CAPTURE_CENTER")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+    });
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
 
     app.run(move |cx| {
@@ -85,34 +92,16 @@ fn main() {
                     cx.new(|cx| Root::new(view.clone(), window, cx).bg(cx.theme().background));
 
                 #[cfg(feature = "visual-test")]
-                if let Some(capture_path) = capture_path {
+                if let Some(capture) = capture {
                     let capture_view = view.clone();
                     if waiting_for_database && !view.read(cx).is_ready() {
                         view.update(cx, |view, _| {
                             view.set_on_ready(move |window, cx| {
-                                schedule_capture(
-                                    window,
-                                    cx,
-                                    capture_path,
-                                    capture_view,
-                                    capture_command,
-                                    capture_result,
-                                    capture_zoom,
-                                    capture_center,
-                                );
+                                schedule_capture(window, cx, capture, capture_view);
                             });
                         });
                     } else {
-                        schedule_capture(
-                            window,
-                            cx,
-                            capture_path,
-                            capture_view,
-                            capture_command,
-                            capture_result,
-                            capture_zoom,
-                            capture_center,
-                        );
+                        schedule_capture(window, cx, capture, capture_view);
                     }
                 }
 
@@ -136,32 +125,20 @@ fn window_dimension(variable: &str, default: f32, minimum: f32) -> f32 {
 fn schedule_capture(
     window: &Window,
     cx: &mut App,
-    capture_path: PathBuf,
+    capture: CaptureOptions,
     view: Entity<StudioView>,
-    capture_command: Option<String>,
-    capture_result: Option<usize>,
-    capture_zoom: Option<f32>,
-    capture_center: Option<u64>,
 ) {
     window.defer(cx, move |window, cx| {
-        if let Some(command) = capture_command {
+        if let Some(command) = capture.command.as_deref() {
             view.update(cx, |view, cx| {
-                view.execute_command(&command, window, cx);
+                view.execute_command(command, window, cx);
             });
             if view.read(cx).is_searching() {
                 let capture_view = view.clone();
                 view.update(cx, |view, _| {
                     view.set_on_search_ready(move |window, cx| {
                         window.defer(cx, move |window, cx| {
-                            finish_visual_state(
-                                window,
-                                cx,
-                                capture_path,
-                                capture_view,
-                                capture_result,
-                                capture_zoom,
-                                capture_center,
-                            );
+                            finish_visual_state(window, cx, capture, capture_view);
                         });
                     });
                 });
@@ -172,15 +149,7 @@ fn schedule_capture(
                 view.update(cx, |view, _| {
                     view.set_on_path_ready(move |window, cx| {
                         window.defer(cx, move |window, cx| {
-                            finish_visual_state(
-                                window,
-                                cx,
-                                capture_path,
-                                capture_view,
-                                capture_result,
-                                capture_zoom,
-                                capture_center,
-                            );
+                            finish_visual_state(window, cx, capture, capture_view);
                         });
                     });
                 });
@@ -191,30 +160,14 @@ fn schedule_capture(
                 view.update(cx, |view, _| {
                     view.set_on_layout_ready(move |window, cx| {
                         window.defer(cx, move |window, cx| {
-                            finish_visual_state(
-                                window,
-                                cx,
-                                capture_path,
-                                capture_view,
-                                capture_result,
-                                capture_zoom,
-                                capture_center,
-                            );
+                            finish_visual_state(window, cx, capture, capture_view);
                         });
                     });
                 });
                 return;
             }
         }
-        finish_visual_state(
-            window,
-            cx,
-            capture_path,
-            view,
-            capture_result,
-            capture_zoom,
-            capture_center,
-        );
+        finish_visual_state(window, cx, capture, view);
     });
 }
 
@@ -222,33 +175,30 @@ fn schedule_capture(
 fn finish_visual_state(
     window: &mut Window,
     cx: &mut App,
-    capture_path: PathBuf,
+    capture: CaptureOptions,
     view: Entity<StudioView>,
-    capture_result: Option<usize>,
-    capture_zoom: Option<f32>,
-    capture_center: Option<u64>,
 ) {
     // Finish any load/layout transition before applying a capture-specific
     // camera center. Otherwise the camera follows the node's old presentation
     // position while its spring moves to the new arrangement.
     view.update(cx, |view, _| view.settle_presentation_for_capture());
-    if let Some(index) = capture_result {
+    if let Some(index) = capture.result {
         view.update(cx, |view, cx| {
             view.activate_search_result(index, window, cx);
         });
     }
-    if let Some(node_id) = capture_center {
+    if let Some(node_id) = capture.center {
         view.update(cx, |view, cx| {
             view.execute_command(&format!("center {node_id}"), window, cx);
         });
     }
-    if let Some(zoom) = capture_zoom {
+    if let Some(zoom) = capture.zoom {
         view.update(cx, |view, cx| {
             view.execute_command(&format!("zoom {zoom}"), window, cx);
         });
     }
     view.update(cx, |view, _| view.settle_presentation_for_capture());
-    capture_frame(window, cx, capture_path);
+    capture_frame(window, cx, capture.path);
 }
 
 #[cfg(feature = "visual-test")]

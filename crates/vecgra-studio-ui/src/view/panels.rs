@@ -1,4 +1,6 @@
 use super::*;
+use bezel_theme::Theme as BezelTheme;
+use bezel_ui::{icons, popover, tooltip::Tooltip, widgets::Content as _};
 
 #[cfg(target_os = "macos")]
 const TITLE_BAR_PLATFORM_INSET: f32 = 80.0;
@@ -176,7 +178,11 @@ impl StudioView {
                 this.child(self.render_evidence_path(cx))
             })
             .when(!showing_search && !showing_path, |this| {
-                this.child(section_label("RELATIONSHIPS"))
+                this.child(section_label(
+                    "RELATIONSHIPS",
+                    relationship_counts.len(),
+                    cx,
+                ))
             })
             .when(!showing_search && !showing_path, |this| {
                 this.child(
@@ -246,7 +252,7 @@ impl StudioView {
                 )
             })
             .when(!showing_search && !showing_path, |this| {
-                this.child(section_label("NODE LABELS"))
+                this.child(section_label("NODE LABELS", label_counts.len(), cx))
             })
             .when(!showing_search && !showing_path, |this| {
                 this.child(
@@ -1201,9 +1207,7 @@ impl StudioView {
                                         )
                                         .child(
                                             div()
-                                                .font_family(
-                                                    cx.theme().mono_font_family.clone(),
-                                                )
+                                                .font_family(cx.theme().mono_font_family.clone())
                                                 .text_xs()
                                                 .text_color(palette().celadon)
                                                 .child(format!("ORIGIN · node:{start}")),
@@ -1352,20 +1356,27 @@ impl StudioView {
                     )
                     .into_any_element()
             }
-            _ => v_flex()
-                .px_3()
-                .gap_2()
-                .text_color(cx.theme().muted_foreground)
-                .child(div().text_sm().child("Select a node or relationship."))
-                .child(
-                    div()
-                        .text_xs()
-                        .line_height(px(18.0))
-                        .child(
-                            "Click to inspect. Double-click a node—or press Enter after selecting it—to open its two-hop context.",
-                        ),
-                )
-                .into_any_element(),
+            _ => {
+                let theme = BezelTheme::of(cx).clone();
+                v_flex()
+                    .debug_selector(|| "inspector-empty-state".into())
+                    .px_3()
+                    .child(theme.empty_state(
+                        icons::COMPASS,
+                        "Nothing selected",
+                        "Choose a node or relationship to inspect it.",
+                    ))
+                    .child(div().h(px(1.0)).bg(cx.theme().border))
+                    .child(
+                        v_flex()
+                            .pt_3()
+                            .gap_2()
+                            .child(inspector_shortcut(&theme, "↵", "Open connected context"))
+                            .child(inspector_shortcut(&theme, "⌘K", "Search the graph"))
+                            .child(inspector_shortcut(&theme, "esc", "Return to overview")),
+                    )
+                    .into_any_element()
+            }
         };
         v_flex()
             .debug_selector(|| "inspector-panel".into())
@@ -1399,6 +1410,7 @@ impl StudioView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let entity = cx.entity().clone();
+        let navigator_entity = entity.clone();
         let dragging_node = match self.drag {
             Some(DragState::Node { index, .. }) => Some(index),
             Some(DragState::Canvas { .. }) | None => None,
@@ -1438,6 +1450,30 @@ impl StudioView {
             ),
             LoadState::Failed(error) => centered_state("Could not open graph", error.clone(), cx),
         };
+        let main_viewport = self
+            .canvas_bounds
+            .map_or(Vec2::new(800.0, 600.0), |bounds| {
+                Vec2::new(bounds.size.width.into(), bounds.size.height.into())
+            });
+        let navigator = (self.semantic_depth().0 > 0)
+            .then(|| {
+                self.snapshot()
+                    .cloned()
+                    .zip(self.workspace.clone())
+                    .map(|(snapshot, workspace)| {
+                        graph_navigator(
+                            snapshot,
+                            workspace,
+                            self.camera,
+                            self.world_bounds,
+                            main_viewport,
+                            self.selection,
+                            self.lens.as_ref().map(LensTransition::emphasis),
+                        )
+                        .into_any_element()
+                    })
+            })
+            .flatten();
         div()
             .id("graph-canvas")
             .debug_selector(|| "graph-canvas".into())
@@ -1462,6 +1498,48 @@ impl StudioView {
                 });
             })
             .child(scene)
+            .when_some(navigator, |this, navigator| {
+                this.child(
+                    div()
+                        .id("graph-navigator")
+                        .debug_selector(|| "graph-navigator".into())
+                        .role(Role::Button)
+                        .aria_label("Graph navigator; click to recenter the canvas")
+                        .absolute()
+                        .top(if show_bezel_controls {
+                            px(12.0)
+                        } else {
+                            px(8.0)
+                        })
+                        .right(if show_bezel_controls {
+                            px(12.0)
+                        } else {
+                            px(8.0)
+                        })
+                        .w(px(if show_bezel_controls { 148.0 } else { 116.0 }))
+                        .h(px(if show_bezel_controls { 104.0 } else { 82.0 }))
+                        .rounded(px(8.0))
+                        .overflow_hidden()
+                        .bg(rgb(0x10181e).opacity(0.93))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .shadow_sm()
+                        .cursor_pointer()
+                        .tooltip(|window, cx| {
+                            Tooltip::text("Click to recenter the graph", window, cx)
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(Self::on_navigator_mouse_down),
+                        )
+                        .on_prepaint(move |bounds, _window, cx| {
+                            navigator_entity.update(cx, |this, _| {
+                                this.navigator_bounds = Some(bounds);
+                            });
+                        })
+                        .child(navigator),
+                )
+            })
             .when(show_bezel_controls, |this| {
                 this.child(
                     div()
@@ -1484,8 +1562,10 @@ impl StudioView {
                 )
             })
             .when(!show_bezel_controls, |this| {
+                let (active_depth, level_label) = self.semantic_depth();
                 this.child(
                     div()
+                        .debug_selector(|| "compact-semantic-depth".into())
                         .absolute()
                         .left_3()
                         .bottom_3()
@@ -1498,7 +1578,19 @@ impl StudioView {
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("{:.0}%", self.camera.zoom * 100.0)),
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(h_flex().gap(px(3.0)).children((0..3).map(|index| {
+                            div().w(px(8.0)).h(px(2.0)).rounded_full().bg(
+                                if index <= active_depth {
+                                    palette().celadon
+                                } else {
+                                    cx.theme().border
+                                },
+                            )
+                        })))
+                        .child(format!("{level_label}  {:.0}%", self.camera.zoom * 100.0)),
                 )
             })
     }
@@ -1813,15 +1905,41 @@ const fn path_strategy_label(strategy: EvidencePathStrategy) -> &'static str {
     }
 }
 
-fn section_label(label: &'static str) -> impl IntoElement {
-    div()
+fn section_label(label: &'static str, count: usize, cx: &Context<StudioView>) -> impl IntoElement {
+    h_flex()
         .px_4()
         .pt_4()
         .pb_2()
+        .items_center()
         .text_xs()
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(rgb(0x70838e))
         .child(label)
+        .child(div().flex_1())
+        .child(
+            div()
+                .font_family(cx.theme().mono_font_family.clone())
+                .font_weight(gpui::FontWeight::NORMAL)
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{} TYPES", format_count(count))),
+        )
+}
+
+fn inspector_shortcut(
+    theme: &BezelTheme,
+    shortcut: &'static str,
+    description: &'static str,
+) -> impl IntoElement {
+    h_flex()
+        .items_center()
+        .gap_2()
+        .child(popover::kbd_hint(theme, shortcut))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.text_muted)
+                .child(description),
+        )
 }
 
 fn inspector_header_label(label: &'static str) -> impl IntoElement {

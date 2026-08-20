@@ -112,7 +112,7 @@ pub struct GraphEmphasis {
 }
 
 impl GraphEmphasis {
-    fn node_score(&self, index: usize) -> f32 {
+    pub(crate) fn node_score(&self, index: usize) -> f32 {
         lerp_score(
             self.from_nodes.get(index).copied().unwrap_or(0.0),
             self.target_nodes.get(index).copied().unwrap_or(0.0),
@@ -784,7 +784,7 @@ fn arrowhead(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Option<Path<Pixels
     builder.build().ok()
 }
 
-fn circle(center: Point<Pixels>, radius: f32, color: Hsla) -> PaintQuad {
+pub(crate) fn circle(center: Point<Pixels>, radius: f32, color: Hsla) -> PaintQuad {
     fill(circle_bounds(center, radius), color).corner_radii(px(radius))
 }
 
@@ -817,7 +817,7 @@ fn segment_may_be_visible(from: Vec2, to: Vec2, viewport: Vec2) -> bool {
     max_x >= -16.0 && max_y >= -16.0 && min_x <= viewport.x + 16.0 && min_y <= viewport.y + 16.0
 }
 
-fn label_color(label: &str) -> Hsla {
+pub(crate) fn label_color(label: &str) -> Hsla {
     let colors = palette();
     let hash = label.bytes().fold(0_u64, |hash, byte| {
         hash.wrapping_mul(109).wrapping_add(byte as u64)

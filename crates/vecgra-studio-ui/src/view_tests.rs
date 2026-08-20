@@ -525,6 +525,7 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(cx.debug_bounds("bezel-graph-controls").is_none());
     assert!(cx.debug_bounds("bezel-search-modes").is_some());
     assert!(cx.debug_bounds("bezel-layout-modes").is_some());
+    assert!(cx.debug_bounds("compact-semantic-depth").is_some());
     assert_eq!(
         cx.debug_bounds("bezel-search-modes").unwrap().center().y,
         cx.debug_bounds("bezel-layout-modes").unwrap().center().y
@@ -554,6 +555,8 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(cx.debug_bounds("wide-toolbar").is_some());
     assert!(cx.debug_bounds("compact-toolbar-primary").is_none());
     assert!(cx.debug_bounds("bezel-graph-controls").is_some());
+    assert!(cx.debug_bounds("semantic-depth-readout").is_some());
+    assert!(cx.debug_bounds("compact-semantic-depth").is_none());
     assert!(cx.debug_bounds("bezel-layout-modes").is_none());
     assert!(cx.debug_bounds("bezel-sidebar-tabs").is_some());
 
@@ -594,6 +597,47 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
         .expect("Bezel zoom control should render at the wide breakpoint");
     cx.simulate_click(zoom_in.center(), Modifiers::none());
     assert!(cx.read(|cx| view.read(cx).camera.zoom) > zoom_before);
+}
+
+#[gpui::test]
+fn deep_zoom_navigator_recenters_without_starting_a_canvas_drag(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bezel_ui::focus::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+
+    view.update(cx, |view, cx| {
+        view.camera.zoom = 4.0;
+        view.camera_motion.cancel_at(view.camera);
+        view.set_selection(Some(SceneSelection::Node(0)));
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(1_340.0), px(820.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+
+    let navigator = cx
+        .debug_bounds("graph-navigator")
+        .expect("deep zoom should show the graph navigator");
+    let camera_before = cx.read(|cx| view.read(cx).camera);
+    cx.simulate_click(
+        point(navigator.right() - px(12.0), navigator.top() + px(12.0)),
+        Modifiers::none(),
+    );
+    view.update(cx, |view, _| view.settle_presentation_for_capture());
+
+    cx.read(|cx| {
+        let view = view.read(cx);
+        assert_ne!(view.camera.center, camera_before.center);
+        assert_eq!(view.camera.zoom, camera_before.zoom);
+        assert_eq!(view.selection, Some(SceneSelection::Node(0)));
+        assert!(view.drag.is_none());
+        assert!(view.status.contains("Navigator"));
+    });
 }
 
 #[gpui::test]

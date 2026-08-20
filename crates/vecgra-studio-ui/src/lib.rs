@@ -4,6 +4,7 @@ use bezel_theme::{Appearance as BezelAppearance, Theme as BezelTheme};
 use gpui::App;
 
 mod graph_canvas;
+mod graph_navigator;
 mod theme;
 mod view;
 

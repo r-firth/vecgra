@@ -24,8 +24,8 @@ serde_json = "1.0.145"
 tree-sitter = "0.26.12"
 tree-sitter-rust = "0.24.2"
 ureq = { version = "3.4.0", features = ["json"] }
-vecgra = { path = "../vecgra" }
-vecgra-embedding = { path = "../vecgra-embedding" }
+vecgra = { version = "=0.1.0", path = "../vecgra" }
+vecgra-embedding = { version = "=0.1.0", path = "../vecgra-embedding" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"
