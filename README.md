@@ -120,8 +120,7 @@ offline embedder for a quick local run. Authentication comes from
 
 ```sh
 target/release/vecgra import-github \
-  BurntSushi/ripgrep ripgrep.vg \
-  100 100 25 10 256 hash 128
+  BurntSushi/ripgrep ripgrep.vg
 
 target/release/vecgra stats ripgrep.vg
 target/release/vecgra check ripgrep.vg
@@ -133,15 +132,16 @@ For semantic quality, build with Qwen3-Embedding-8B through OpenRouter and use
 the same database-level model for queries:
 
 ```sh
-OPENROUTER_API_KEY=... target/release/vecgra import-github \
-  BurntSushi/ripgrep ripgrep-qwen.vg \
-  100 100 25 10 256 qwen 128
+export OPENROUTER_API_KEY=...
+export VECGRA_EMBEDDER=qwen
 
-OPENROUTER_API_KEY=... target/release/vecgra semantic-text \
-  ripgrep-qwen.vg "why was this behaviour changed" 20 2 qwen
+target/release/vecgra import-github \
+  BurntSushi/ripgrep ripgrep-qwen.vg
 
-OPENROUTER_API_KEY=... VECGRA_EMBEDDER=qwen \
-  cargo run --release -p vecgra-studio -- ripgrep-qwen.vg
+target/release/vecgra semantic-text \
+  ripgrep-qwen.vg "why was this behaviour changed"
+
+cargo run --release -p vecgra-studio -- ripgrep-qwen.vg
 ```
 
 Generic JSONL, fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter
