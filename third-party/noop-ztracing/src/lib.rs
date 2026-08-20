@@ -1,4 +1,4 @@
-//! Apache-licensed no-op implementation of GPUI's disabled tracing surface.
+//! Apache-licensed no-op implementation of GPUI's disabled tracing API.
 //!
 //! Vecgra does not enable Zed's `ZTRACING` build-time instrumentation. GPUI's
 //! disabled configuration only needs span-producing macros, a passthrough

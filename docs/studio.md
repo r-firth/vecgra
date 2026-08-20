@@ -5,13 +5,11 @@ workspace, opens the same portable `.vg` container directly, and treats graph
 structure and vector relevance as two views of one result rather than two
 separate products.
 
-This document defines the current product, interaction, rendering, and visual
-contract, then records the local evidence behind performance and platform
-claims.
+This document describes the product, its interaction model, and its renderer.
 
 ## Product contract
 
-| Surface | Decision |
+| Area | Decision |
 |---|---|
 | Product name | Vecgra Studio |
 | Binary | `vecgra-studio` |
@@ -35,7 +33,7 @@ Unicode/IME-aware command field; Bezel owns the segmented modes, graph control
 bar, view navigation, focus rings, and keyboard traversal.
 
 GPUI also resolves disabled GPL tracing facades and the obsolete `block` 0.1.6
-FFI declaration. The workspace replaces the disabled tracing surface with
+FFI declaration. The workspace replaces the disabled tracing API with
 Apache-2.0 no-op compatibility crates and applies a narrow MIT-licensed source
 patch to `block`; neither changes Studio behavior. The exact provenance,
 licence boundary, and removal conditions are in
@@ -50,7 +48,7 @@ The unit of exploration is a query result or bounded expansion, not an
 attempt to draw every record as a giant hairball.
 
 1. Open a `.vg` file and show useful structure immediately.
-2. Search semantically, structurally, or with both in one command surface.
+2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout.
 4. Select a node or relationship and inspect its label, properties, vectors,
    neighbors, and provenance without losing the current view.
@@ -114,7 +112,7 @@ rings. Double-clicking a node, or pressing Enter after selecting it, opens a
 112-node/168-edge two-hop context lens. Expansion rotates across frontier
 branches and relationship types, reserves capacity for the second hop, and
 places semantic hops in separate radial bands. Child groups retain their
-parent’s circular ordering; discovery edges remain prominent while cross-links
+parent's circular ordering; discovery edges remain prominent while cross-links
 stay visible but quieter. The underlying Auto/Force/Structure/Orbit targets are
 preserved. Escape or the
 Overview row springs positions, camera, and emphasis back to that saved
@@ -132,7 +130,7 @@ or failed search states. A command-selected label outside the usual top-ten
 summary replaces the last row while active, so the current control never falls
 out of view. `facet node <label>` and
 `facet relationship <label>` provide the same path through the command box and
-deterministic visual harness.
+deterministic screenshot runner.
 
 Exact paths are a separate evidence mode rather than another generic filter.
 For direct manipulation, selecting a node exposes `Set as path origin` in the
@@ -152,12 +150,12 @@ on pointer precision, color recognition, or a panel that disappears at the
 760-pixel minimum.
 
 `path-start <node> [both|out|in] [max-hops]` drives the same state for the
-command surface and visual harness.
+command box and screenshot runner.
 
 The `path <start> <end> [both|out|in] [relationship-label|-] [max-hops]`
-command searches the complete database off the application thread, then
-hydrates an owned report—including properties and vector counts—after the exact
-engine result is known. Multi-hop searches adapt between the two frontiers and
+command searches the complete database off the application thread. It then
+hydrates a report with properties and vector counts after the engine returns
+an exact result. Multi-hop searches adapt between the two frontiers and
 expose the selected physical plan. The left panel becomes an ordered evidence
 rail: endpoints, each relationship step, traversal orientation, plan, hop
 bound, elapsed time, and visited/read work map directly to the bright directed
@@ -233,7 +231,7 @@ vecgra-studio-core
     bounded search, owned snapshots, layout, LOD, projection, hit testing
         |
 vecgra-studio-ui
-    GPUI entities, canvas, command surface, inspector, themes
+    GPUI entities, canvas, command box, inspector, themes
         |
 vecgra-studio
     process startup, platform policy, menus, windows, diagnostics
@@ -255,7 +253,7 @@ is quiet, dense, and legible.
 
 Palette:
 
-- Graphite `#0B1116`: canvas and deepest surface;
+- Graphite `#0B1116`: canvas and darkest background;
 - Strata `#162129`: panels and raised controls;
 - Mist `#D9E3E8`: primary text and selected labels;
 - Cobalt `#4D8DFF`: vector relevance and semantic search;
@@ -287,223 +285,3 @@ relevance appears as a Cobalt field around the current result or selection. At
 distance it becomes a density contour; close up it becomes ranked halos and
 score marks. This makes Vecgra's native fusion visible without decorating
 every node.
-
-## Design self-critique
-
-A dark three-column developer tool, blue accent, command bar, and node-link
-canvas are all familiar choices. They become generic if every region is a
-rounded card, if the canvas is a random force-directed hairball, or if color is
-only decoration. Studio therefore spends boldness only on the semantic lens,
-uses continuous panel planes instead of card grids, keeps visible primitives
-query-bounded, and assigns color stable meaning. Docking is optional
-customization, not the default information architecture.
-
-## Verification gates
-
-- Pure tests: snapshot ownership, layout determinism, projection, LOD, hit
-  testing, selection, and stale-generation rules.
-- GPUI tests: actions, focus, pointer/keyboard selection, zoom anchoring,
-  loading/error states, and idle frame behavior.
-- Runtime: debug and release launch, real `.vg` file, resize, pan, zoom,
-  selection, close/reopen, and idle.
-- Visual: deterministic database at fixed bounds, default/selected/loading/
-  empty/error states, dark/light/high-contrast, and small/target/wide windows.
-- Performance: application-thread preparation, draw/present time, primitive
-  count, memory, first useful scene, and interaction latency at each LOD.
-
-## Current implementation and evidence
-
-The end-to-end explorer is implemented in this repository, with these current
-boundaries:
-
-- `vecgra-studio-core` opens the portable file read-only, takes a bounded
-  owned snapshot, and chooses a topology-aware Auto layout. Small directed
-  forests use a radial hierarchy; large forests use an O(V+E) top-level
-  subtree analysis to seed a packed constellation before sampled refinement.
-  Small general graphs retain a bounded cell-force pass; graphs with 256 or
-  more nodes use a deterministic portable-Rust implementation of the
-  [SNAP-tFDP](https://arxiv.org/abs/2608.01907) objective: bounded
-  t-distribution forces and edge-centric negative sampling, with O(E) work per
-  epoch and no spatial grid to leak a lattice into the drawing. It also owns
-  deterministic Auto/Force/Structure/Orbit targets and the tested presentation
-  spring/pin/neighbor-physics model;
-- `vecgra-studio-ui` swaps the completed scene on the application thread,
-  paints the graph as one canvas, aggregates fitted large scenes into density
-  bins, batches edges by relationship type, and adds bounded captions and
-  arrowheads. It supports pointer/trackpad navigation, direct node
-  manipulation, persistent pin/release, animated arrangement, node/edge
-  selection, relationship inspection, ranked whole-element search, animated
-  result framing, reversible one-hop focus constellations, and the branch-aware
-  two-hop node context lens. Relationship and node-label rows are focusable,
-  stable-ID taxonomy toggles that drive the same animated graph lens. Ranked
-  rows use stable graph-element identities,
-  list semantics, selected state, and descriptive accessibility labels. The
-  exact-path draft keeps direction, hop limit, destination evidence, and its
-  primary execution action together in the responsive evidence rail. The
-  native title-bar component reserves platform window-control space and owns
-  drag/double-click behavior;
-- `vecgra-studio` owns application identity, window policy, key bindings,
-  assets, and an opt-in Metal offscreen capture harness.
-
-The primary product-shaped fixture now comes from the GitHub engineering-history
-importer rather than an AST. A 37 MB Zed snapshot contains 12,601 nodes, 25,569
-typed relationships, and 40,209 node/relationship vectors: issues, PRs,
-discussions, comments/replies, people, reviews, commits, files, releases, and
-taxonomy. After the sampled-force layout landed, the default capture loaded and
-laid out the complete graph in 30.3 ms; its three startup draws measured 3.326
-ms p50 and 8.552 ms p95/max. A 900% detail capture measured 3.326 ms p50 and
-6.795 ms p95/max and visually removed the former Cartesian bands. A selected
-`CLOSES` relationship capture measured 4.000 ms p50 and 6.611 ms p95/max and
-showed the type, direction, and endpoint identities in the inspector. Explicit
-Force target generation took 15.773 ms (the prior cell-force measurement was
-23.043 ms); the 120 Hz spring simulation settled in 173 frames using 4.482 ms
-total CPU. The optional resistance-distance Structure arrangement took about
-one second end-to-end off the application thread on the same 12,601/25,569
-scene; its
-settled overview capture drew in 1.236 ms p50 and 7.922 ms p95/max across four
-startup draws. The layout benchmark found no duplicate coordinates; projected
-p10 nearest-node clearance rises from 1.91 px at the former 80x zoom ceiling to
-24.42 px at 1,024x. A centered deep-element capture drew in 3.635 ms p50 and
-11.493 ms p95/max across four startup draws. The two-hop context lens around a
-157-degree node retained 37
-direct and 74 second-hop nodes plus 168 typed relationships; its settled
-capture drew in 5.018 ms p50 and 7.840 ms p95/max across three startup draws.
-These are local release-mode smoke
-measurements with deterministic hash embeddings, not sustained-frame,
-cross-machine, or semantic-quality claims.
-
-The same complete Zed fixture returned 24 bounded Hybrid results for `memory
-leak` in 25.7 ms in a release capture, including whole-element score fusion
-across node and relationship vectors. The result-state capture drew in 2.096 ms
-p50 and 7.905 ms p95/max across four startup draws. This measures the current
-scan-plus-native-vector path on one machine; it is not yet a full-text-index or
-latency-distribution claim.
-
-The responsive search state was also captured from the same fixture at the
-1,340×820 target and exact 760×520 minimum logical bounds on a 2× display. The
-minimum layout retained every search, arrangement, release, and camera control,
-kept the ranked result list scrollable, and left a 466-point-wide graph canvas;
-the selected Hybrid result exposed labelled Text and Vector rails without
-clipping. These are structural visual checks, not cross-platform evidence.
-
-The active `AUTHORED` relationship facet was captured from a deterministic
-193-node/296-edge fixture at the same 1,340×820 target and 760×520 minimum
-logical bounds on a 2× display. Both captures retain the active row’s blue
-structural stroke and `LENS` marker, make all 103 matching directed edges and
-their endpoints legible, keep unrelated topology as dim context, and preserve
-every toolbar control. The release harness recorded 4.538 ms p50 across three
-startup draws at the target size and 3.619 ms p50 at the minimum. The p95/max
-values were 11.158 ms and 9.839 ms respectively; these are visual smoke samples,
-not sustained-frame latency distributions.
-
-With the animated result lens settled on an `AUTHORED` relationship, the
-bounded 11-element constellation capture drew in 2.018 ms p50 and 8.131 ms
-p95/max across four startup draws. The visual harness advances the same spring
-math deterministically before capture; interactive motion remains driven by
-display frames in the normal application.
-
-The larger structural stress fixture was generated from Vecgra's own Rust
-source using the Tree-sitter importer and deterministic hash embedder. It contains
-110,303 nodes, 110,302 relationships, and 441,157 node/relationship vectors.
-Studio's bounded view loaded and laid out 50,000 nodes plus 49,999 relationships
-in 86.5 ms using the topology-aware constellation plus sampled refinement in a
-warm-file optimized run on the development machine. An explicit 50k-node Force
-rearrangement computed in 35.3 ms off-thread; the higher-quality Structure
-arrangement computed in 1,585.5 ms off-thread on the same scene. Its 120 Hz
-spring solver consumed
-0.099 ms CPU per simulated frame and settled in 171 frames. The three final
-startup draws measured 2.945 ms p50 and 10.174 ms p95/max.
-With the relationship layer enabled on the same 50k-node view, a 200% middle-
-distance capture measured 4.424 ms p50 and 9.273 ms p95/max across three draws;
-the fitted selected-edge capture measured 4.182 ms p50 and 8.675 ms p95/max.
-These tiny capture samples are smoke evidence, not latency distributions.
-The unoptimized load/layout
-path was 584.5 ms after replacing force layout for this forest-shaped dataset,
-down from 17,970.6 ms. These are local smoke measurements, not sustained-frame
-or cross-machine claims.
-
-The exact path from repository node 0 to sampled-out syntax node 100000 adds
-seven nodes and seven relationships to that 50k scene before presenting the
-complete seven-hop chain. The adaptive either-direction plan reports 129 unique
-visited nodes, 62 expansions, and 188 relationship reads; the former one-sided
-plan reported 22,928, 15,293, and 38,219 respectively for the identical chain.
-The final 24×-framed release captures drew in 3.211 ms p50 at 1,340×840 and
-2.574 ms p50 at the exact 760×520 minimum; their p95/max values were 10.437 ms
-and 7.676 ms.
-Separate origin and destination-candidate captures preserve the explicit
-`ORIGIN` marker and path intent at target width. The configurable
-intent captures drew in 7.598 ms p50 at 1,340×840, 4.551 ms p50 at the exact
-minimum, and 5.902 ms p50 with a destination candidate selected; p95/max was
-9.470 ms, 7.492 ms, and 8.077 ms respectively. After moving destination
-execution into the rail, final candidate captures drew in 5.874 ms p50 and
-9.642 ms p95/max at 1,340×820, and 4.123 ms p50 and 7.676 ms p95/max at the
-exact 760×520 minimum. These remain startup-draw smokes, not
-interaction-latency distributions.
-
-The final planner-ledger captures of the same 27-from/35-to query drew in 3.152
-ms p50 and 10.117 ms p95/max at 1,340×820, and 2.787 ms p50 and 7.623 ms
-p95/max at 760×520. The minimum-width destination draft with persistent
-`ENTER RUNS` guidance drew in 4.198 ms p50 and 7.934 ms p95/max. These are
-also startup-draw smokes rather than interaction-latency distributions.
-
-The repeatable layout benchmark uses visited, bounded graph characterization,
-so it is safe for cyclic graphs and DAGs with shared descendants as well as
-forests:
-
-```sh
-cargo run --release -p vecgra-studio-core \
-  --example layout_bench -- graph.vg
-
-cargo run --release -p vecgra-studio-core \
-  --example layout_bench -- graph.vg structure
-```
-
-The repeatable visual path is:
-
-```sh
-cargo build --release -p vecgra-studio --features visual-test
-
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio.png \
-  target/release/vecgra-studio graph.vg
-
-# Capture a deterministic inspection state.
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-edge.png \
-VECGRA_STUDIO_CAPTURE_COMMAND='edge 0' \
-  target/release/vecgra-studio graph.vg
-
-# Wait for search, activate ranked result 0, settle every spring, then capture.
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-focus.png \
-VECGRA_STUDIO_CAPTURE_COMMAND='memory leak' \
-VECGRA_STUDIO_CAPTURE_RESULT=0 \
-  target/release/vecgra-studio graph.vg
-
-# Exercise the exact minimum supported window geometry.
-VECGRA_STUDIO_WINDOW_WIDTH=760 VECGRA_STUDIO_WINDOW_HEIGHT=520 \
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-minimum.png \
-  target/release/vecgra-studio graph.vg
-
-# Activate a taxonomy row through the same command path as pointer input.
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-facet.png \
-VECGRA_STUDIO_CAPTURE_COMMAND='facet relationship AUTHORED' \
-  target/release/vecgra-studio graph.vg
-
-# Set a path origin, then select a destination candidate without executing it.
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-path-origin.png \
-VECGRA_STUDIO_CAPTURE_COMMAND='path-start 0 out 4' \
-VECGRA_STUDIO_CAPTURE_CENTER=1 \
-  target/release/vecgra-studio graph.vg
-
-# Wait for the complete database path, settle its lens, then capture the
-# evidence rail and its one-for-one directed canvas chain. Sampled-out path
-# records are injected before the frame is drawn.
-VECGRA_STUDIO_CAPTURE=/tmp/vecgra-studio-path.png \
-VECGRA_STUDIO_CAPTURE_COMMAND='path 0 42 out SUPPORTS 6' \
-  target/release/vecgra-studio graph.vg
-```
-
-The next evidence gates are pointer-to-photon interaction-latency distributions,
-pinned-state captures, multi-selection and marquee movement, and Windows/Linux
-native launch evidence. A
-custom GPUI graph primitive remains contingent on those measurements; the
-current public quad/path pipeline is already fast enough for the fitted
-50k-node overview smoke case.

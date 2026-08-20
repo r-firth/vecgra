@@ -18,8 +18,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo deny check advisories licenses sources
 ```
 
-Vecgra Studio currently has its strongest support on Apple Silicon macOS. The
-database and CLI are deliberately independent of the desktop dependency stack.
+Vecgra Studio has only been verified on Apple Silicon macOS. The database and
+CLI do not depend on the desktop stack.
 
 ## Change expectations
 

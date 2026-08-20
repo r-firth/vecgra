@@ -219,7 +219,7 @@ fn evidence_paths_preserve_direction_hydration_and_incomplete_outcomes() {
         32,
     )
     .unwrap_err();
-    assert!(error.contains("relationship label “MISSING” does not exist"));
+    assert!(error.contains("relationship label \"MISSING\" does not exist"));
 }
 
 #[test]

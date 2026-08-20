@@ -469,7 +469,7 @@ impl StudioView {
     }
 
     /// Deterministically advances presentation springs for the offscreen
-    /// visual harness, whose compositor does not deliver display-link frames.
+    /// screenshot runner, whose compositor does not deliver display-link frames.
     #[doc(hidden)]
     pub fn settle_presentation_for_capture(&mut self) {
         for _ in 0..600 {
@@ -1329,7 +1329,7 @@ impl StudioView {
 
     /// Presents a bounded two-hop context around a node. The expansion is
     /// branch-balanced and relationship-type-diverse in the scene layer, so a
-    /// hub or one prolific relationship cannot monopolise the useful context.
+    /// hub or one prolific relationship cannot consume the whole context budget.
     fn focus_node_context(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.path_generation = self.path_generation.wrapping_add(1);
         drop(self.path_task.take());

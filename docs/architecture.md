@@ -14,14 +14,14 @@ This is similar to a table snapshot followed by a WAL, except the checkpoint is
 laid out for graph traversal and vector search. Compaction writes a new
 checkpoint without changing stable element IDs.
 
-The important storage terms are:
+Storage terms:
 
 - **Column-projected records:** source ID, target ID, label, and vector offsets
   live in fixed-width mapped records. Hot operators read only the fields they
   require without allocating a Rust object for every graph element.
 - **Memory mapping:** the OS makes file pages addressable as memory and loads
-  only pages that are touched. This enables fast open and lets cold data leave
-  RAM naturally.
+  only pages that are touched. The database opens without reading the whole
+  file, and the OS can reclaim cold pages.
 - **CSR adjacency:** outgoing or incoming edge IDs for each node occupy one
   contiguous array. A second offsets array says where each node's slice begins
   and ends. A degree-one traversal is two offset reads plus one edge read, with
@@ -83,7 +83,7 @@ directly from the mapping on little-endian machines and decoded on big-endian
 machines; point/traversal/vector paths project only existence, endpoints, or
 vector-span fields as appropriate. They point into the property and vector
 sections. Properties remain encoded until an API call or predicate needs them.
-The compact mapped descriptor intentionally has no per-record decode cache:
+The compact mapped descriptor has no per-record decode cache:
 avoiding millions of `OnceLock` values matters more than caching a cold
 property. CSR arrays are mapped under the same endian policy. Every v8 section
 starts on a 64-byte cache-line boundary, so adding a format descriptor cannot
@@ -122,7 +122,7 @@ order are preserved independently, including infinities and canonical signed
 zero. Numeric equality is a one-value ordered range, while inclusive,
 exclusive, and unbounded range predicates use two binary searches. NaN remains
 eligible only for ordinary typed equality semantics because it has no useful
-range order. Storing each number in the ordered table only—not both tables—cuts
+range order. Storing each number only in the ordered table, rather than both tables, cuts
 3.58 MB from the 99,560-row MoReVec checkpoint.
 
 The smallest property range competes with label cardinality at query time. WAL
@@ -152,7 +152,7 @@ Promotion is explicit rather than a hidden query side effect. `warm_vector_cache
 returns the owned allocation size, `vector_cache_bytes` exposes current use,
 and all ordinary searches stay compressed until the caller opts in. This avoids
 a large synchronous latency spike and makes the memory/throughput tradeoff
-controllable. Sparse ANN reranking deliberately continues to use F16 even when
+controllable. Sparse ANN reranking continues to use F16 even when
 the cache exists because its smaller random-gather working set measures faster.
 A full search scores the base and delta in one logical offset space. Updating
 one vector never hydrates the base.
@@ -238,7 +238,7 @@ separate node/edge weights, path decay, hop and degree penalties, direction and
 label filters, a hop bound, and an expansion budget. This is a database
 operator, not an agent framework feature.
 
-`shortest_path` is the exact evidence-chain primitive beneath higher-level
+`shortest_path` is the exact evidence-chain operation used by higher-level
 path ranking. One-hop work stays on a simple BFS. Deeper work searches from
 both endpoints, reverses traversal direction on the destination side, and
 costs each complete frontier by node expansions plus a conservative adjacency
@@ -279,22 +279,22 @@ A single local debug smoke changed from 23.94 ms to 2.02 ms; the work counters
 are deterministic, while those timings are not a distribution or
 cross-machine claim.
 
-`vecgra-studio-core::evidence_path_database` is the owned presentation
-boundary above that primitive. It opens a read-only view, resolves an optional
+`vecgra-studio-core::evidence_path_database` builds an owned presentation from
+that operation. It opens a read-only view, resolves an optional
 relationship label, executes the bounded exact path, and hydrates node and
 relationship properties, vector counts, titles, labels,
 stored-versus-traversed direction, physical strategy, termination, and work
 diagnostics before releasing the read guard. Native clients can therefore run
 the complete unit on a background executor without leaking mapped records or
-database locks into UI state. It deliberately preserves `ExpansionLimit` as an
+database locks into UI state. It preserves `ExpansionLimit` as an
 incomplete result rather than collapsing it into absence.
 
 `one_hop_plan` uses the same conservative label/property posting cardinalities
 as scalar filtering, estimates directional adjacency work, and exposes the
-selected physical strategy before execution. This is the first general pattern
-cost boundary; the Cypher-compatible parser remains a convenience surface for
-one-hop patterns. The internal plan model will remain vector-aware rather than
-forcing all features through Cypher syntax.
+selected physical strategy before execution. This forms the first general pattern
+cost boundary; the Cypher-compatible parser remains convenience syntax for
+one-hop patterns. The internal plan model will remain vector-aware instead of
+forcing every operator through Cypher syntax.
 
 ## Recovery and compaction
 

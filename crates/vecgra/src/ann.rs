@@ -68,7 +68,7 @@ impl<T: Copy> IndexColumn<T> {
                 let pointer = map[*byte_offset..].as_ptr();
                 debug_assert_eq!(pointer.align_offset(std::mem::align_of::<T>()), 0);
                 // SAFETY: the checkpoint decoder validates alignment and the
-                // complete range for these primitive fixed-width columns.
+                // complete range for these fixed-width columns.
                 unsafe { std::slice::from_raw_parts(pointer.cast::<T>(), *count) }
             }
         }

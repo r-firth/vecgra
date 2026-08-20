@@ -25,10 +25,10 @@ are source patches, not forks of product behavior.
 `deny.toml` records the remaining unmaintained transitive advisories and why
 they are present. They currently enter through the pinned desktop stack (or a
 development-only benchmark), not the storage engine's default dependency
-surface. New vulnerabilities, unknown registries, copyleft dependencies, and
+graph. New vulnerabilities, unknown registries, copyleft dependencies, and
 unexplained advisories fail CI.
 
-`cargo audit` additionally reports `rustls-pemfile` from Zed's locked reqwest
+`cargo audit` also reports `rustls-pemfile` from Zed's locked reqwest
 source. Cargo does not resolve that package into any of Vecgra's declared
 target graphs, so `cargo-deny` correctly treats it as outside the build rather
 than adding a non-matching exception.

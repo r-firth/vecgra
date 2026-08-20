@@ -11,7 +11,7 @@ use vecgra::{
 };
 
 pub(crate) fn run() -> Result<(), Box<dyn Error>> {
-    let mut arguments = env::args().skip(1);
+    let mut arguments = env::args().skip(1).peekable();
     let Some(command) = arguments.next() else {
         print_help();
         return Ok(());
@@ -22,6 +22,17 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     }
     if matches!(command.as_str(), "--version" | "-V") {
         println!("vecgra {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if arguments
+        .peek()
+        .is_some_and(|argument| matches!(argument.as_str(), "help" | "--help" | "-h"))
+    {
+        arguments.next();
+        if let Some(extra) = arguments.next() {
+            return Err(format!("unexpected argument {extra:?} after help").into());
+        }
+        print_command_help(&command)?;
         return Ok(());
     }
     let handled = run_import_command(&command, &mut arguments)?
@@ -376,7 +387,7 @@ fn run_benchmark_command(
                 result_count = hits.len();
             }
             samples.sort_unstable();
-            // Ground truth is deliberately evaluated after timing so an exact
+            // Evaluate ground truth after timing so an exact
             // full scan cannot warm or promote the vector tier used by ANN.
             let exact_hits = candidate_vectors
                 .map(|_| read.vector_search(&vector, target, 10, label))
@@ -1279,44 +1290,151 @@ fn recall(exact: &[vecgra::VectorHit], approximate: &[vecgra::VectorHit]) -> f64
         / exact.len() as f64
 }
 
+const COMMAND_USAGES: &[(&str, &str)] = &[
+    (
+        "import-jsonl",
+        "import-jsonl <nodes.jsonl> <edges.jsonl> <database> <dimension> [f16|f32]",
+    ),
+    ("import-fbin", "import-fbin <train.fbin> <database>"),
+    (
+        "import-node-fbin",
+        "import-node-fbin <train.fbin> <metadata.jsonl> <database> [f16|f32]",
+    ),
+    (
+        "bench-fbin",
+        "bench-fbin <database> <test.fbin> <neighbors.ibin> [queries] [candidate-vectors] [k] [compressed|hot-f32]",
+    ),
+    (
+        "bench-filtered-fbin",
+        "bench-filtered-fbin <database> <test.fbin> [queries] [stride] [candidate-elements] [k]",
+    ),
+    (
+        "bench-range-fbin",
+        "bench-range-fbin <database> <test.fbin> <neighbors.ibin> <property> <inclusive-lower-bound> [queries] [candidate-elements] [k]",
+    ),
+    (
+        "import-graphalytics",
+        "import-graphalytics <vertices> <edges> <database>",
+    ),
+    (
+        "bench-bfs",
+        "bench-bfs <database> <source> [reference-output|-] [iterations]",
+    ),
+    (
+        "bench-wcc",
+        "bench-wcc <database> [reference-output|-] [iterations]",
+    ),
+    (
+        "bench-pagerank",
+        "bench-pagerank <database> [reference-output|-] [benchmark-iterations]",
+    ),
+    (
+        "import-rust",
+        "import-rust <repository> <database> [dimension] [hash|qwen] [batch-size]",
+    ),
+    (
+        "import-github",
+        "import-github <owner/repository> <database> [issues] [pulls] [discussions] [releases] [dimension] [hash|qwen] [batch-size]",
+    ),
+    ("stats", "stats <database>"),
+    ("check", "check <database>"),
+    (
+        "plan-search",
+        "plan-search <database> [nodes|edges|both] [label]",
+    ),
+    (
+        "bench-property",
+        "bench-property <database> <nodes|edges|both> <key> <json-scalar> [iterations]",
+    ),
+    (
+        "numeric-range",
+        "numeric-range <database> <nodes|edges|both> <key> <int|float> <inclusive-lower|-> <inclusive-upper|-> [limit]",
+    ),
+    ("node", "node <database> <node-id>"),
+    ("neighbors", "neighbors <database> <node-id> [out|in|both]"),
+    (
+        "shortest-path",
+        "shortest-path <database> <start-node-id> <end-node-id> [max-hops] [out|in|both] [edge-label|-] [max-expansions]",
+    ),
+    (
+        "search-text",
+        "search-text <database> <query> [limit] [hash|qwen]",
+    ),
+    (
+        "range-text",
+        "range-text <database> <seed-node-id> <query> [hops] [limit] [hash|qwen] [out|in|both] [edge-label|-] [node-label|-]",
+    ),
+    (
+        "search-facets",
+        "search-facets <database> '<facet-1> || <facet-2>' [limit] [hash|qwen] [nodes|edges|both] [label|-] [candidate-elements]",
+    ),
+    (
+        "semantic-text",
+        "semantic-text <database> <query> [limit] [max-hops] [hash|qwen]",
+    ),
+    (
+        "bench-search",
+        "bench-search <database> <query> [iterations] [hash|qwen] [nodes|edges|both] [label|-] [candidate-vectors]",
+    ),
+    (
+        "bench-ann",
+        "bench-ann <database> [queries] [candidate-vectors] [nodes|edges|both]",
+    ),
+    (
+        "query",
+        "query <database> 'MATCH (a:A)-[e:E]->(b:B) RETURN a,e,b LIMIT 10'",
+    ),
+    (
+        "query-text",
+        "query-text <database> '<MATCH query>' <semantic-text> [hash|qwen]",
+    ),
+    (
+        "bench-pattern",
+        "bench-pattern <database> <query> [iterations]",
+    ),
+    (
+        "bench-neighbors",
+        "bench-neighbors <database> <node-id> [iterations] [out|in|both]",
+    ),
+    (
+        "bench-expand",
+        "bench-expand <database> <seed-node-id> <hops> [iterations] [out|in|both]",
+    ),
+    (
+        "compact",
+        "compact <source-database> <destination-database> [f16|f32]",
+    ),
+    (
+        "export-ladybug",
+        "export-ladybug <database> <output-directory>",
+    ),
+];
+
 fn print_help() {
+    println!("Vecgra CLI\n\nUsage:\n  vecgra --version");
+    for (_, usage) in COMMAND_USAGES {
+        println!("  vecgra {usage}");
+    }
     println!(
-        "Vecgra CLI\n\n\
-         Usage:\n\
-           vecgra --version\n\
-           vecgra import-jsonl <nodes.jsonl> <edges.jsonl> <database> <dimension> [f16|f32]\n\
-           vecgra import-fbin <train.fbin> <database>\n\
-           vecgra import-node-fbin <train.fbin> <metadata.jsonl> <database> [f16|f32]\n\
-           vecgra bench-fbin <database> <test.fbin> <neighbors.ibin> [queries] [candidate-vectors] [k] [compressed|hot-f32]\n\
-           vecgra bench-filtered-fbin <database> <test.fbin> [queries] [stride] [candidate-elements] [k]\n\
-           vecgra bench-range-fbin <database> <test.fbin> <neighbors.ibin> <property> <inclusive-lower-bound> [queries] [candidate-elements] [k]\n\
-           vecgra import-graphalytics <vertices> <edges> <database>\n\
-           vecgra bench-bfs <database> <source> [reference-output|-] [iterations]\n\
-           vecgra bench-wcc <database> [reference-output|-] [iterations]\n\
-           vecgra bench-pagerank <database> [reference-output|-] [benchmark-iterations]\n\
-           vecgra import-rust <repository> <database> [dimension] [hash|qwen] [batch-size]\n\
-           vecgra import-github <owner/repository> <database> [issues] [pulls] [discussions] [releases] [dimension] [hash|qwen] [batch-size]\n\
-           vecgra stats <database>\n\
-           vecgra check <database>\n\
-           vecgra plan-search <database> [nodes|edges|both] [label]\n\
-           vecgra bench-property <database> <nodes|edges|both> <key> <json-scalar> [iterations]\n\
-           vecgra numeric-range <database> <nodes|edges|both> <key> <int|float> <inclusive-lower|-> <inclusive-upper|-> [limit]\n\
-           vecgra node <database> <node-id>\n\
-           vecgra neighbors <database> <node-id> [out|in|both]\n\
-           vecgra shortest-path <database> <start-node-id> <end-node-id> [max-hops] [out|in|both] [edge-label|-] [max-expansions]\n\
-           vecgra search-text <database> <query> [limit] [hash|qwen]\n\
-           vecgra range-text <database> <seed-node-id> <query> [hops] [limit] [hash|qwen] [out|in|both] [edge-label|-] [node-label|-]\n\
-           vecgra search-facets <database> '<facet-1> || <facet-2>' [limit] [hash|qwen] [nodes|edges|both] [label|-] [candidate-elements]\n\
-           vecgra semantic-text <database> <query> [limit] [max-hops] [hash|qwen]\n\
-           vecgra bench-search <database> <query> [iterations] [hash|qwen] [nodes|edges|both] [label|-] [candidate-vectors]\n\n\
-           vecgra bench-ann <database> [queries] [candidate-vectors] [nodes|edges|both]\n\n\
-           vecgra query <database> 'MATCH (a:A)-[e:E]->(b:B) RETURN a,e,b LIMIT 10'\n\n\
-           vecgra query-text <database> '<MATCH query>' <semantic-text> [hash|qwen]\n\n\
-           vecgra bench-pattern <database> <query> [iterations]\n\n\
-           vecgra bench-neighbors <database> <node-id> [iterations] [out|in|both]\n\n\
-           vecgra bench-expand <database> <seed-node-id> <hops> [iterations] [out|in|both]\n\n\
-           vecgra compact <source-database> <destination-database> [f16|f32]\n\n\
-           vecgra export-ladybug <database> <output-directory>\n\n\
+        "\nRun `vecgra <command> --help` for command help.\n\
          OPENROUTER_API_KEY is required for qwen. VECGRA_EMBEDDER sets the default embedder."
     );
+}
+
+fn print_command_help(command: &str) -> Result<(), Box<dyn Error>> {
+    let Some((_, usage)) = COMMAND_USAGES.iter().find(|(name, _)| *name == command) else {
+        return Err(format!("unknown command {command}").into());
+    };
+    println!("Usage:\n  vecgra {usage}");
+    match command {
+        "import-github" => println!(
+            "\nDefaults: 1000 issues, 1000 pull requests, 300 discussions, \
+             100 releases, 256 dimensions, hash embeddings, batch size 128.\n\
+             Authentication: GITHUB_TOKEN, GH_TOKEN, or `gh auth login`."
+        ),
+        "import-rust" => println!("\nDefaults: 256 dimensions, hash embeddings, batch size 128."),
+        "semantic-text" => println!("\nDefaults: 20 results, 2 hops, hash embeddings."),
+        _ => {}
+    }
+    Ok(())
 }

@@ -683,8 +683,8 @@ impl Graph {
             )?;
         }
 
-        // The checkpoint sketch is immutable. WAL vectors are deliberately
-        // searched exhaustively, mirroring an LSM delta and guaranteeing that
+        // The checkpoint sketch is immutable. Search WAL vectors exhaustively,
+        // mirroring an LSM delta and guaranteeing that
         // fresh writes are immediately visible without rebuilding the base.
         if target.accepts(ElementRef::Node(0))
             && (!self.node_overlays.is_empty() || !self.nodes.is_empty())

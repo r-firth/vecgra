@@ -39,7 +39,7 @@ struct NavigatorCacheKey {
 
 /// The miniature graph is invariant under main-camera movement; only its
 /// viewport rectangle changes. Retaining it removes a full node scan from
-/// every pan and zoom frame without changing any painted primitive.
+/// every pan and zoom frame without changing the painted geometry.
 #[derive(Default)]
 pub(crate) struct GraphNavigatorCache {
     key: Option<NavigatorCacheKey>,

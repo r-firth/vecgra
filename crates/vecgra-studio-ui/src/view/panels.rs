@@ -907,7 +907,7 @@ impl StudioView {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(format!(
-                            "Searching all nodes and relationships for “{query}”…"
+                            "Searching all nodes and relationships for \"{query}\"…"
                         )),
                 )
                 .into_any_element(),
@@ -920,7 +920,7 @@ impl StudioView {
                     div()
                         .text_sm()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(format!("No results for “{query}”")),
+                        .child(format!("No results for \"{query}\"")),
                 )
                 .child(
                     div()
@@ -955,7 +955,7 @@ impl StudioView {
                                             .text_sm()
                                             .font_weight(gpui::FontWeight::SEMIBOLD)
                                             .truncate()
-                                            .child(format!("“{}”", report.query)),
+                                            .child(format!("\"{}\"", report.query)),
                                     )
                                     .child(
                                         div()

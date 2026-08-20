@@ -1,14 +1,14 @@
-# Neo4j comparison harness
+# Neo4j comparison
 
 This directory contains two reproducible Neo4j baselines for Vecgra's
 public benchmark corpora:
 
-- a same-process Neo4j Community 2026.06 baseline that deliberately avoids
+- a same-process Neo4j Community 2026.06 baseline with no
   Bolt and client serialization; and
 - a loopback Neo4j Enterprise 2026.07/Desktop baseline using dedicated native
   vector properties, Cypher 25 `SEARCH`, `neo4j-admin`, and GDS.
 
-The harness requires Java 25. Its Gradle wrapper downloads all other Java
+The benchmark requires Java 25. Its Gradle wrapper downloads all other Java
 dependencies:
 
 ```sh
@@ -120,7 +120,7 @@ CALL gds.graph.project(
 ```
 
 The official input is dense and ordered, so external source 2 maps to internal
-node ID 2. The harness first checks the reached cardinality through
+node ID 2. The benchmark first checks the reached cardinality through
 `gds.bfs.stream`, then times server-reported computation and full driver
 latency through `gds.bfs.stats`:
 

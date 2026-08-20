@@ -1,9 +1,8 @@
 # GitHub engineering-history import
 
 `vecgra import-github` turns a GitHub repository's collaboration history into a
-portable Vecgra database. It is deliberately not a code AST: the graph
-captures work, decisions, evidence, authorship, review, discussion, and the
-files and commits those activities affected.
+portable Vecgra database. It captures issues, decisions, authorship, reviews,
+discussion, commits, and changed files rather than a code AST.
 
 ```sh
 # Uses GITHUB_TOKEN, GH_TOKEN, or the token from `gh auth login`.
@@ -20,7 +19,7 @@ The destination must not already exist.
 
 ## Graph shape
 
-| Nodes | Important relationships |
+| Nodes | Relationships |
 |---|---|
 | `Repository`, `Topic` | `HAS_TOPIC` |
 | `Issue`, `PullRequest` | `HAS_ISSUE`, `HAS_PULL_REQUEST`, `CLOSES` |
@@ -31,9 +30,8 @@ The destination must not already exist.
 
 Content nodes normally receive separate title/context and body vectors. Every
 relationship receives a natural-language embedding payload describing its
-typed assertion. This makes relationship search and path scoring first-class:
-a query can match the meaning of “this PR closes that failure” independently
-of either endpoint's prose.
+typed assertion. A query can therefore match "this PR closes that failure"
+without relying on either endpoint's prose.
 
 Properties remain ordinary typed graph data. Content records retain IDs,
 numbers, state, URLs, text, ISO dates, numeric millisecond timestamps, and
@@ -43,7 +41,7 @@ KiB and text sent to an embedder is bounded to 12 KiB.
 ## Completeness and recovery
 
 Top-level limits select the most recently updated records. Nested connections
-are intentionally bounded to keep GitHub GraphQL responses reliable: issue and
+are bounded so GitHub GraphQL responses stay manageable. Issue and
 PR comments and reviews are capped at 20, PR commits at 40, changed files at
 50, discussion comments at 40, and discussion replies at 20. The corresponding
 GitHub `totalCount` is retained, so a consumer can see when a connection has
@@ -82,5 +80,5 @@ target/release/vecgra semantic-text graph.vg \
   'regressions fixed after reviewer feedback' 20 3 qwen
 ```
 
-The hash embedder is useful for deterministic plumbing, performance tests, and
-offline demos; use a real model when judging semantic quality.
+The hash embedder tests deterministic storage and query mechanics. Use a real
+model when judging semantic quality.

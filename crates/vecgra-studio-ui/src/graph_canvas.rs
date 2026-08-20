@@ -455,7 +455,7 @@ fn prepare_scene(
     }
     // A context lens already paints its bounded edge set. Repainting every
     // incident edge of the selected hub would punch through the lens and send
-    // bright lines to deliberately hidden nodes.
+    // bright lines to nodes omitted by that bounded view.
     if let Some(node_index) = selected_node
         && emphasis.is_none_or(|lens| lens.dim < 0.35)
     {

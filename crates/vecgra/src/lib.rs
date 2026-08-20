@@ -1,6 +1,6 @@
 //! A vector-native embedded labelled property graph database.
 //!
-//! The storage kernel keeps its dependency surface deliberately small.
+//! The storage kernel has few dependencies.
 //! Importers and language-specific integrations belong in adjacent crates.
 //!
 //! # Quick start

@@ -1,6 +1,6 @@
 //! Query embedding adapters shared by Vecgra tools.
 //!
-//! A database deliberately records only its vector dimension, not model
+//! A database records its vector dimension, not model
 //! metadata. Callers choose the one embedding model used for their database.
 
 use serde::{Deserialize, Serialize};

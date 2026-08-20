@@ -6,7 +6,7 @@ pub(super) fn run_force_layout(
     options: LayoutOptions,
     pinned: Option<&[bool]>,
 ) {
-    // The cell-centroid approximation below is excellent for small, direct
+    // The cell-centroid approximation is fast for small, direct
     // manipulation layouts, but its square neighborhoods become visible as a
     // lattice once thousands of nodes are present. Large general graphs use
     // sampled t-distribution forces instead: work and auxiliary memory remain
@@ -14,7 +14,7 @@ pub(super) fn run_force_layout(
     //
     // This follows the objective introduced by SNAP-tFDP (Wang et al., IEEE
     // VIS 2026), with a deterministic RNG and portable scalar Rust. The hot
-    // loop is deliberately contiguous and branch-light so it can later gain
+    // loop is contiguous and branch-light so it can later gain
     // platform SIMD or a GPU backend without changing layout semantics.
     const SAMPLED_T_FORCE_NODE_THRESHOLD: usize = 256;
     if positions.len() >= SAMPLED_T_FORCE_NODE_THRESHOLD && !edges.ids.is_empty() {
@@ -268,8 +268,8 @@ impl LayoutRng {
 
 /// Lays out each connected component with Omega's low-rank resistance-distance
 /// stress model, then packs the independent components without inventing edges
-/// between them. This mode deliberately favors global topology and community
-/// faithfulness over the latency of the default sampled-force arrangement.
+/// between them. This mode spends more time to preserve global topology and
+/// community structure than the default sampled-force arrangement.
 pub(super) fn run_resistance_structure_layout(
     positions: &mut [Vec2],
     edges: &SceneEdges,
@@ -439,9 +439,8 @@ fn resistance_component(
         .iter()
         .any(|point| !point.x.is_finite() || !point.y.is_finite())
     {
-        // Numerical failure should never poison the Studio scene. A stable
-        // phyllotaxis component remains inspectable and makes the fallback
-        // visually explicit instead of returning a collapsed origin.
+        // Numerical failure must not poison the Studio scene. Fall back to a
+        // stable phyllotaxis component instead of collapsing every node at the origin.
         const GOLDEN_ANGLE: f32 = 2.399_963_1;
         for (index, position) in coordinates.iter_mut().enumerate() {
             let radius = (index as f32 + 1.0).sqrt();

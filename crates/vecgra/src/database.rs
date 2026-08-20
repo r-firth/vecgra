@@ -731,7 +731,7 @@ impl ReadGuard<'_> {
 
     /// Returns only the nodes reachable within `max_hops`, optionally keeping
     /// the seed nodes and applying an ordinary node label/property predicate.
-    /// Traversed relationship IDs are deliberately not materialized.
+    /// This does not materialize traversed relationship IDs.
     ///
     /// # Errors
     ///
@@ -805,7 +805,7 @@ impl ReadGuard<'_> {
     }
 
     /// Streams adjacent `(node_id, edge_id)` pairs. This avoids cloning edge
-    /// records and is the preferred primitive for graph algorithms.
+    /// records and is the preferred operation for graph algorithms.
     ///
     /// # Errors
     ///

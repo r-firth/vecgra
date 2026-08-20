@@ -20,7 +20,7 @@ impl SearchMode {
 }
 
 /// One whole-element search result. Nodes and relationships share the same
-/// ranked result surface because both can carry native vectors.
+/// ranked result set because both can carry native vectors.
 #[derive(Clone, Debug)]
 pub struct SearchHit {
     pub element: ElementRef,
@@ -146,7 +146,7 @@ pub fn evidence_path_database(
     let edge_label = relationship_label
         .map(|label| {
             read.label_id(label)
-                .ok_or_else(|| format!("relationship label “{label}” does not exist"))
+                .ok_or_else(|| format!("relationship label \"{label}\" does not exist"))
         })
         .transpose()?;
     let result = read

@@ -1,102 +1,91 @@
-# Frontier research and design implications
+# Research notes
 
-This is the working research map, not a claim that every cited idea is already
-implemented.
+These papers and experiments shaped Vecgra's design. A cited idea is not
+necessarily implemented.
 
 ## Native vector/graph execution
 
-[TigerVector (2025)](https://arxiv.org/abs/2501.11216) makes embeddings a graph
-attribute type and composes distributed vector search with graph query blocks.
-It validates the unified-system direction, but Vecgra goes further at the
-local storage level: nodes and relationships both own vectors, the checkpoint
-physically co-designs graph and vector access, and semantic traversal can score
-relationships rather than retrieving vertices then joining.
+[TigerVector (2025)](https://arxiv.org/abs/2501.11216) stores embeddings as a
+graph attribute type and composes distributed vector search with graph query
+blocks. Vecgra makes a different storage tradeoff. Nodes and relationships own
+vectors in one local checkpoint, and semantic traversal can score relationships
+without retrieving vertices and joining them later.
 
-[NaviX (2025)](https://arxiv.org/abs/2506.23397) is the most directly relevant
-ANN work. It stores HNSW through graph-DB primitives, pre-evaluates an arbitrary
+[NaviX (2025)](https://arxiv.org/abs/2506.23397) is the closest ANN comparison.
+It stores HNSW through graph database operations, pre-evaluates an arbitrary
 predicate into a candidate subset, and adapts filtered search using local
-selectivity. Vecgra now has that execution contract: compressed typed
+selectivity. Vecgra uses the same plan shape. Compressed typed
 candidate sets can come from labels, traversal, or application subplans; exact,
 binary-sketch, and MaxSim execution all consume them before scoring/candidate
 budgeting. v8 adds automatic typed equality and ordered numeric-range postings
-whose candidate ranges are reconciled with the WAL. The remaining work is
-correlation-aware partition choice and richer compound predicate classes,
-rather than separate “vector DB” behavior.
+whose candidate ranges are reconciled with the WAL. Correlation-aware partition
+choice and compound predicates remain open work.
 
 [Filtered Vector Search: State-of-the-art and Research Opportunities
 (2025)](https://research.google/pubs/filtered-vector-search-state-of-the-art-and-research-opportunities/)
-formalizes why prefilter, inline-filter, and postfilter strategies change with
+explains why prefilter, inline-filter, and postfilter strategies change with
 selectivity and vector/filter correlation. External VIBE measurements already
 show distinct local cost shapes: a contiguous unfiltered exact scan remains
 competitive through about 64M float comparisons, while scattered candidates
 cross at roughly 12M floats for 512+-D vectors and 32M for narrower vectors.
-Observed correlation and partition locality should refine those measured
-priors.
+Correlation and partition locality are the missing inputs to that policy.
 
 [Filtered Approximate Nearest Neighbor Search in Vector Databases
-(2026)](https://arxiv.org/abs/2602.11443) adds two especially useful pieces:
-the MoReVec corpus couples 768-dimensional text embeddings to real scalar
+(2026)](https://arxiv.org/abs/2602.11443) introduces the MoReVec corpus, which
+couples 768-dimensional text embeddings to real scalar
 filters, and its Global-Local Selectivity metric distinguishes global predicate
 cardinality from the predicate density near a query. Its experiments also find
 that hybrid exact/approximate execution avoids optimizer mistakes and that IVF
 can beat HNSW for low-selectivity filtered search. Vecgra now runs the
-official 99,560-row Movies/medium workload through ordinary fbin + typed JSONL.
+official 99,560-row Movies/medium workload through fbin and typed JSONL.
 It exactly matches all tested filter cardinalities. At 10.8% selectivity the
 planner retains exact search; at 20.7% it switches to a 5,147-row sketch rerank,
 reaching 0.9992 official recall@10 at ~2.03 ms total p50 including ordered range
-evaluation. This is the paper's adaptive exact/approximate lesson implemented
-as a measured local policy, not merely cited. A partition tier should still be
-judged on MoReVec rather than justified by unfiltered recall alone.
+evaluation. Any partitioned index should earn its place on MoReVec, not on
+unfiltered recall alone.
 
 [Approximate Nearest Neighbor Search with Graph Range Filters
 (2026)](https://arxiv.org/abs/2607.00727) defines the ANNGR workload directly:
 nearest-neighbor search constrained to the `r`-hop neighborhood of a query
 node. Its DLH design converts distance-aware graph labels into a small number
 of set intersections, compresses large sets with Bloom filters, and memoizes
-intermediate state for repeated query nodes. Vecgra already exposes the
-exact prefilter version of this contract: a node-only compressed bounded range
-is intersected with an optional label/property predicate, and only then does
-the engine choose exact gather or persisted sketch/rerank. The result reports
+intermediate state for repeated query nodes. Vecgra prefilters the exact
+version. It intersects a compressed node range with an optional label or
+property predicate before choosing exact gather or persisted sketch/rerank. The result reports
 both reachable cardinality and the chosen vector plan. Avoiding traversed-edge
 materialization cuts wiki-Talk radius-3 and radius-6 expansion time by roughly
-one quarter. The paper identifies the next adaptive branch: broad or repeatedly
-queried neighborhoods may favor memoized/approximate membership and
-postfiltering over rebuilding a complete exact frontier.
+one quarter. Broad or repeated neighborhoods may be cheaper with memoized or
+approximate membership than with a rebuilt exact frontier.
 
-[BoomHQ (2026)](https://arxiv.org/abs/2604.24552) goes beyond scalar
-selectivity by learning vector–attribute correlation and query-neighborhood
-patterns to choose execution hints. A small embedded engine should not require
-a learned model to function, but it should collect the same evidence:
-predicate cardinality, neighborhood cardinality, ANN survivors, rerank work,
-and achieved recall. The inspectable property/label/full-scan plan is the
-deterministic base on which observed correlation can later refine choices.
+[BoomHQ (2026)](https://arxiv.org/abs/2604.24552) learns vector-attribute
+correlation and query-neighborhood patterns to choose execution hints. Requiring
+a learned optimizer would be a poor default for a small embedded engine. Vecgra
+can still record the useful inputs: predicate and neighborhood cardinality, ANN
+survivors, rerank work, and achieved recall. Those measurements can refine the
+deterministic property, label, and full-scan plan.
 
-[AkasicDB (2026)](https://arxiv.org/abs/2608.09214) independently validates
-unified vector, graph, and relational execution, composing ANN as an iterator
-inside a traversal/join plan. It uses dedicated vector, graph, and PostgreSQL
-stores coordinated by one execution layer. Vecgra's differentiator is
-physical rather than merely logical integration: one local file, native node
-and relationship multivectors, shared candidate sets, and no separate service
-or relational runtime. Its lesson is still important: native operators must be
-composable and incremental instead of hidden behind an application RAG
+[AkasicDB (2026)](https://arxiv.org/abs/2608.09214) composes ANN as an iterator
+inside a traversal and join plan. It coordinates separate vector, graph, and
+PostgreSQL stores. Vecgra instead keeps node and relationship multivectors,
+candidate sets, and graph records in one local file. In both designs, operators
+need to compose incrementally rather than hide behind an application RAG
 pipeline.
 
 ## Graph algorithm execution
 
 [Algorithm Support for Graph Databases, Done Right
 (2026)](https://arxiv.org/abs/2601.06705) argues that graph algorithms belong
-inside the graph system and should share its storage and execution machinery,
-rather than requiring a separate export-oriented analytics stack. That is a
-useful boundary for this engine: the primitive should be a fast mapped graph
-scan/frontier/pull API on which algorithms and hybrid retrieval plans compose,
-not a catalogue of opaque agent-specific routines.
+inside the graph system and share its storage and execution machinery. For
+Vecgra, that means a fast mapped scan, frontier, and pull API. Algorithms and
+hybrid retrieval plans should compose from those operations rather than require
+a separate analytics export.
 
-The official Graphalytics wiki-Talk corpus now exercises three different
-physical access patterns against complete supplied outputs: directed frontier
+The official Graphalytics wiki-Talk corpus exercises three physical access
+patterns against complete supplied outputs: directed frontier
 BFS, undirected WCC, and iterative incoming-pull PageRank with dangling-mass
-redistribution. This matters to the vector-native design because a semantic
-candidate set is also a graph frontier: compressed sets, endpoint projection,
-CSR locality, and bounded scoring should remain shared execution primitives.
+redistribution. Semantic candidate sets use the same machinery as graph
+frontiers: compressed sets, endpoint projection, CSR locality, and bounded
+scoring.
 
 ## Quantized coarse search
 
@@ -104,11 +93,11 @@ CSR locality, and bounded scoring should remain shared execution primitives.
 [official implementation](https://github.com/VectorDB-NTU/RaBitQ-Library)
 show that randomized quantization can provide very compact similarity estimates
 with useful error bounds and fast bitwise kernels. [VSAG
-(2025)](https://arxiv.org/abs/2503.17911) reinforces the systems lessons:
-cache-friendly organization, low-precision distance computation, and automatic
-parameter selection matter as much as the high-level ANN graph.
+(2025)](https://arxiv.org/abs/2503.17911) measures the same systems concerns:
+cache layout, low-precision distance computation, and parameter selection can
+matter as much as the ANN graph.
 
-Vecgra v6 persists a deliberately simpler measured first tier: two
+Vecgra v6 uses a simpler measured first tier: two
 structured randomized Hadamard rotations followed by up to a 512-bit sign
 sketch (earlier 256-bit v5 files remain readable).
 The sketch is scanned sequentially. On one-vector corpora, a query-only
@@ -117,9 +106,9 @@ source F16/F32 vectors are then reranked exactly. This asymmetric score raised
 official VIBE recall from 0.9938 at 20k reranks to 0.9967 at only 12k while
 reducing p50 from 5.963 to 5.419 ms, with no format or file-size change. It is
 not presented as RaBitQ and has no equivalent theoretical error bound; exact
-recall curves decide whether it is used. Its useful properties are tiny in-file
-overhead, portable construction, contiguous reads, natural node/edge
-multivectors, and no pointer-heavy ANN graph in RAM.
+recall curves decide whether it is used. It adds little to the file, builds in
+portable Rust, reads contiguously, handles node and edge multivectors, and does
+not keep a pointer-heavy ANN graph in RAM.
 
 ## Update-friendly vector storage
 
@@ -133,8 +122,8 @@ recent WAL data remains immediately searchable through exhaustive scan. Its
 attribute postings with vector clusters so filters and ANN maintenance share
 partition boundaries.
 
-The local embedded setting has different latency economics, but the transferable
-ideas are strong:
+Object-store latency differs from local mmap and SSD access. The useful pieces
+are:
 
 - immutable indexed base plus an exact recent delta;
 - large contiguous partitions instead of pointer-heavy random I/O;
@@ -146,20 +135,18 @@ ideas are strong:
 
 The 2026 storage tutorial [Vector Search for the Future: From Memory-Resident,
 Static Heterogeneous Storage, to Cloud-Native
-Architectures](https://arxiv.org/abs/2601.01937) independently organizes the
-frontier around block layout, memory/SSD/object tiers, query strategy, and
-update maintenance. For this local engine the relevant scale boundary is mmap
-page and SSD-range locality, not object-store RPC, but it reinforces that a
-future partition directory must point to contiguous independently searchable
-blocks rather than merely adding an in-memory centroid graph.
+Architectures](https://arxiv.org/abs/2601.01937) compares block layouts,
+memory and storage tiers, query strategies, and update maintenance. Vecgra's
+scale boundary is mmap page and SSD-range locality, not object-store RPC. A
+future partition directory should therefore point to contiguous searchable
+blocks, not an in-memory centroid graph over scattered data.
 
 Vecgra already implements the immutable F16 base, persisted binary coarse
 index, exact F32 delta, explicit inspectable hot promotion, and block-ranged
-verification.
-The next scale tier should compare an SPFresh-like contiguous partition layer
+verification. The next scale tier should compare an SPFresh-like contiguous partition layer
 with NaviX-like filtered HNSW, using exact recall@k as the oracle.
 
-Two tempting no-format-change shortcuts were also tested and rejected on the
+Two no-format-change shortcuts failed on the
 million-row VIBE workload. Eight 16-bit multi-probe tables over disjoint pieces
 of the 512-bit signature inspected 188k rows at radius three but reached only
 0.790 official recall@10 at 6.94 ms; radius four inspected 480k, reached 0.960,
@@ -169,11 +156,11 @@ path was both faster (roughly 5.5--5.9 ms in those paired runs) and more
 accurate (0.990 on the 200-query sample). Neither experiment remains in the
 engine API.
 
-A reproducible Faiss IVF design probe (`scripts/ivf_frontier_probe.py`) gives a
-more constructive result. With 4,096 centroids, 512 probes inspect about 118k
+A reproducible Faiss IVF design probe (`scripts/ivf_frontier_probe.py`) did
+better. With 4,096 centroids, 512 probes inspect about 118k
 VIBE rows and reach 0.998 official recall@10 at 1.76 ms in Faiss; 256 probes
 inspect 59k but fall to 0.989. This is not a Vecgra performance claim.
-It narrows the durable design: train a compact centroid directory, physically
+The result points to a concrete design: train a compact centroid directory, physically
 co-locate vectors/sketches and filter postings by partition, probe enough
 contiguous partitions to meet measured recall, then scan the exact WAL delta.
 Random short-code postings and scattered gathers are not an adequate stand-in
@@ -183,23 +170,21 @@ for that physical layout.
 
 [PathRAG (2025)](https://arxiv.org/abs/2502.14902) argues for relational path
 retrieval with redundancy and flow-aware pruning rather than flat entity
-retrieval. This supports treating a path as a ranked evidence object. The engine
-currently combines seed, edge, and destination-node similarity with path decay,
-hop penalty, degree penalty, and hard expansion bounds. Future work should learn
-or calibrate these components without turning the database into an agent
-framework.
+retrieval. Vecgra ranks paths as evidence objects by combining seed, edge, and
+destination-node similarity with path decay, hop penalty, degree penalty, and
+hard expansion bounds. The weights still need calibration. That work belongs
+in retrieval, not in an agent framework baked into the database.
 
-Embedding every relationship is intentional. It removes a schema-time decision
-about which predicates are “semantic,” allows a query to distinguish relations
-between equally similar endpoints, and provides the primitive needed for path
-ranking. Path embeddings themselves should be derived/cacheable query artifacts,
-not a permanently materialized vector for every combinatorial path.
+Vecgra embeds every relationship. This avoids a schema-time decision about
+which predicates are "semantic" and lets a query distinguish relations between
+similar endpoints. Path embeddings should be derived or cached per query, not
+stored for every possible path.
 
-The engine also now exposes an exact bounded shortest-path operator as the
+The engine exposes an exact bounded shortest-path operator as the
 non-semantic evidence baseline. It normalizes traversal order by stable node
 and relationship IDs, supports outgoing/incoming/undirected and relationship
 label constraints, and reports expansion-budget truncation separately from
-“not found within the hop bound.” Start- and end-side expansion counters expose
+"not found within the hop bound." Start- and end-side expansion counters expose
 how its costed bidirectional plan spent that budget, and always sum to the total
 expanded count. This gives Studio and retrieval planners a reproducible path
 object to compare against learned or embedding-weighted path ranking without
@@ -209,29 +194,27 @@ confusing an incomplete search with graph absence.
 
 [MG²-RAG (2026)](https://arxiv.org/abs/2604.04969) constructs multi-granularity
 multimodal graphs with unified textual and visual nodes, then propagates dense
-relevance over the graph. The storage implication is not separate image tables;
-it is multiple vectors per element in one shared embedding space, plus typed
-provenance in ordinary properties and edges. Vecgra's multivector model
-supports both a single query's “best matching view” and weighted late
-interaction: each text/image/query facet selects its best stored facet, their
+relevance over the graph. Vecgra stores multiple vectors per element in one
+embedding space instead of adding separate image tables. Typed properties and
+edges hold provenance. A query can select the "best matching view" or use
+weighted late interaction. Each text, image, or query facet selects its best stored facet, their
 scores are averaged, and the result exposes the matched facet indices. The
 binary coarse tier mirrors that MaxSim reduction at the whole-element level
 before exact reranking, so elements with more views do not consume more
 candidate slots.
 
-The one-model-per-database assumption remains useful. A multimodal embedding
+One embedding model per database keeps this simple. A multimodal embedding
 model can place text, image regions, audio, or other views in one space without
 storing redundant model metadata beside every vector. Changing embedding space
 is a database migration, not a row-level concern.
 
 ## Product boundary
 
-Agent context is a demanding benchmark, not the schema. The database should be
-excellent at semantic entry, evidence relationships, bounded traversal,
-incremental writes, provenance-like properties, and compact local deployment.
-It should not hard-code agents, memories, TTL policy, ACLs, prompt formats, or a
-particular RAG framework.
+Agent context is a demanding benchmark, not the schema. Vecgra needs fast
+semantic entry, relationship evidence, bounded traversal, incremental writes,
+and compact local deployment. It does not need agent memories, TTL policy,
+ACLs, prompt formats, or a RAG framework in the storage model.
 
-The defensible position is: **a small embedded property graph whose physical
-storage and planner treat vectors, filters, relationships, and paths as one
-workload**. “Faster Cypher” is useful compatibility; it is not the core design.
+The product is a small embedded property graph whose storage and planner treat
+vectors, filters, relationships, and paths as one workload. "Faster Cypher" is
+useful compatibility, not the reason to build it.

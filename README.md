@@ -31,27 +31,24 @@ property multigraph, node and relationship embeddings, and multivectors in one
 portable `.vg` file.
 
 Most graph databases bolt a vector index onto nodes. Vecgra makes vectors
-part of the graph itself: relationships are searchable elements, graph
+part of the graph itself. Relationships are searchable elements, graph
 predicates can shrink the candidate set before scoring, and a semantic query
-can return a path—not merely a pile of nearby chunks.
+can return a path instead of a pile of nearby chunks.
 
-> [!IMPORTANT]
-> Vecgra is an early 0.1 source release. It does not yet promise production
-> support or a stable on-disk/API contract.
+Vecgra is an early 0.1 source release. Expect the API and file format to change.
 
 The headless engine and CLI are the portable core and are checked on Linux and
 macOS. Studio is currently verified on Apple Silicon macOS; Windows and Linux
-remain source targets until native launch evidence exists. See the
-[release checklist](docs/release-checklist.md) for the exact publication bar.
+remain source targets until native launch evidence exists.
 
-## What this unlocks
+## What you can build
 
-- **Ask why, not just what.** Search for “why did authentication move to the
-  gateway?” and rank the discussion, decision, commit, and `CHANGES` /
+- **Ask why, not just what.** Search for "why did authentication move to the
+  gateway?" and rank the discussion, decision, commit, and `CHANGES` /
   `CLOSES` relationships as one evidence path.
 
-- **Search relationships directly.** Find every edge that *means* “blocks,”
-  “supports,” or “contradicts,” even when its endpoints and source schemas are
+- **Search relationships directly.** Find every edge that means "blocks,"
+  "supports," or "contradicts," even when its endpoints and source schemas are
   unrelated. Embedded edges become a practical semantic ontology layer.
 
 - **Move between modalities.** Start with a screenshot embedding, land on the
@@ -69,10 +66,10 @@ remain source targets until native launch evidence exists. See the
   deployments, ownership, or compatibility constraints before making a
   recommendation.
 
-These are ordinary graph workloads composed with native vector operators—not
-agent-framework concepts baked into the storage model.
+These are graph workloads composed with native vector operators. Vecgra does
+not bake agent-framework concepts into the storage model.
 
-## Built differently
+## How it works
 
 - **Vectors belong to graph elements.** Nodes and parallel/self relationships
   can each own one or more vectors.
@@ -90,7 +87,7 @@ agent-framework concepts baked into the storage model.
 - **Plans are inspectable.** Scalar and vector paths expose their filters,
   candidate budgets, strategy, and rerank work as structured diagnostics.
 
-The native Rust API is the primary surface. The CLI also includes a focused
+The native Rust API is the primary interface. The CLI also includes a focused
 one-hop Cypher-compatible query subset and hybrid semantic-pattern operators.
 
 ## Quick start
@@ -185,7 +182,7 @@ details, exact configurations, recall methodology, memory policy, and caveats
 are in [the reproducible benchmark notes](docs/benchmarks.md). A latency number
 without recall is not accepted as an optimization.
 
-## Read deeper
+## Documentation
 
 - [Storage and execution architecture](docs/architecture.md)
 - [Benchmark methodology and competitor audits](docs/benchmarks.md)
@@ -193,11 +190,10 @@ without recall is not accepted as an optimization.
 - [Studio architecture and interaction contract](docs/studio.md)
 - [Research and frontier design notes](docs/research.md)
 - [Dependency and licence policy](docs/dependencies.md)
-- [Release checklist](docs/release-checklist.md)
 
-Vecgra is general-purpose graph infrastructure. Agent context is a strong
-workload because it benefits from semantic entry points and evidence paths;
-the database itself contains no agent-only TTL, ACL, or framework concepts.
+Vecgra is a general-purpose graph database. Agent context is a demanding test
+because it needs semantic entry points and evidence paths. The database has no
+agent-specific TTL, ACL, or framework concepts.
 
 ## Licence
 

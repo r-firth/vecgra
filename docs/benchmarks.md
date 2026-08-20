@@ -47,7 +47,7 @@ On the same source it produces:
 
 This doubles semantic facets for only about 4,400 additional unique model
 inputs over the older importer. The hash embedder measures parsing/storage, not
-semantic quality. The v7 result additionally contains widened 512-bit sketches,
+semantic quality. The v7 result also contains widened 512-bit sketches,
 mapped owner columns, and 3.47M automatic property postings. The earlier direct
 v5 builder took 4.36 s / 453 MB; v7 spends more build work and 72.8 MB of file
 space on those query structures while remaining below 500 MB private.
@@ -129,16 +129,16 @@ non-vector graph in about 18 MB and measured:
 | `Syntax-AST_CHILD-Syntax`, limit 100 | 12.215 ms | ~0.003 ms |
 | Point degree/property query | 0.428 ms | ~0.000083 ms adjacency API |
 
-This is directional, not a publishable head-to-head: Ladybug was called through
-Python and a declarative query engine, Vecgra through a release Rust CLI
-and native operators; Ladybug's file contains no vectors; and the schemas are
-not byte-equivalent. The clean conclusion is narrower: Ladybug still opens
-faster, while Vecgra's current warm adjacency/operator path is extremely
-cheap. A fair Rust binding and LSQB/LDBC harness remain required.
+This is not a clean head-to-head. Ladybug was called through Python and a
+declarative query engine; Vecgra used a release Rust CLI and native operators.
+Ladybug's file contains no vectors, and the schemas are not byte-equivalent.
+The result says only that Ladybug opened faster while Vecgra's warm adjacency
+operators were faster. A Rust binding and LSQB or LDBC benchmark would make a
+fairer comparison.
 
 ## Reproduce
 
-Useful commands are:
+Reproduction commands:
 
 ```sh
 cargo test --workspace
@@ -187,10 +187,9 @@ An external single-thread Faiss IVFFlat probe is retained as a reproducible
 design tool rather than a product comparison. On the same million vectors,
 4,096 centroids and 512 probes inspected about 117,918 rows per query, reached
 0.998 official recall@10, and measured 1.76 ms/query inside Faiss. At 256 probes
-it inspected 58,573 rows and reached only 0.989. This supports a future native
-partition tier only if its vector/sketch/filter rows are physically contiguous;
-it does not justify layering an in-memory Faiss dependency over the current
-file.
+it inspected 58,573 rows and reached only 0.989. A native partition tier would
+need similarly contiguous vector, sketch, and filter rows. Adding an in-memory
+Faiss dependency would not fix the current file layout.
 
 ### VIBE/Yandex: one million modern multimodal vectors
 
@@ -297,7 +296,7 @@ bytes. Direct construction took 1.60 s with about 94 MB maximum RSS / 60 MB
 private peak on the development machine.
 
 The following single-threaded results use 200 queries for the two smallest
-subsets and 500 for the larger subsets. “Total” includes rebuilding the exact
+subsets and 500 for the larger subsets. "Total" includes rebuilding the exact
 ordered range set for every query as well as vector search. Official recall
 below 1.0 is largely the expected F16/normalization difference: exact F16
 itself is 0.9986–0.9995 on the affected rows.
@@ -333,8 +332,8 @@ target/release/vecgra bench-range-fbin /tmp/morevec.vg \
 As a same-machine embedded-system check, DuckDB 1.5.5 plus its official VSS
 extension loaded the identical 99,560 F32 vectors and built a default cosine
 HNSW index. One thread and 500 `avg_rating >= 8.1`, k=10 queries were used.
-DuckDB's physical plan was HNSW index scan followed by the rating filter—not a
-prefiltered vector search.
+DuckDB's physical plan was an HNSW index scan followed by the rating filter.
+It did not prefilter the vector search.
 
 | Measurement | DuckDB VSS | Vecgra |
 |---|---:|---:|
@@ -346,13 +345,11 @@ prefiltered vector search.
 | Minimum results returned | 0 | 10 |
 | Forced exact p50 / recall | 104.43 ms / 0.9996 | 2.86 ms isolated / 0.9994 |
 
-This is directional, not a general DuckDB claim: DuckDB was called through
-Python with a 768-value bound parameter, retained F32, used extension defaults,
-and is a general analytical SQL engine; Vecgra's benchmark runs inside
-Rust, stores F16, and has a purpose-built prefilter path. The useful conclusion
-is architectural and independently visible in `EXPLAIN`: postfiltering an
-unfiltered HNSW result is unsuitable at 20.7% selectivity, while an ordered
-metadata range feeding exact/ANN choice preserves cardinality and recall.
+This does not compare the databases as a whole. DuckDB was called through
+Python with a 768-value bound parameter, retained F32, and used extension
+defaults. Vecgra ran inside Rust, stored F16, and used a purpose-built prefilter.
+`EXPLAIN` shows the relevant difference: DuckDB filtered an unfiltered HNSW
+result, while Vecgra fed an ordered metadata range into its exact or ANN choice.
 
 ### ANN-Benchmarks COCO text-to-image
 
@@ -435,9 +432,9 @@ on the widest case, while avoiding the edge posting result:
 
 On the ripgrep hash-embedding graph, `range-text` from `build.rs` over six
 outgoing hops produced 131 node candidates (262 vector facets) and correctly
-selected the exact gathered path. This is an end-to-end smoke test of graph
-range construction, ordinary node filtering, adaptive planning, and vector
-ranking; the hash embedder's scores are not a semantic-quality benchmark.
+selected the exact gathered path. The run covers graph-range construction,
+node filtering, adaptive planning, and vector ranking. Hash-embedding scores do
+not measure semantic quality.
 
 The six-hop run used about 5.7 MB private memory (mapped resident pages are
 excluded). Radius two is a practical exact vector prefilter; the power-law
@@ -468,12 +465,12 @@ target/release/vecgra bench-expand wiki-talk.vg 2 2 10 out
 
 ### Pass 1: Neo4j 2026.06 Community embedded
 
-This is the first direct competitor baseline. It uses Neo4j Community
-2026.06.0 embedded in the benchmark JVM on Java 25, with no Bolt, HTTP, Docker,
+The first competitor baseline uses Neo4j Community 2026.06.0 embedded in the
+benchmark JVM on Java 25, with no Bolt, HTTP, Docker,
 or client serialization. Lucene's Java Vector API was active. The JVM used a
 2--4 GiB ZGC heap and Neo4j used a 1 GiB page cache. Both engines ran warm,
 single-threaded queries on the same 14-core Apple M4 Pro / 24 GB machine on
-2026-08-18. The checked-in harness and complete reproduction commands are in
+2026-08-18. The checked-in benchmark and complete reproduction commands are in
 [`benchmarks/neo4j`](../benchmarks/neo4j/README.md).
 
 The Community embedded artifact stores embeddings as supported
@@ -482,9 +479,9 @@ property type as an Enterprise storage feature. The 2026.06 vector index
 provider accepts both, so this does not change the Lucene search path, but it
 is relevant to the whole-store size comparison.
 
-This comparison is intentionally narrower than "which database is better".
-Neo4j has a much larger mutable, transactional, server, language, and tooling
-surface. Vecgra exploits an immutable indexed base and direct native API.
+This comparison does not answer "which database is better".
+Neo4j supports far more mutable, transactional, server, language, and tooling
+workloads. Vecgra exploits an immutable indexed base and direct native API.
 Conversely, embedding Neo4j removes network and driver overhead. Vector search
 uses the supported Cypher 25 `SEARCH` path with one transaction per query; BFS
 uses Neo4j's embedded relationship API because Community does not ship the GDS
@@ -516,9 +513,9 @@ Neo4j's best measured recall-matched point is therefore about 2.86x slower at
 p50 and 5.3x larger on disk, despite returning slightly higher recall. Raising
 HNSW construction quality took 121.959 s for the index rebuild and did not
 improve latency: its extra connectivity crossed the recall target at a lower
-search expansion, but traversal cost rose. This is evidence for the current
-contiguous coarse-scan/rerank design at one million vectors, not a claim that it
-will dominate HNSW or partitioned indexes at every scale.
+search expansion, but traversal cost rose. At one million vectors, Vecgra's
+contiguous coarse scan and rerank was faster. That does not predict its result
+against HNSW or partitioned indexes at other scales.
 
 #### Native filtered MoReVec vectors
 
@@ -578,8 +575,8 @@ the official driver over loopback Bolt; connection setup is reported but
 excluded from query samples. GDS 2026.07 and `neo4j-admin` are the versions
 installed by Desktop.
 
-This is the primary product-path comparison. It is less favorable to
-Vecgra than the first pass in several places, as a fair audit should be.
+The second pass uses the normal product path and produces smaller margins than
+the embedded Community run.
 The generated databases were isolated from the default `neo4j` database.
 
 #### VIBE/Yandex with native vectors
@@ -665,23 +662,18 @@ at four, so the four-thread row is the strongest executable result from this
 Desktop instance, not a claim about a separately licensed higher-concurrency
 GDS deployment.
 
-#### What the audit changes
+#### Revised conclusions
 
-The vector-search lead is genuine: it survives native Enterprise vector
-storage, native filtering, the latest provider, Java's Vector API, matched
-recall, and normal loopback product usage. The original whole-store headline
-was directionally right but overstated because Community stored vectors as
-lists; the defensible native-vector result is about 3.3x, excluding disclosed
-transaction logs. The original traversal and import margins were also
-overstated: `neo4j-admin` and GDS reduce them from 17.1x and 13.7x to roughly
-2--3x for import and 1.26x against four-thread GDS. Neo4j wins pure-graph disk
-footprint on this corpus.
+With native Enterprise vector storage and matched recall, Vecgra's vector path
+measured about 3.3x faster and used about 3.3x less disk, excluding Neo4j's
+transaction logs. The first Community run overstated both margins because it
+stored vectors as lists. `neo4j-admin` and GDS also reduce the import and BFS
+margins to roughly 2--3x for import and 1.26x against four-thread GDS. Neo4j
+uses less disk for the graph-only corpus.
 
-The architectural conclusions still hold. The sequential binary coarse tier
-plus exact rerank remains justified at one million vectors; typed postings
-must remain inside the vector planner; and persisted CSR is competitive even
-against a projected analytics graph. The next frontier is a physically
-contiguous partition tier for larger or colder bases, an exact recent-write
-delta, and mixed graph/filter/vector workloads. The benchmark harness retains
-both Neo4j passes so future changes must improve scale without hiding product
-overhead or surrendering current quality.
+The measured design case is narrow. Sequential binary coarse search plus exact
+rerank works at one million vectors, typed postings belong inside the vector
+planner, and persisted CSR can compete with a projected analytics graph. Larger
+or colder datasets still need a contiguous partition tier and an exact
+recent-write delta. Both Neo4j passes remain in the repository so later changes
+can be compared against the same product overhead and recall.
