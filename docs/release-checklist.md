@@ -34,11 +34,9 @@ replace measured values with estimates.
 
 ## Repository settings
 
-- Enable private vulnerability reporting, secret scanning, Dependabot alerts,
-  and dependency updates.
+- Enable Dependabot alerts and dependency updates.
 - Protect the default branch with the three CI jobs required.
-- Check that issue security links, contribution policy, code of conduct, and
-  Apache-2.0 licence render correctly.
+- Check that the contribution policy and Apache-2.0 licence render correctly.
 - Revoke any temporary provider credentials used during development before the
   repository becomes public.
 

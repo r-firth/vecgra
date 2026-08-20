@@ -3,9 +3,6 @@ description: Report reproducible incorrect behavior or a regression
 title: "bug: "
 labels: ["bug"]
 body:
-  - type: markdown
-    attributes:
-      value: For security-sensitive reports, use private vulnerability reporting instead.
   - type: textarea
     id: summary
     attributes:
