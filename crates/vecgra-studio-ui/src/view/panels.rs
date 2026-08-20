@@ -45,118 +45,6 @@ impl StudioView {
             )
     }
 
-    pub(super) fn render_search_modes(&self, cx: &Context<Self>) -> impl IntoElement {
-        h_flex()
-            .gap_0p5()
-            .child(
-                Button::new("search-text")
-                    .label("Text")
-                    .small()
-                    .selected(self.search_mode == SearchMode::Text)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.set_search_mode(SearchMode::Text, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("search-hybrid")
-                    .label("Hybrid")
-                    .small()
-                    .selected(self.search_mode == SearchMode::Hybrid)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.set_search_mode(SearchMode::Hybrid, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("search-semantic")
-                    .label("Semantic")
-                    .small()
-                    .selected(self.search_mode == SearchMode::Semantic)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.set_search_mode(SearchMode::Semantic, window, cx);
-                    })),
-            )
-    }
-
-    pub(super) fn render_layout_controls(&self, cx: &Context<Self>) -> impl IntoElement {
-        h_flex()
-            .gap_1()
-            .child(
-                Button::new("layout-auto")
-                    .label("Auto")
-                    .small()
-                    .selected(self.layout_kind == LayoutKind::Auto)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.arrange(LayoutKind::Auto, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("layout-force")
-                    .label("Force")
-                    .small()
-                    .selected(self.layout_kind == LayoutKind::Force)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.arrange(LayoutKind::Force, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("layout-structure")
-                    .label("Structure")
-                    .small()
-                    .selected(self.layout_kind == LayoutKind::Structure)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.arrange(LayoutKind::Structure, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("layout-orbit")
-                    .label("Orbit")
-                    .small()
-                    .selected(self.layout_kind == LayoutKind::Orbit)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.arrange(LayoutKind::Orbit, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("release-node")
-                    .label("Release")
-                    .small()
-                    .disabled(
-                        !self
-                            .selection
-                            .and_then(SceneSelection::node)
-                            .is_some_and(|index| {
-                                self.workspace
-                                    .as_ref()
-                                    .is_some_and(|workspace| workspace.borrow().is_pinned(index))
-                            }),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.release_selected(cx))),
-            )
-    }
-
-    pub(super) fn render_zoom_controls(&self, cx: &Context<Self>) -> impl IntoElement {
-        h_flex()
-            .gap_1()
-            .child(
-                Button::new("zoom-out")
-                    .label("−")
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.zoom(0.82, cx))),
-            )
-            .child(
-                Button::new("fit-view")
-                    .label("Fit")
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
-            )
-            .child(
-                Button::new("zoom-in")
-                    .label("+")
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.zoom(1.22, cx))),
-            )
-    }
-
     pub(super) fn render_top_bar(&self, compact: bool, cx: &Context<Self>) -> gpui::AnyElement {
         let database_name: SharedString = match &self.state {
             LoadState::Ready(snapshot) => snapshot.database_name.to_string().into(),
@@ -183,7 +71,7 @@ impl StudioView {
                                         .min_w(px(180.0))
                                         .child(Input::new(&self.query_input).small()),
                                 )
-                                .child(self.render_zoom_controls(cx)),
+                                .child(self.render_bezel_zoom_controls(cx)),
                         )
                         .child(
                             h_flex()
@@ -194,9 +82,9 @@ impl StudioView {
                                 .items_center()
                                 .border_t_1()
                                 .border_color(cx.theme().title_bar_border)
-                                .child(self.render_search_modes(cx))
+                                .child(self.render_bezel_search_modes(cx))
                                 .child(div().flex_1())
-                                .child(self.render_layout_controls(cx)),
+                                .child(self.render_bezel_layout_controls(cx)),
                         ),
                 )
                 .into_any_element();
@@ -218,7 +106,7 @@ impl StudioView {
                             .max_w(px(620.0))
                             .child(Input::new(&self.query_input).small()),
                     )
-                    .child(self.render_search_modes(cx))
+                    .child(self.render_bezel_search_modes(cx))
                     .child(div().flex_1()),
             )
             .into_any_element()
@@ -252,32 +140,20 @@ impl StudioView {
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .bg(cx.theme().sidebar)
-            .child(section_label("VIEW"))
-            .child(
-                div()
-                    .id("overview-navigation")
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.show_overview(window, cx);
-                    }))
-                    .child(nav_row(
-                        "Overview",
-                        !showing_search && !showing_path && !showing_context && !showing_facet,
-                        cx,
-                    )),
-            )
-            .when(!showing_path, |this| {
-                this.child(nav_row("Search results", showing_search, cx))
-            })
-            .when(showing_path, |this| {
-                this.child(nav_row("Evidence path", true, cx))
-            })
-            .when(showing_context, |this| {
-                this.child(nav_row("2-hop context", true, cx))
-            })
-            .when(showing_facet, |this| {
-                this.child(nav_row("Facet lens", true, cx))
-            })
+            .child(self.render_bezel_sidebar_tabs(
+                if showing_search {
+                    Some("Search results")
+                } else if showing_path {
+                    Some("Evidence path")
+                } else if showing_context {
+                    Some("2-hop context")
+                } else if showing_facet {
+                    Some("Facet lens")
+                } else {
+                    None
+                },
+                cx,
+            ))
             .when(showing_search, |this| {
                 this.child(self.render_search_results(cx))
             })
@@ -1959,25 +1835,6 @@ fn endpoint_row(
                         .child(format!("node:{id}")),
                 ),
         )
-}
-
-fn nav_row(label: &'static str, selected: bool, cx: &Context<StudioView>) -> impl IntoElement {
-    h_flex()
-        .id(label)
-        .mx_2()
-        .h(px(30.0))
-        .px_2()
-        .items_center()
-        .rounded(px(4.0))
-        .text_sm()
-        .when(selected, |this| {
-            this.bg(cx.theme().sidebar_accent)
-                .text_color(cx.theme().sidebar_accent_foreground)
-        })
-        .when(!selected, |this| {
-            this.text_color(cx.theme().muted_foreground)
-        })
-        .child(label)
 }
 
 fn property_row(key: &str, value: &PropertyValue, cx: &Context<StudioView>) -> impl IntoElement {

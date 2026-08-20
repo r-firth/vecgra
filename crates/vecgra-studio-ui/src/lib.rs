@@ -17,6 +17,7 @@ pub use view::{
 /// Install Bezel's environment theme and bundled fonts for the Studio chrome.
 pub fn init_bezel(cx: &mut App) {
     ensure_bezel_theme(cx);
+    bezel_ui::focus::init(cx);
     if let Err(error) = bezel_ui::register_fonts(cx) {
         eprintln!("Vecgra Studio could not register Bezel fonts: {error}");
     }

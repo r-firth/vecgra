@@ -500,6 +500,7 @@ fn double_click_opens_a_reversible_two_hop_context_without_starting_a_drag(
 fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
+        bezel_ui::focus::init(cx);
         crate::apply_studio_theme(cx);
     });
     let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
@@ -522,6 +523,24 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(secondary.size.height >= px(39.0));
     assert!(cx.debug_bounds("wide-toolbar").is_none());
     assert!(cx.debug_bounds("bezel-graph-controls").is_none());
+    assert!(cx.debug_bounds("bezel-search-modes").is_some());
+    assert!(cx.debug_bounds("bezel-layout-modes").is_some());
+
+    let semantic = cx
+        .debug_bounds("bezel-search-semantic")
+        .expect("Bezel semantic mode should render in the compact toolbar");
+    cx.simulate_click(semantic.center(), Modifiers::none());
+    assert_eq!(
+        cx.read(|cx| view.read(cx).search_mode),
+        SearchMode::Semantic
+    );
+    cx.update(|window, cx| {
+        let text_focus = view.read(cx).bezel_search_focus[0].clone();
+        window.focus(&text_focus, cx);
+        _ = window.draw(cx);
+    });
+    cx.simulate_keystrokes("space");
+    assert_eq!(cx.read(|cx| view.read(cx).search_mode), SearchMode::Text);
 
     cx.simulate_resize(size(px(1_340.0), px(820.0)));
     cx.run_until_parked();
@@ -531,6 +550,8 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(cx.debug_bounds("wide-toolbar").is_some());
     assert!(cx.debug_bounds("compact-toolbar-primary").is_none());
     assert!(cx.debug_bounds("bezel-graph-controls").is_some());
+    assert!(cx.debug_bounds("bezel-layout-modes").is_none());
+    assert!(cx.debug_bounds("bezel-sidebar-tabs").is_some());
 
     let zoom_before = cx.read(|cx| view.read(cx).camera.zoom);
     let zoom_in = cx

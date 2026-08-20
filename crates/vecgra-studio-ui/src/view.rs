@@ -273,6 +273,11 @@ pub struct StudioView {
     drag: Option<DragState>,
     query_input: Entity<InputState>,
     focus_handle: FocusHandle,
+    bezel_search_focus: [FocusHandle; 3],
+    bezel_zoom_focus: [FocusHandle; 3],
+    bezel_layout_focus: [FocusHandle; 4],
+    bezel_release_focus: FocusHandle,
+    bezel_overview_focus: FocusHandle,
     inspector_scroll_handle: ScrollHandle,
     generation: u64,
     load_task: Option<Task<()>>,
@@ -307,6 +312,11 @@ impl StudioView {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search nodes + relationships…"));
         let subscription = cx.subscribe_in(&query_input, window, Self::on_query_event);
         let focus_handle = cx.focus_handle().tab_stop(true);
+        let bezel_search_focus = std::array::from_fn(|_| cx.focus_handle());
+        let bezel_zoom_focus = std::array::from_fn(|_| cx.focus_handle());
+        let bezel_layout_focus = std::array::from_fn(|_| cx.focus_handle());
+        let bezel_release_focus = cx.focus_handle();
+        let bezel_overview_focus = cx.focus_handle();
         let (state, workspace, world_bounds) = if let Some(path) = &path {
             (
                 LoadState::Loading {
@@ -351,6 +361,11 @@ impl StudioView {
             drag: None,
             query_input,
             focus_handle,
+            bezel_search_focus,
+            bezel_zoom_focus,
+            bezel_layout_focus,
+            bezel_release_focus,
+            bezel_overview_focus,
             inspector_scroll_handle: ScrollHandle::new(),
             generation: 0,
             load_task: None,
@@ -2189,7 +2204,7 @@ impl Render for StudioView {
         let show_inspector = viewport_width >= px(980.0);
         let compact_toolbar = viewport_width < px(1_280.0);
         let show_bezel_controls = !compact_toolbar;
-        v_flex()
+        bezel_ui::focus::traversal(v_flex())
             .id("vecgra-studio")
             .role(Role::Application)
             .aria_label("Vecgra Studio")

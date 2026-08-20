@@ -25,12 +25,14 @@ claims.
 | Cache | Rebuildable layout and level-of-detail data, never graph truth |
 | Network | None for text/hash search; Qwen query embedding uses OpenRouter when explicitly selected |
 
-`gpui-component` is pinned to commit
-`222cf9644fbfd9bdff970a0308f9ce216b2c0818`. Its manifest currently names
-Zed's GPUI Git source without a revision, so the application uses the identical
-source declaration and pins the resolved Zed commit in `Cargo.lock`. Using a
-separate `rev` declaration creates two incompatible GPUI type universes. An
-upstream revision-pinning mechanism remains a release-hardening item.
+Studio uses [Bezel](https://github.com/crabtalk/bezel) for its material-aware
+application chrome and pins commit
+`49ee7b1d422d761551b3f6951d74cdfb87314241`. Bezel's GPUI fork is pinned at
+`e0b415b4bcffe4a2f05221544a788d482f5f6f50`; the workspace patches
+`gpui-component` onto that same source so the desktop graph has one GPUI
+runtime type universe. The maintained `gpui-component` input remains the
+Unicode/IME-aware command field; Bezel owns the segmented modes, graph control
+bar, view navigation, focus rings, and keyboard traversal.
 
 GPUI also resolves disabled GPL tracing facades and the obsolete `block` 0.1.6
 FFI declaration. The workspace replaces the disabled tracing surface with
@@ -89,7 +91,7 @@ thread.
 The title-bar input is a maintained Unicode/IME-aware component. `Cmd-K`
 focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
 moves the ranked selection; a second Enter or click selects and frames the
-result. At widths below 1,120 logical pixels, the single command rail becomes
+result. At widths below 1,280 logical pixels, the single command rail becomes
 two rows so search, layout, pin, and camera controls remain present at the
 760-pixel minimum instead of clipping or silently disappearing. Text retrieval
 scans properties with a bounded top-K heap rather than materializing every
@@ -182,9 +184,9 @@ selection and emphasis.
 
 ## Rendering contract
 
-The app chrome uses ordinary GPUI elements and GPUI Component behavior. The
-graph is one custom canvas/custom element, not one retained UI element per
-node or edge.
+The app chrome combines Bezel's material, control, and navigation vocabulary
+with GPUI Component's maintained text-input behavior. The graph is one custom
+canvas/custom element, not one retained UI element per node or edge.
 
 The renderer groups visible edges into a small number of `Path` batches
 by a stable relationship-type palette and emits visible nodes as quads inside

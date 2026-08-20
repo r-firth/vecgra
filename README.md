@@ -154,6 +154,9 @@ Studio opens the same `.vg` file directly in read-only mode. It is a native
 GPUI application with GPU-painted graphs, animated structural and force
 layouts, semantic level of detail, deep zoom, node manipulation, relationship
 inspection, and text/semantic/hybrid search over both nodes and edges.
+Its dense, material-aware application chrome is built with
+[Bezel](https://github.com/crabtalk/bezel), while the graph remains a dedicated
+GPU-painted canvas.
 
 Press `Cmd-K` to search. Selecting a result animates into its connected
 context; double-clicking a node opens a relationship-diverse two-hop focus and

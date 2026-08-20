@@ -2,7 +2,7 @@
 
 Vecgra locks every dependency in `Cargo.lock` and checks advisories, licences,
 and source origins with `cargo-deny`. Git dependencies are limited to the
-declared GPUI, gpui-component, egraph-rs, proptest, font-kit, and xim-rs
+declared GPUI, Bezel, gpui-component, egraph-rs, proptest, font-kit, and xim-rs
 repositories in `deny.toml`.
 
 ## Deliberate compatibility patches
