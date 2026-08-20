@@ -219,9 +219,7 @@ impl StudioView {
                             .child(Input::new(&self.query_input).small()),
                     )
                     .child(self.render_search_modes(cx))
-                    .child(div().flex_1())
-                    .child(self.render_layout_controls(cx))
-                    .child(self.render_zoom_controls(cx)),
+                    .child(div().flex_1()),
             )
             .into_any_element()
     }
@@ -1493,7 +1491,11 @@ impl StudioView {
             )
     }
 
-    pub(super) fn render_canvas(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_canvas(
+        &mut self,
+        show_bezel_controls: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let entity = cx.entity().clone();
         let dragging_node = match self.drag {
             Some(DragState::Node { index, .. }) => Some(index),
@@ -1557,22 +1559,45 @@ impl StudioView {
                 });
             })
             .child(scene)
-            .child(
-                div()
-                    .absolute()
-                    .left_3()
-                    .bottom_3()
-                    .px_2()
-                    .py_1()
-                    .rounded(px(4.0))
-                    .bg(rgb(0x10181e).opacity(0.9))
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("{:.0}%", self.camera.zoom * 100.0)),
-            )
+            .when(show_bezel_controls, |this| {
+                this.child(
+                    div()
+                        .id("bezel-graph-controls")
+                        .debug_selector(|| "bezel-graph-controls".into())
+                        .absolute()
+                        .bottom(px(18.0))
+                        .left_0()
+                        .right_0()
+                        .px_3()
+                        .flex()
+                        .justify_center()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(820.0))
+                                .child(self.render_bezel_graph_controls(cx)),
+                        ),
+                )
+            })
+            .when(!show_bezel_controls, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_3()
+                        .bottom_3()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(4.0))
+                        .bg(rgb(0x10181e).opacity(0.9))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{:.0}%", self.camera.zoom * 100.0)),
+                )
+            })
     }
 
     pub(super) fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {

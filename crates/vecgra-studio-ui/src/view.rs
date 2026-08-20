@@ -31,6 +31,7 @@ use vecgra_studio_core::{
     hit_test_positions, search_database,
 };
 
+mod bezel_controls;
 mod panels;
 
 use panels::path_direction_label;
@@ -301,6 +302,7 @@ pub struct StudioView {
 
 impl StudioView {
     pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::ensure_bezel_theme(cx);
         let query_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search nodes + relationships…"));
         let subscription = cx.subscribe_in(&query_input, window, Self::on_query_event);
@@ -2185,7 +2187,8 @@ impl Render for StudioView {
         }
         let viewport_width = window.viewport_size().width;
         let show_inspector = viewport_width >= px(980.0);
-        let compact_toolbar = viewport_width < px(1_120.0);
+        let compact_toolbar = viewport_width < px(1_280.0);
+        let show_bezel_controls = !compact_toolbar;
         v_flex()
             .id("vecgra-studio")
             .role(Role::Application)
@@ -2239,7 +2242,7 @@ impl Render for StudioView {
                             .relative()
                             .flex_1()
                             .h_full()
-                            .child(self.render_canvas(cx)),
+                            .child(self.render_canvas(show_bezel_controls, cx)),
                     )
                     .when(show_inspector, |this| this.child(self.render_inspector(cx))),
             )

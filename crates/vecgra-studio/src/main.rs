@@ -9,7 +9,7 @@ use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
     FitView, FocusSearch, NextSearchResult, PreviousSearchResult, ReleaseSelected, StudioView,
-    ZoomIn, ZoomOut, apply_studio_theme,
+    ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -39,6 +39,7 @@ fn main() {
     app.run(move |cx| {
         cx.set_app_identity("dev.vecgra.studio", "Vecgra Studio");
         gpui_component::init(cx);
+        init_bezel(cx);
         apply_studio_theme(cx);
 
         cx.bind_keys([

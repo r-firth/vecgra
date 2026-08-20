@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{KeyBinding, ScrollDelta, TestAppContext, point, size};
+use gpui::{KeyBinding, Modifiers, ScrollDelta, TestAppContext, point, size};
 use std::time::Duration;
 use vecgra_studio_core::{EvidencePath, EvidenceStep};
 
@@ -502,7 +502,7 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
         gpui_component::init(cx);
         crate::apply_studio_theme(cx);
     });
-    let (_view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
 
     cx.simulate_resize(size(px(760.0), px(520.0)));
     cx.run_until_parked();
@@ -521,6 +521,7 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     assert!(primary.size.height >= px(47.0));
     assert!(secondary.size.height >= px(39.0));
     assert!(cx.debug_bounds("wide-toolbar").is_none());
+    assert!(cx.debug_bounds("bezel-graph-controls").is_none());
 
     cx.simulate_resize(size(px(1_340.0), px(820.0)));
     cx.run_until_parked();
@@ -529,6 +530,14 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
     });
     assert!(cx.debug_bounds("wide-toolbar").is_some());
     assert!(cx.debug_bounds("compact-toolbar-primary").is_none());
+    assert!(cx.debug_bounds("bezel-graph-controls").is_some());
+
+    let zoom_before = cx.read(|cx| view.read(cx).camera.zoom);
+    let zoom_in = cx
+        .debug_bounds("bezel-zoom-in")
+        .expect("Bezel zoom control should render at the wide breakpoint");
+    cx.simulate_click(zoom_in.center(), Modifiers::none());
+    assert!(cx.read(|cx| view.read(cx).camera.zoom) > zoom_before);
 }
 
 #[gpui::test]

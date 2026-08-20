@@ -100,6 +100,8 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
+    "https://github.com/crabtalk/bezel",
+    "https://github.com/crabtalk/zed",
     "https://github.com/likr/egraph-rs",
     "https://github.com/longbridge/gpui-component",
     "https://github.com/proptest-rs/proptest",

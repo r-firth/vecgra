@@ -36,19 +36,26 @@ unsafe_op_in_unsafe_fn = "deny"
 undocumented_unsafe_blocks = "deny"
 
 [workspace.dependencies]
-# gpui-component currently declares Zed's Git source without a revision. These
-# two declarations must use the identical Cargo source ID to avoid two
-# incompatible GPUI type universes; Cargo.lock records the exact Zed commit.
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
+# Bezel uses a small GPUI fork for its GPU backdrop material. Pin every GPUI
+# consumer to that exact revision so Studio keeps one compatible type universe.
+gpui = { git = "https://github.com/crabtalk/zed", rev = "e0b415b4bcffe4a2f05221544a788d482f5f6f50" }
+gpui_platform = { git = "https://github.com/crabtalk/zed", rev = "e0b415b4bcffe4a2f05221544a788d482f5f6f50", default-features = false }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "222cf9644fbfd9bdff970a0308f9ce216b2c0818" }
+bezel-theme = { package = "theme", git = "https://github.com/crabtalk/bezel", rev = "49ee7b1d422d761551b3f6951d74cdfb87314241" }
+bezel-ui = { package = "ui", git = "https://github.com/crabtalk/bezel", rev = "49ee7b1d422d761551b3f6951d74cdfb87314241" }
+
+# gpui-component declares official Zed's Git source. Redirect its framework
+# crates to Bezel's pinned fork instead of compiling a second GPUI.
+[patch."https://github.com/zed-industries/zed"]
+gpui = { git = "https://github.com/crabtalk/zed", rev = "e0b415b4bcffe4a2f05221544a788d482f5f6f50", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/crabtalk/zed", rev = "e0b415b4bcffe4a2f05221544a788d482f5f6f50" }
 
 # GPUI uses Zed's GPL tracing facade even when tracing is compiled as a no-op.
 # Vecgra does not enable ZTRACING, so replace that disabled surface with a small
 # Apache-2.0 compatibility implementation rather than pulling GPL code into the
 # distributed Studio binary.
-[patch."https://github.com/zed-industries/zed"]
+[patch."https://github.com/crabtalk/zed"]
 ztracing = { path = "third-party/noop-ztracing" }
 ztracing_macro = { path = "third-party/noop-ztracing-macro" }
 
