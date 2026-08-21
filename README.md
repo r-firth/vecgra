@@ -24,12 +24,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/r-firth/vecgra/releases/download/v0.1.0/vecgra-demo.mp4">
-    <img src="assets/demo.jpg" width="1200" alt="Vecgra Studio exploring a GitHub engineering graph">
-  </a><br>
-  <a href="https://github.com/r-firth/vecgra/releases/download/v0.1.0/vecgra-demo.mp4"><strong>Watch the 37-second demo</strong></a>
-</p>
+https://github.com/user-attachments/assets/31d280db-32d0-49d3-8c4c-8e731f6688f7
 
 Vecgra is a vector-native embedded graph database. It stores a labelled
 property multigraph, node and relationship embeddings, and multivectors in one
