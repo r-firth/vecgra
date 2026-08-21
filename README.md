@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="docs/custom-data.md">Custom data</a> ·
   <a href="#what-you-can-build">Ideas</a> ·
   <a href="docs/studio.md">Studio</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
@@ -101,7 +102,34 @@ cargo build --release
 The repository pins Rust 1.97.1 and installs `rustfmt` and Clippy through
 `rust-toolchain.toml`.
 
-Run the native API quickstart to create a database, embed nodes and a
+### Import your own graph
+
+`import-jsonl` accepts arbitrary node labels, edge labels, scalar properties,
+and zero or more vectors on every node and edge. The repository includes a
+small customer and product graph that CI imports and queries:
+
+```sh
+target/release/vecgra import-jsonl \
+  examples/custom-data/nodes.jsonl \
+  examples/custom-data/edges.jsonl \
+  customer-orders.vg \
+  4
+
+target/release/vecgra query customer-orders.vg \
+  'MATCH (c:Customer)-[r:PURCHASED]->(p:Product) RETURN c,r,p LIMIT 10'
+```
+
+The destination must not exist. The `4` is the database-wide vector
+dimension. Vecgra stores supplied vectors but does not generate embeddings for
+JSONL properties.
+
+Read [Import your own data](docs/custom-data.md) for the complete JSONL schema,
+vector rules, a checked Rust ingestion program, ongoing writes with
+transactions, and high-volume loading with `BulkLoader`.
+
+### Write from Rust
+
+Run the native API quickstart to create a database, write nodes and a
 relationship, search both, and traverse the result:
 
 ```sh
@@ -110,6 +138,16 @@ cargo run -p vecgra --example quickstart
 
 The complete, small Rust program is in
 [`crates/vecgra/examples/quickstart.rs`](crates/vecgra/examples/quickstart.rs).
+
+The [`custom_ingest` example](crates/vecgra/examples/custom_ingest.rs) shows
+how to map IDs from application records to Vecgra node IDs before creating
+relationships:
+
+```sh
+cargo run -p vecgra --example custom_ingest -- customer-orders-rust.vg
+```
+
+### Optional source adapters
 
 Create a real engineering-history graph from GitHub, using the deterministic
 offline embedder for a quick local run. Authentication comes from
@@ -141,9 +179,8 @@ target/release/vecgra semantic-text \
 cargo run --release -p vecgra-studio -- ripgrep-qwen.vg
 ```
 
-Generic JSONL, fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter
-imports are also available. See the CLI help and the
-[GitHub importer schema](docs/github-import.md).
+Fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter imports are also
+available. See the CLI help and the [GitHub importer schema](docs/github-import.md).
 
 ## Vecgra Studio
 
@@ -184,6 +221,7 @@ without recall is not accepted as an optimization.
 
 ## Documentation
 
+- [Import custom data with JSONL or Rust](docs/custom-data.md)
 - [Storage and execution architecture](docs/architecture.md)
 - [Benchmark methodology and competitor audits](docs/benchmarks.md)
 - [GitHub engineering-graph schema](docs/github-import.md)

@@ -1427,6 +1427,14 @@ fn print_command_help(command: &str) -> Result<(), Box<dyn Error>> {
     };
     println!("Usage:\n  vecgra {usage}");
     match command {
+        "import-jsonl" => println!(
+            "\nEach nonblank node line is JSON with: id, label, optional properties, \
+             and optional vectors. Each edge line has: source, target, label, optional \
+             properties, and optional vectors. IDs are strings or integers. Properties \
+             are JSON scalars. Every vector must match <dimension>. The command creates \
+             a new database and does not overwrite an existing path.\n\
+             See docs/custom-data.md for the full schema and checked examples."
+        ),
         "import-github" => println!(
             "\nDefaults: 1000 issues, 1000 pull requests, 300 discussions, \
              100 releases, 256 dimensions, hash embeddings, batch size 128.\n\

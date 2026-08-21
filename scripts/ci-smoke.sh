@@ -13,20 +13,11 @@ VECGRA_SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vecgra-smoke.XXXXXX")"
 export VECGRA_SMOKE_DIR
 trap 'rm -rf -- "$VECGRA_SMOKE_DIR"' EXIT
 
-printf '%s\n' \
-  '{"id":"repo","label":"Repository","properties":{"name":"smoke","stars":3},"vectors":[[1.0,0.0,0.0,0.0]]}' \
-  '{"id":"issue","label":"Issue","properties":{"title":"bounded recovery","open":true},"vectors":[[0.9,0.1,0.0,0.0]]}' \
-  '{"id":"pr","label":"PullRequest","properties":{"title":"repair torn tail","open":false},"vectors":[[0.8,0.2,0.0,0.0]]}' \
-  > "$VECGRA_SMOKE_DIR/nodes.jsonl"
-
-printf '%s\n' \
-  '{"source":"repo","target":"issue","label":"HAS_ISSUE","properties":{"position":1},"vectors":[[0.7,0.3,0.0,0.0]]}' \
-  '{"source":"pr","target":"issue","label":"CLOSES","properties":{"confidence":1.0},"vectors":[[0.6,0.4,0.0,0.0]]}' \
-  > "$VECGRA_SMOKE_DIR/edges.jsonl"
+"$vecgra_binary" import-jsonl --help | grep -q 'Each nonblank node line is JSON'
 
 "$vecgra_binary" import-jsonl \
-  "$VECGRA_SMOKE_DIR/nodes.jsonl" \
-  "$VECGRA_SMOKE_DIR/edges.jsonl" \
+  examples/custom-data/nodes.jsonl \
+  examples/custom-data/edges.jsonl \
   "$VECGRA_SMOKE_DIR/smoke.vg" 4 f16
 
 stats="$($vecgra_binary stats "$VECGRA_SMOKE_DIR/smoke.vg")"
@@ -43,8 +34,8 @@ integrity="$($vecgra_binary check "$VECGRA_SMOKE_DIR/smoke.vg")"
 grep -q $'status\tok' <<<"$integrity"
 
 query="$($vecgra_binary query "$VECGRA_SMOKE_DIR/smoke.vg" \
-  'MATCH (p:PullRequest)-[r:CLOSES]->(i:Issue) RETURN p,r,i LIMIT 10')"
-grep -q 'CLOSES' <<<"$query"
+  'MATCH (c:Customer)-[r:PURCHASED]->(p:Product) RETURN c,r,p LIMIT 10')"
+grep -q 'PURCHASED' <<<"$query"
 
 "$vecgra_binary" compact \
   "$VECGRA_SMOKE_DIR/smoke.vg" \
