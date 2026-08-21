@@ -16,7 +16,7 @@ bezel-ui.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 lyon_geom = "=1.0.19"
-vecgra-studio-core = { version = "=0.1.0", path = "../vecgra-studio-core" }
+vecgra-studio-core = { version = "=0.1.1", path = "../vecgra-studio-core" }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

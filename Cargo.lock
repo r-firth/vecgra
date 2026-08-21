@@ -7781,7 +7781,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "memmap2",
  "roaring",
@@ -7789,7 +7789,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "dirs",
@@ -7807,7 +7807,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra-embedding"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "ureq",
@@ -7815,7 +7815,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra-studio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -7827,7 +7827,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra-studio-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "petgraph",
  "petgraph-drawing",
@@ -7841,7 +7841,7 @@ dependencies = [
 
 [[package]]
 name = "vecgra-studio-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui",
  "gpui-component",

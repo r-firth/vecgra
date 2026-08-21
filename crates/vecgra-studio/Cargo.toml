@@ -28,7 +28,7 @@ gpui.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
-vecgra-studio-ui = { version = "=0.1.0", path = "../vecgra-studio-ui" }
+vecgra-studio-ui = { version = "=0.1.1", path = "../vecgra-studio-ui" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_platform = { workspace = true, features = ["font-kit"] }
