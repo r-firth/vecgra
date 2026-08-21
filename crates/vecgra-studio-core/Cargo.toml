@@ -16,7 +16,7 @@ petgraph-drawing = { version = "=0.1.0", git = "https://github.com/likr/egraph-r
 petgraph-layout-omega = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
 petgraph-layout-sgd = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
 petgraph-linalg-rdmds = { version = "=0.1.0", git = "https://github.com/likr/egraph-rs", rev = "cdf3ddc47c8cd9afcff2cc7f58d9324a391ec4c4" }
-rand = "0.8"
+rand = "0.10"
 vecgra = { version = "=0.1.1", path = "../vecgra" }
 vecgra-embedding = { version = "=0.1.1", path = "../vecgra-embedding" }
 
