@@ -232,3 +232,41 @@ fn append_in_another_process_cannot_open_an_active_writer() {
     drop(database);
     assert!(fixture.append().status.success());
 }
+
+#[cfg(unix)]
+#[test]
+fn closing_writer_releases_lock_even_if_a_fork_inherited_the_file() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("graph.vg");
+    let database = Database::open(&path).unwrap();
+    let mut pipe = [0; 2];
+    // SAFETY: pipe points to two writable descriptors. After fork, the child
+    // calls only async-signal-safe libc functions and never touches Rust state.
+    let pid = unsafe {
+        assert_eq!(libc::pipe(pipe.as_mut_ptr()), 0);
+        let pid = libc::fork();
+        if pid == 0 {
+            libc::close(pipe[1]);
+            let mut byte = 0u8;
+            libc::read(pipe[0], (&mut byte as *mut u8).cast(), 1);
+            libc::_exit(0);
+        }
+        pid
+    };
+    drop(database);
+    let reopened = Database::open(&path);
+    // SAFETY: these are the parent's pipe descriptors; closing the write end
+    // wakes the child, and waitpid reaps only the child created above.
+    unsafe {
+        libc::close(pipe[0]);
+        libc::close(pipe[1]);
+        if pid > 0 {
+            assert_eq!(libc::waitpid(pid, std::ptr::null_mut(), 0), pid);
+        }
+    }
+    assert!(pid > 0, "fork failed");
+    assert!(
+        reopened.is_ok(),
+        "child retained the closed writer's lock: {reopened:?}"
+    );
+}

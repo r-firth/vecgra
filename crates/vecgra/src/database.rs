@@ -72,6 +72,20 @@ struct Inner {
     vector_encoding: VectorEncoding,
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        if !self.read_only {
+            // A fork may inherit the descriptor until exec. Explicit unlock
+            // ties writer ownership to this handle, not the child's lifetime.
+            let file = self
+                .file
+                .get_mut()
+                .unwrap_or_else(|error| error.into_inner());
+            let _ = file.unlock();
+        }
+    }
+}
+
 /// Thread-safe handle to one embedded Vecgra database file.
 ///
 /// Cloning the handle shares its file, graph snapshot, and transaction state.
