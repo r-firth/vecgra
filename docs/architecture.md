@@ -303,6 +303,17 @@ count, payload, CRC32C, and a tail marker. Recovery stops at a partial final
 frame and truncates that tail before the next commit. A checksum or marker
 mismatch inside a supposedly complete frame is corruption, not a torn write.
 
+Writable opens acquire an exclusive OS file lock before reading or repairing
+the log and retain it until the final `Database` clone drops. Competing writers
+fail immediately with a conflict instead of loading independent mutable states.
+Read-only opens do not repair the file or acquire a writer lock. On Linux and
+macOS they can coexist with a writer and expose the committed data seen at open;
+they must be reopened to observe later transactions.
+
+Buffered mutations retain individual vector facets until validation, so two
+wrong-sized facets cannot masquerade as valid vectors with the same total length.
+The public transaction API and file format are unchanged.
+
 Compaction is non-destructive: it requires a new destination path, writes a new
 header/checkpoint, flushes and syncs it, and removes the partial destination on
 failure. Vector output is spooled, checksummed incrementally, and copied raw

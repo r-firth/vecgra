@@ -37,6 +37,19 @@ query="$($vecgra_binary query "$VECGRA_SMOKE_DIR/smoke.vg" \
   'MATCH (c:Customer)-[r:PURCHASED]->(p:Product) RETURN c,r,p LIMIT 10')"
 grep -q 'PURCHASED' <<<"$query"
 
+cat > "$VECGRA_SMOKE_DIR/new-nodes.jsonl" <<'JSONL'
+{"id":"review","label":"Review","properties":{"text":"Great keyboard"}}
+JSONL
+cat > "$VECGRA_SMOKE_DIR/new-edges.jsonl" <<'JSONL'
+{"source":"review","target":{"node":1},"label":"REVIEW_OF"}
+JSONL
+"$vecgra_binary" append-jsonl "$VECGRA_SMOKE_DIR/smoke.vg" \
+  "$VECGRA_SMOKE_DIR/new-nodes.jsonl" "$VECGRA_SMOKE_DIR/new-edges.jsonl"
+query="$($vecgra_binary query "$VECGRA_SMOKE_DIR/smoke.vg" \
+  'MATCH (r:Review)-[e:REVIEW_OF]->(p:Product) RETURN r,e,p LIMIT 10')"
+grep -q 'Great keyboard' <<<"$query"
+grep -q 'Mechanical keyboard' <<<"$query"
+
 "$vecgra_binary" compact \
   "$VECGRA_SMOKE_DIR/smoke.vg" \
   "$VECGRA_SMOKE_DIR/compact.vg" f32

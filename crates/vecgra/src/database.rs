@@ -11,7 +11,7 @@ use crate::vector::{
     LateInteractionHit, Similarity, VectorEncoding, VectorHit, VectorSearchPlan, VectorTarget,
 };
 use memmap2::MmapOptions;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -75,6 +75,8 @@ struct Inner {
 /// Thread-safe handle to one embedded Vecgra database file.
 ///
 /// Cloning the handle shares its file, graph snapshot, and transaction state.
+/// Writable handles hold an exclusive OS file lock until the last clone drops.
+/// Use clones for in-process sharing; opening a second writer returns a conflict.
 #[derive(Clone, Debug)]
 pub struct Database {
     inner: Arc<Inner>,
@@ -99,6 +101,7 @@ impl Database {
             .write(true)
             .create_new(true)
             .open(&path)?;
+        lock_writer(&file)?;
         codec::write_header(
             &mut file,
             Header {
@@ -130,7 +133,8 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// Returns an error when the file is unavailable, unsupported, or corrupt.
+    /// Returns an error when the file is unavailable, unsupported, corrupt,
+    /// or already open by another writer.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_internal(path.as_ref(), false)
     }
@@ -138,6 +142,9 @@ impl Database {
     /// Opens a database without requesting write permission or repairing a
     /// torn log tail. Valid committed frames remain readable and transactions
     /// that contain mutations are rejected at commit.
+    /// On Linux and macOS this may coexist with a writer. It captures committed
+    /// data at open time; reopen to see subsequent commits. It never takes a
+    /// writer lock or modifies the file.
     ///
     /// # Errors
     ///
@@ -152,6 +159,9 @@ impl Database {
             .read(true)
             .write(!read_only)
             .open(&path)?;
+        if !read_only {
+            lock_writer(&file)?;
+        }
         let header = codec::read_header(&mut file)?;
         let mut graph = Graph::new(header.dimension, header.similarity);
         let mut next_transaction_id = 1;
@@ -260,7 +270,6 @@ impl Database {
         Transaction {
             database: self,
             mutations: Vec::new(),
-            committed: false,
         }
     }
 
@@ -355,7 +364,6 @@ impl Database {
 pub struct Transaction<'a> {
     database: &'a Database,
     mutations: Vec<Mutation>,
-    committed: bool,
 }
 
 impl Transaction<'_> {
@@ -384,8 +392,7 @@ impl Transaction<'_> {
                 .into_iter()
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
-            vectors: flatten_vectors(vectors),
-            vector_count: vectors.len() as u32,
+            vectors: vectors.to_vec(),
         });
         id
     }
@@ -419,8 +426,7 @@ impl Transaction<'_> {
                 .into_iter()
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
-            vectors: flatten_vectors(vectors),
-            vector_count: vectors.len() as u32,
+            vectors: vectors.to_vec(),
         });
         id
     }
@@ -451,8 +457,7 @@ impl Transaction<'_> {
                 .into_iter()
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
-            vectors: flatten_vectors(vectors),
-            vector_count: vectors.len() as u32,
+            vectors: vectors.to_vec(),
         });
         Ok(())
     }
@@ -487,8 +492,7 @@ impl Transaction<'_> {
                 .into_iter()
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
-            vectors: flatten_vectors(vectors),
-            vector_count: vectors.len() as u32,
+            vectors: vectors.to_vec(),
         });
         Ok(())
     }
@@ -509,12 +513,8 @@ impl Transaction<'_> {
     ///
     /// Returns an error for a read-only database, invalid graph mutation,
     /// transaction conflict, encoding failure, or durable-write failure.
-    pub fn commit(mut self) -> Result<()> {
-        if self.committed {
-            return Err(Error::Conflict("transaction was already committed".into()));
-        }
+    pub fn commit(self) -> Result<()> {
         if self.mutations.is_empty() {
-            self.committed = true;
             return Ok(());
         }
         if self.database.inner.read_only {
@@ -544,7 +544,6 @@ impl Transaction<'_> {
         }
         graph.apply(&operations)?;
         graph.mark_transaction_applied();
-        self.committed = true;
         Ok(())
     }
 }
@@ -1157,11 +1156,12 @@ impl ReadGuard<'_> {
     }
 }
 
-fn flatten_vectors(vectors: &[Vec<f32>]) -> Vec<f32> {
-    let length = vectors.iter().map(Vec::len).sum();
-    let mut flattened = Vec::with_capacity(length);
-    for vector in vectors {
-        flattened.extend_from_slice(vector);
-    }
-    flattened
+fn lock_writer(file: &File) -> Result<()> {
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => Error::Conflict(
+            "database already has a writer; share a Database clone or close the other writer"
+                .into(),
+        ),
+        TryLockError::Error(error) => Error::Io(error),
+    })
 }

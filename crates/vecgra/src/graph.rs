@@ -1469,8 +1469,7 @@ pub(crate) enum Mutation {
         id: NodeId,
         label: Arc<str>,
         properties: Vec<(Arc<str>, Value)>,
-        vectors: Vec<f32>,
-        vector_count: u32,
+        vectors: Vec<Vec<f32>>,
     },
     PutEdge {
         id: EdgeId,
@@ -1478,8 +1477,7 @@ pub(crate) enum Mutation {
         target: NodeId,
         label: Arc<str>,
         properties: Vec<(Arc<str>, Value)>,
-        vectors: Vec<f32>,
-        vector_count: u32,
+        vectors: Vec<Vec<f32>>,
     },
     DeleteNode {
         id: NodeId,

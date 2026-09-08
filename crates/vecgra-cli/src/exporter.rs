@@ -9,7 +9,7 @@ pub(crate) fn export_ladybug_csv(
     directory: &Path,
 ) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(directory)?;
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let read = database.read();
     let mut files = csv(directory.join("files.csv"), "id,path\n")?;
     let mut syntax = csv(directory.join("syntax.csv"), "id,kind,detail\n")?;

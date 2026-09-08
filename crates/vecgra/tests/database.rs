@@ -29,6 +29,97 @@ fn options() -> DatabaseOptions {
     }
 }
 
+#[test]
+fn writable_open_excludes_other_writers_until_last_clone_drops() {
+    let path = temp_database("writer-lock");
+    let database = Database::create(&path, options()).unwrap();
+    assert!(matches!(
+        Database::open(&path),
+        Err(vecgra::Error::Conflict(_))
+    ));
+    let shared = database.clone();
+    drop(database);
+    assert!(matches!(
+        Database::open(&path),
+        Err(vecgra::Error::Conflict(_))
+    ));
+    let mut transaction = shared.transaction();
+    transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.commit().unwrap();
+    drop(shared);
+    let reopened = Database::open(&path).unwrap();
+    assert_eq!(reopened.read().stats().nodes, 1);
+    assert!(matches!(
+        Database::open(&path),
+        Err(vecgra::Error::Conflict(_))
+    ));
+    drop(reopened);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ragged_multivectors_reject_the_entire_transaction() {
+    let path = temp_database("ragged-vectors");
+    let database = Database::create(&path, options()).unwrap();
+    let mut transaction = database.transaction();
+    let node = transaction.create_node("N", std::iter::empty::<(&str, Value)>(), &[]);
+    let edge = transaction.create_edge(node, node, "E", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.commit().unwrap();
+    let before = std::fs::read(&path).unwrap();
+    // Eight floats in total, but neither facet has the required four values.
+    let vectors = [vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0, 0.0]];
+    for operation in 0..4 {
+        let mut transaction = database.transaction();
+        transaction.create_node("WouldLeak", std::iter::empty::<(&str, Value)>(), &[]);
+        match operation {
+            0 => {
+                transaction.create_node("Bad", std::iter::empty::<(&str, Value)>(), &vectors);
+            }
+            1 => {
+                transaction.create_edge(
+                    node,
+                    node,
+                    "Bad",
+                    std::iter::empty::<(&str, Value)>(),
+                    &vectors,
+                );
+            }
+            2 => transaction
+                .update_node(node, "Bad", std::iter::empty::<(&str, Value)>(), &vectors)
+                .unwrap(),
+            _ => transaction
+                .update_edge(
+                    edge,
+                    node,
+                    node,
+                    "Bad",
+                    std::iter::empty::<(&str, Value)>(),
+                    &vectors,
+                )
+                .unwrap(),
+        }
+        assert!(
+            transaction.commit().is_err(),
+            "accepted ragged vectors for operation {operation}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(
+            (database.read().stats().nodes, database.read().stats().edges),
+            (1, 1)
+        );
+    }
+    drop(database);
+    assert_eq!(
+        Database::open_read_only(&path)
+            .unwrap()
+            .read()
+            .stats()
+            .nodes,
+        1
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
 fn test_crc32c(bytes: &[u8]) -> u32 {
     let mut crc = !0u32;
     for byte in bytes {

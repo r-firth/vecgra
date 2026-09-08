@@ -3,11 +3,12 @@
 Vecgra is not tied to GitHub. The GitHub command is one adapter built on top of
 the same graph database APIs available to your code.
 
-There are three general ingestion paths:
+Choose an ingestion path:
 
 | Need | Use |
 | --- | --- |
 | Turn node and edge files into a new database | `vecgra import-jsonl` |
+| Add nodes and relationships to an existing database | `vecgra append-jsonl` |
 | Create, update, or delete data from a Rust application | `Database::transaction()` |
 | Build a large new database from Rust | `BulkLoader` |
 
@@ -117,6 +118,46 @@ target/release/vecgra import-jsonl nodes.jsonl edges.jsonl graph.vg 768 f32
 Vecgra stores vectors that you supply. This command does not turn property text
 into embeddings. Generate embeddings with your chosen model before writing the
 JSONL, and use the same model and dimension for query vectors.
+
+### Append JSONL
+
+Append a small batch to an existing database as one durable transaction:
+
+```sh
+target/release/vecgra append-jsonl graph.vg new-nodes.jsonl new-edges.jsonl
+```
+
+The record schema is the same as `import-jsonl`, with one extra endpoint form:
+`{"node":42}` refers to an existing internal database node ID. Scalar strings
+and integers still name IDs in the current node file; integer `42` and
+`{"node":42}` deliberately have different meanings.
+
+For example, append a memory linked to an existing person whose internal ID is 0:
+
+```json
+{"id":"memory:new","label":"Memory","properties":{"text":"Prefers tea"}}
+```
+
+```json
+{"source":"memory:new","target":{"node":0},"label":"ABOUT"}
+```
+
+Use an empty node file to add relationships between existing nodes, or an empty
+edge file for standalone nodes. Existing references must name live nodes that
+were present before this batch. They are not accepted by `import-jsonl`.
+Internal IDs are visible in query results and the Rust API; external IDs are
+still batch-local and are not stored automatically.
+
+The command reports counts added by the batch. Every vector facet must have the
+database dimension. Invalid records, duplicate batch IDs, missing endpoints,
+and invalid vectors abort the entire batch. Append does not update or deduplicate
+existing records; retrying a successful batch creates another copy.
+
+Only one writable database handle may be open at a time. A competing writer
+returns a conflict; close it before retrying. Rust callers can share clones of
+one `Database`. CLI queries, stats, integrity checks, and exports open read-only
+views and do not repair torn log tails. On Linux and macOS these views can coexist
+with a writer; reopen them to see later commits.
 
 ## Ingest from Rust
 

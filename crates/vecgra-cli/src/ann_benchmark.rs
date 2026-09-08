@@ -58,7 +58,7 @@ pub(crate) fn benchmark_fbin(
     if query_count == 0 || candidate_vectors == 0 || k == 0 {
         return Err("query count, candidate vectors, and k must be greater than zero".into());
     }
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let (mut queries, available_queries, dimension) = open_matrix(queries_path, 4)?;
     let (mut neighbors, neighbor_rows, ground_truth_k) = open_matrix(neighbors_path, 4)?;
     if dimension != database.vector_dimension() {
@@ -178,7 +178,7 @@ pub(crate) fn benchmark_filtered_fbin(
                 .into(),
         );
     }
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let (mut queries, available_queries, dimension) = open_matrix(queries_path, 4)?;
     if dimension != database.vector_dimension() {
         return Err(format!(
@@ -270,7 +270,7 @@ pub(crate) fn benchmark_range_fbin(
                 .into(),
         );
     }
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let (mut queries, available_queries, dimension) = open_matrix(queries_path, 4)?;
     let (mut neighbors, neighbor_rows, ground_truth_k) = open_matrix(neighbors_path, 4)?;
     if dimension != database.vector_dimension() {

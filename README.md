@@ -123,6 +123,11 @@ The destination must not exist. The `4` is the database-wide vector
 dimension. Vecgra stores supplied vectors but does not generate embeddings for
 JSONL properties.
 
+For later batches, use
+`vecgra append-jsonl customer-orders.vg new-nodes.jsonl new-edges.jsonl`.
+The append is committed atomically. Edge endpoints can reference new batch IDs
+or existing database nodes with `{"node":42}`; an empty node file adds only edges.
+
 Read [Import your own data](docs/custom-data.md) for the complete JSONL schema,
 vector rules, a checked Rust ingestion program, ongoing writes with
 transactions, and high-volume loading with `BulkLoader`.

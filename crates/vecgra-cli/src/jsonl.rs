@@ -7,7 +7,16 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::Arc;
-use vecgra::{BulkLoader, DatabaseOptions, GraphStats, Similarity, Value, VectorEncoding};
+use vecgra::{
+    BulkLoader, Database, DatabaseOptions, GraphStats, ReadGuard, Similarity, Value, VectorEncoding,
+};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct AppendStats {
+    pub(crate) nodes: usize,
+    pub(crate) edges: usize,
+    pub(crate) indexed_vectors: usize,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(untagged)]
@@ -41,13 +50,40 @@ struct JsonNode {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JsonEdge {
-    source: ExternalId,
-    target: ExternalId,
+    source: Endpoint,
+    target: Endpoint,
     label: String,
     #[serde(default)]
     properties: BTreeMap<String, JsonValue>,
     #[serde(default)]
     vectors: Vec<Vec<f32>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+enum Endpoint {
+    Batch(ExternalId),
+    Existing { node: u64 },
+}
+
+impl Endpoint {
+    fn resolve(
+        &self,
+        node_ids: &HashMap<ExternalId, u64>,
+        existing: Option<&ReadGuard<'_>>,
+    ) -> Result<u64, Box<dyn Error>> {
+        match self {
+            Self::Batch(id) => node_ids.get(id).copied().ok_or_else(|| {
+                format!("edge endpoint {id} does not name a node in this batch").into()
+            }),
+            Self::Existing { node } => {
+                let read = existing.ok_or("existing node references require append-jsonl")?;
+                read.node(*node)
+                    .map(|record| record.id)
+                    .ok_or_else(|| format!("existing node {node} was not found").into())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,44 +112,69 @@ pub(crate) fn import_jsonl(
     )?;
     let mut node_ids = HashMap::new();
 
-    for_json_lines::<JsonNode>(nodes_path, |line, node| {
+    for_json_lines::<JsonNode>(nodes_path, |node| {
         let external_id = node.id.clone();
         if node_ids.contains_key(&external_id) {
-            return Err(format!(
-                "{}:{line}: duplicate node id {external_id}",
-                nodes_path.display()
-            )
-            .into());
+            return Err(format!("duplicate node id {external_id}").into());
         }
-        let properties = convert_properties(node.properties)
-            .map_err(|message| format!("{}:{line}: {message}", nodes_path.display()))?;
+        let properties = convert_properties(node.properties)?;
         let id = loader.create_node(node.label, properties, &node.vectors)?;
         node_ids.insert(external_id, id);
         Ok(())
     })?;
 
-    for_json_lines::<JsonEdge>(edges_path, |line, edge| {
-        let source = node_ids.get(&edge.source).copied().ok_or_else(|| {
-            format!(
-                "{}:{line}: edge source {} does not name an imported node",
-                edges_path.display(),
-                edge.source
-            )
-        })?;
-        let target = node_ids.get(&edge.target).copied().ok_or_else(|| {
-            format!(
-                "{}:{line}: edge target {} does not name an imported node",
-                edges_path.display(),
-                edge.target
-            )
-        })?;
-        let properties = convert_properties(edge.properties)
-            .map_err(|message| format!("{}:{line}: {message}", edges_path.display()))?;
+    for_json_lines::<JsonEdge>(edges_path, |edge| {
+        let source = edge.source.resolve(&node_ids, None)?;
+        let target = edge.target.resolve(&node_ids, None)?;
+        let properties = convert_properties(edge.properties)?;
         loader.create_edge(source, target, edge.label, properties, &edge.vectors)?;
         Ok(())
     })?;
 
     Ok(loader.finish()?)
+}
+
+/// Durably appends one JSONL batch to an existing database.
+///
+/// Scalar endpoints name batch-local IDs; `{ "node": id }` endpoints refer to
+/// existing database nodes. Either input file may be empty.
+pub(crate) fn append_jsonl(
+    database_path: &Path,
+    nodes_path: &Path,
+    edges_path: &Path,
+) -> Result<AppendStats, Box<dyn Error>> {
+    let database = Database::open(database_path)?;
+    let mut transaction = database.transaction();
+    let mut node_ids = HashMap::new();
+    let mut stats = AppendStats::default();
+
+    for_json_lines::<JsonNode>(nodes_path, |node| {
+        let external_id = node.id.clone();
+        if node_ids.contains_key(&external_id) {
+            return Err(format!("duplicate node id {external_id}").into());
+        }
+        let properties = convert_properties(node.properties)?;
+        stats.indexed_vectors += node.vectors.len();
+        let id = transaction.create_node(node.label, properties, &node.vectors);
+        node_ids.insert(external_id, id);
+        stats.nodes += 1;
+        Ok(())
+    })?;
+
+    let read = database.read();
+    for_json_lines::<JsonEdge>(edges_path, |edge| {
+        let source = edge.source.resolve(&node_ids, Some(&read))?;
+        let target = edge.target.resolve(&node_ids, Some(&read))?;
+        let properties = convert_properties(edge.properties)?;
+        stats.indexed_vectors += edge.vectors.len();
+        transaction.create_edge(source, target, edge.label, properties, &edge.vectors);
+        stats.edges += 1;
+        Ok(())
+    })?;
+
+    drop(read);
+    transaction.commit()?;
+    Ok(stats)
 }
 
 /// Streams one fbin vector and one JSON metadata record into each node. This
@@ -140,11 +201,10 @@ pub(crate) fn import_node_fbin(
     let mut batch = vec![vec![0.0f32; dimension]];
     let mut imported = 0usize;
 
-    for_json_lines::<JsonNodeMetadata>(metadata_path, |line, metadata| {
+    for_json_lines::<JsonNodeMetadata>(metadata_path, |metadata| {
         if imported == vector_count {
             return Err(format!(
-                "{}:{line}: metadata has more records than the {vector_count} vectors in {}",
-                metadata_path.display(),
+                "metadata has more records than the {vector_count} vectors in {}",
                 vectors_path.display()
             )
             .into());
@@ -153,8 +213,7 @@ pub(crate) fn import_node_fbin(
         for (value, bytes) in batch[0].iter_mut().zip(encoded.chunks_exact(4)) {
             *value = f32::from_le_bytes(bytes.try_into().unwrap());
         }
-        let properties = convert_properties(metadata.properties)
-            .map_err(|message| format!("{}:{line}: {message}", metadata_path.display()))?;
+        let properties = convert_properties(metadata.properties)?;
         loader.create_node(metadata.label, properties, &batch)?;
         imported += 1;
         if imported.is_multiple_of(100_000) {
@@ -176,7 +235,7 @@ pub(crate) fn import_node_fbin(
 
 fn for_json_lines<T>(
     path: &Path,
-    mut visitor: impl FnMut(usize, T) -> Result<(), Box<dyn Error>>,
+    mut visitor: impl FnMut(T) -> Result<(), Box<dyn Error>>,
 ) -> Result<(), Box<dyn Error>>
 where
     T: for<'de> Deserialize<'de>,
@@ -190,7 +249,7 @@ where
         }
         let value = serde_json::from_str(&line)
             .map_err(|error| format!("{}:{line_number}: invalid JSON: {error}", path.display()))?;
-        visitor(line_number, value)?;
+        visitor(value).map_err(|error| format!("{}:{line_number}: {error}", path.display()))?;
     }
     Ok(())
 }
@@ -297,6 +356,53 @@ mod tests {
         drop(database);
 
         fs::remove_file(nodes).unwrap();
+        fs::remove_file(edges).unwrap();
+        fs::remove_file(database_path).unwrap();
+    }
+
+    #[test]
+    fn generic_jsonl_append_adds_a_durable_batch() {
+        let initial_nodes = path("initial-nodes.jsonl");
+        let appended_nodes = path("appended-nodes.jsonl");
+        let edges = path("empty-edges.jsonl");
+        let database_path = path("append.vg");
+        fs::write(
+            &initial_nodes,
+            "{\"id\":\"old\",\"label\":\"Memory\",\"properties\":{\"text\":\"old\"},\"vectors\":[[1,0]]}\n",
+        )
+        .unwrap();
+        fs::write(
+            &appended_nodes,
+            "{\"id\":\"new\",\"label\":\"Memory\",\"properties\":{\"text\":\"new\"},\"vectors\":[[0,1]]}\n",
+        )
+        .unwrap();
+        fs::write(&edges, "").unwrap();
+
+        import_jsonl(
+            &initial_nodes,
+            &edges,
+            &database_path,
+            2,
+            VectorEncoding::F16,
+        )
+        .unwrap();
+        let appended = append_jsonl(&database_path, &appended_nodes, &edges).unwrap();
+        assert_eq!(
+            appended,
+            AppendStats {
+                nodes: 1,
+                edges: 0,
+                indexed_vectors: 1
+            }
+        );
+
+        let database = Database::open(&database_path).unwrap();
+        let stats = database.read().stats();
+        assert_eq!((stats.nodes, stats.edges, stats.indexed_vectors), (2, 0, 2));
+        drop(database);
+
+        fs::remove_file(initial_nodes).unwrap();
+        fs::remove_file(appended_nodes).unwrap();
         fs::remove_file(edges).unwrap();
         fs::remove_file(database_path).unwrap();
     }

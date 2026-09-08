@@ -109,7 +109,7 @@ pub(crate) fn benchmark_bfs(
     if iterations == 0 {
         return Err("BFS iterations must be greater than zero".into());
     }
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let read = database.read();
     let node_count = read.stats().nodes;
     if source as usize >= node_count {
@@ -163,7 +163,7 @@ pub(crate) fn benchmark_wcc(
     if iterations == 0 {
         return Err("WCC iterations must be greater than zero".into());
     }
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let read = database.read();
     let node_count = read.stats().nodes;
     let first_started = Instant::now();
@@ -207,7 +207,7 @@ pub(crate) fn benchmark_pagerank(
     }
     const DAMPING: f64 = 0.85;
     const ALGORITHM_ITERATIONS: usize = 10;
-    let database = Database::open(database_path)?;
+    let database = Database::open_read_only(database_path)?;
     let read = database.read();
     let node_count = read.stats().nodes;
     let first_started = Instant::now();

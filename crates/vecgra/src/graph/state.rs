@@ -819,9 +819,13 @@ impl Graph {
                     label,
                     properties,
                     vectors,
-                    vector_count,
                 } => {
-                    validate_vectors(self.dimension, self.similarity, vectors, *vector_count)?;
+                    let vector_count = u32::try_from(vectors.len())
+                        .map_err(|_| Error::InvalidArgument("too many vector facets".into()))?;
+                    for vector in vectors {
+                        validate_vectors(self.dimension, self.similarity, vector, 1)?;
+                    }
+                    let vectors: Vec<f32> = vectors.iter().flatten().copied().collect();
                     let label = self.resolve_symbol(
                         label,
                         &mut pending_symbols,
@@ -846,9 +850,9 @@ impl Graph {
                         id: *id,
                         label,
                         properties: properties.into(),
-                        vector_count: *vector_count,
+                        vector_count,
                         generation,
-                        pending_vectors: vectors.clone().into(),
+                        pending_vectors: vectors.into(),
                     }));
                 }
                 Mutation::PutEdge {
@@ -858,14 +862,18 @@ impl Graph {
                     label,
                     properties,
                     vectors,
-                    vector_count,
                 } => {
                     for endpoint in [source, target] {
                         if !self.has_node(*endpoint) && !staged_nodes.contains(endpoint) {
                             return Err(Error::NotFound("endpoint node", *endpoint));
                         }
                     }
-                    validate_vectors(self.dimension, self.similarity, vectors, *vector_count)?;
+                    let vector_count = u32::try_from(vectors.len())
+                        .map_err(|_| Error::InvalidArgument("too many vector facets".into()))?;
+                    for vector in vectors {
+                        validate_vectors(self.dimension, self.similarity, vector, 1)?;
+                    }
+                    let vectors: Vec<f32> = vectors.iter().flatten().copied().collect();
                     let label = self.resolve_symbol(
                         label,
                         &mut pending_symbols,
@@ -892,10 +900,10 @@ impl Graph {
                         target: *target,
                         label,
                         properties: properties.into(),
-                        vector_count: *vector_count,
+                        vector_count,
                         generation,
                         vector_offset: 0,
-                        pending_vectors: vectors.clone().into(),
+                        pending_vectors: vectors.into(),
                     }));
                 }
                 Mutation::DeleteEdge { id } => {

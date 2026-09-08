@@ -39,12 +39,17 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         || run_benchmark_command(&command, &mut arguments)?
         || run_graph_command(&command, &mut arguments)?;
     if handled {
-        if let Some(extra) = arguments.next() {
-            return Err(format!("unexpected argument {extra:?} for command {command:?}").into());
-        }
+        no_more_arguments(&mut arguments)?;
         return Ok(());
     }
     Err(format!("unknown command {command}").into())
+}
+
+fn no_more_arguments(arguments: &mut impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
+    match arguments.next() {
+        Some(extra) => Err(format!("unexpected argument {extra:?}").into()),
+        None => Ok(()),
+    }
 }
 
 fn run_import_command(
@@ -62,6 +67,7 @@ fn run_import_command(
                 "f32" => VectorEncoding::F32,
                 value => return Err(format!("unknown vector encoding {value:?}").into()),
             };
+            no_more_arguments(arguments)?;
             let stats = jsonl::import_jsonl(
                 Path::new(&nodes),
                 Path::new(&edges),
@@ -69,6 +75,17 @@ fn run_import_command(
                 dimension,
                 encoding,
             )?;
+            println!("nodes\t{}", stats.nodes);
+            println!("edges\t{}", stats.edges);
+            println!("vectors\t{}", stats.indexed_vectors);
+        }
+        "append-jsonl" => {
+            let database = required(&mut arguments, "database path")?;
+            let nodes = required(&mut arguments, "nodes JSONL path")?;
+            let edges = required(&mut arguments, "edges JSONL path")?;
+            no_more_arguments(arguments)?;
+            let stats =
+                jsonl::append_jsonl(Path::new(&database), Path::new(&nodes), Path::new(&edges))?;
             println!("nodes\t{}", stats.nodes);
             println!("edges\t{}", stats.edges);
             println!("vectors\t{}", stats.indexed_vectors);
@@ -97,7 +114,7 @@ fn run_import_command(
             println!("vectors\t{}", stats.indexed_vectors);
             println!(
                 "dimension\t{}",
-                Database::open(&database)?.vector_dimension()
+                Database::open_read_only(&database)?.vector_dimension()
             );
         }
         "import-graphalytics" => {
@@ -162,7 +179,7 @@ fn run_import_command(
                 Some("f32") => VectorEncoding::F32,
                 Some(other) => return Err(format!("unknown vector encoding {other:?}").into()),
             };
-            let database = Database::open(source)?;
+            let database = Database::open_read_only(source)?;
             let stats = database.compact_to(&destination, encoding)?;
             println!("database\t{destination}");
             println!("nodes\t{}", stats.nodes);
@@ -290,7 +307,7 @@ fn run_benchmark_command(
                 return Err("iterations must be greater than zero".into());
             }
             let open_started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let open_time = open_started.elapsed();
             let read = database.read();
             let key = read
@@ -344,7 +361,7 @@ fn run_benchmark_command(
             }
 
             let open_started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let open_time = open_started.elapsed();
             let embedding_started = Instant::now();
             let mut embedder =
@@ -429,7 +446,7 @@ fn run_benchmark_command(
                 return Err("query count and candidate vectors must be greater than zero".into());
             }
             let open_started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let open_time = open_started.elapsed();
             let read = database.read();
             let mut elements = Vec::new();
@@ -520,7 +537,7 @@ fn run_benchmark_command(
                 return Err("iterations must be greater than zero".into());
             }
             let open_started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let open_time = open_started.elapsed();
             let read = database.read();
             for _ in 0..3 {
@@ -556,7 +573,7 @@ fn run_benchmark_command(
                 Some(other) => return Err(format!("unknown direction {other}").into()),
             };
             let open_started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let open_time = open_started.elapsed();
             let read = database.read();
             for _ in 0..5 {
@@ -592,7 +609,7 @@ fn run_benchmark_command(
                 Some("both") => Direction::Both,
                 Some(other) => return Err(format!("unknown direction {other}").into()),
             };
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             let mut seeds = ElementSet::new();
             seeds.insert(ElementRef::Node(id));
@@ -657,7 +674,7 @@ fn run_graph_command(
     match command {
         "stats" => {
             let path = required(&mut arguments, "database path")?;
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let stats = database.read().stats();
             println!("path\t{}", database.path().display());
             println!("nodes\t{}", stats.nodes);
@@ -672,7 +689,7 @@ fn run_graph_command(
         "check" => {
             let path = required(&mut arguments, "database path")?;
             let started = Instant::now();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let report = database.read().verify_integrity()?;
             println!("status\tok");
             println!("nodes\t{}", report.nodes);
@@ -690,7 +707,7 @@ fn run_graph_command(
             let path = required(&mut arguments, "database path")?;
             let target = parse_vector_target(arguments.next().as_deref())?;
             let label_name = arguments.next();
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             let label = label_name
                 .as_deref()
@@ -722,7 +739,7 @@ fn run_graph_command(
                 &numeric_type,
             )?;
             let limit = optional_usize(&mut arguments, "output limit")?.unwrap_or(100);
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             let key = read
                 .label_id(&key_name)
@@ -751,7 +768,7 @@ fn run_graph_command(
         "node" => {
             let path = required(&mut arguments, "database path")?;
             let id: u64 = required(&mut arguments, "node id")?.parse()?;
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             let node = read.node(id).ok_or("node not found")?;
             println!(
@@ -777,7 +794,7 @@ fn run_graph_command(
                 Some("both") => Direction::Both,
                 Some(other) => return Err(format!("unknown direction {other}").into()),
             };
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             for edge in read.neighbors(id, direction, EdgeFilter::default())? {
                 println!(
@@ -803,7 +820,7 @@ fn run_graph_command(
             let edge_label_name = arguments.next().filter(|name| name != "-");
             let max_expansions =
                 optional_usize(&mut arguments, "maximum expansions")?.unwrap_or(100_000);
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             let edge_label = edge_label_name
                 .as_deref()
@@ -855,7 +872,7 @@ fn run_graph_command(
             let path = required(&mut arguments, "database path")?;
             let query = required(&mut arguments, "query text")?;
             let limit = optional_usize(&mut arguments, "limit")?.unwrap_or(10);
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
@@ -910,7 +927,7 @@ fn run_graph_command(
             };
             let edge_label_name = arguments.next().filter(|name| name != "-");
             let node_label_name = arguments.next().filter(|name| name != "-");
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
             let vector = embedder.embed_query(&query)?;
@@ -983,7 +1000,7 @@ fn run_graph_command(
             let target = parse_vector_target(arguments.next().as_deref())?;
             let label_name = arguments.next().filter(|name| name != "-");
             let candidate_elements = optional_usize(&mut arguments, "candidate elements")?;
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
             let queries = facets
@@ -1055,7 +1072,7 @@ fn run_graph_command(
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
                 .unwrap_or_else(|| "hash".into());
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
             let vector = embedder.embed_query(&query)?;
@@ -1094,7 +1111,7 @@ fn run_graph_command(
         "query" => {
             let path = required(&mut arguments, "database path")?;
             let statement = required(&mut arguments, "query statement")?;
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let read = database.read();
             for matched in query::execute(&read, &statement)? {
                 let start = read
@@ -1119,7 +1136,7 @@ fn run_graph_command(
             let path = required(&mut arguments, "database path")?;
             let statement = required(&mut arguments, "query statement")?;
             let text = required(&mut arguments, "semantic query text")?;
-            let database = Database::open(path)?;
+            let database = Database::open_read_only(path)?;
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
@@ -1295,6 +1312,10 @@ const COMMAND_USAGES: &[(&str, &str)] = &[
         "import-jsonl",
         "import-jsonl <nodes.jsonl> <edges.jsonl> <database> <dimension> [f16|f32]",
     ),
+    (
+        "append-jsonl",
+        "append-jsonl <database> <nodes.jsonl> <edges.jsonl>",
+    ),
     ("import-fbin", "import-fbin <train.fbin> <database>"),
     (
         "import-node-fbin",
@@ -1434,6 +1455,13 @@ fn print_command_help(command: &str) -> Result<(), Box<dyn Error>> {
              are JSON scalars. Every vector must match <dimension>. The command creates \
              a new database and does not overwrite an existing path.\n\
              See docs/custom-data.md for the full schema and checked examples."
+        ),
+        "append-jsonl" => println!(
+            "\nAppends a durable JSONL batch to an existing database using the same node and \
+             edge schema as import-jsonl. Scalar edge endpoints name batch-local node IDs. \
+             Use {{\"node\":42}} to reference an existing database node. Either input may be \
+             empty. The entire batch is validated before commit; a competing writer \
+             causes a conflict without appending data."
         ),
         "import-github" => println!(
             "\nDefaults: 1000 issues, 1000 pull requests, 300 discussions, \
