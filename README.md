@@ -154,34 +154,22 @@ cargo run -p vecgra --example custom_ingest -- customer-orders-rust.vg
 
 ### Optional source adapters
 
-Create a real engineering-history graph from GitHub, using the deterministic
-offline embedder for a quick local run. Authentication comes from
-`GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session.
+Create a real engineering-history graph from GitHub. Authentication comes from
+`GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session. Embeddings
+come from Qwen3-Embedding-8B through OpenRouter; use the same database-level
+model for queries:
 
 ```sh
+export OPENROUTER_API_KEY=...
+
 target/release/vecgra import-github \
   BurntSushi/ripgrep ripgrep.vg
 
 target/release/vecgra stats ripgrep.vg
-target/release/vecgra check ripgrep.vg
-cargo run --release -p vecgra-studio -- ripgrep.vg
-```
-
-The hash embedder tests storage and interaction; it is not a semantic model.
-For semantic quality, build with Qwen3-Embedding-8B through OpenRouter and use
-the same database-level model for queries:
-
-```sh
-export OPENROUTER_API_KEY=...
-export VECGRA_EMBEDDER=qwen
-
-target/release/vecgra import-github \
-  BurntSushi/ripgrep ripgrep-qwen.vg
-
 target/release/vecgra semantic-text \
-  ripgrep-qwen.vg "why was this behaviour changed"
+  ripgrep.vg "why was this behaviour changed"
 
-cargo run --release -p vecgra-studio -- ripgrep-qwen.vg
+cargo run --release -p vecgra-studio -- ripgrep.vg
 ```
 
 Fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter imports are also

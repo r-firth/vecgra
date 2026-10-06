@@ -17,46 +17,11 @@ pub fn embed_query(model: &str, dimension: usize, text: &str) -> Result<Vec<f32>
         return Err("embedding dimension must be greater than zero".into());
     }
     match model {
-        "hash" => Ok(feature_vector(text, dimension)),
         "qwen" | QWEN_MODEL => openrouter_qwen_query(dimension, text),
         other => Err(format!(
-            "unknown embedder {other:?}; expected hash, qwen, or {QWEN_MODEL}"
+            "unknown embedder {other:?}; expected qwen or {QWEN_MODEL}"
         )),
     }
-}
-
-/// The deterministic lexical embedding used by local fixtures and offline use.
-pub fn feature_vector(text: &str, dimension: usize) -> Vec<f32> {
-    let mut vector = vec![0.0_f32; dimension];
-    if dimension == 0 {
-        return vector;
-    }
-    let lowercase = text.to_ascii_lowercase();
-    let mut populated = false;
-    for token in lowercase
-        .split(|character: char| !character.is_alphanumeric() && character != '_')
-        .filter(|token| !token.is_empty())
-    {
-        add_feature(&mut vector, token.as_bytes(), 1.0);
-        populated = true;
-        if token.len() >= 3 {
-            for trigram in token.as_bytes().windows(3) {
-                add_feature(&mut vector, trigram, 0.2);
-            }
-        }
-    }
-    if !populated {
-        add_feature(&mut vector, lowercase.as_bytes(), 1.0);
-    }
-    let magnitude = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-    if magnitude > f32::EPSILON {
-        for value in &mut vector {
-            *value /= magnitude;
-        }
-    } else {
-        vector[0] = 1.0;
-    }
-    vector
 }
 
 fn openrouter_qwen_query(dimension: usize, text: &str) -> Result<Vec<f32>, String> {
@@ -125,22 +90,6 @@ fn validate_vector(vector: &[f32], dimension: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn add_feature(vector: &mut [f32], bytes: &[u8], weight: f32) {
-    let hash = fnv1a(bytes);
-    let index = (hash as usize) % vector.len();
-    let sign = if hash & (1 << 63) == 0 { 1.0 } else { -1.0 };
-    vector[index] += sign * weight;
-}
-
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100_0000_01b3);
-    }
-    hash
-}
-
 #[derive(Serialize)]
 struct EmbeddingRequest<'a> {
     model: &'a str,
@@ -157,19 +106,4 @@ struct EmbeddingResponse {
 struct EmbeddingDatum {
     index: usize,
     embedding: Vec<f32>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hash_vectors_are_normalized_and_related_tokens_overlap() {
-        let left = feature_vector("rust function parser", 128);
-        let related = feature_vector("parser function declaration", 128);
-        let unrelated = feature_vector("database transaction checksum", 128);
-        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
-        assert!((dot(&left, &left) - 1.0).abs() < 1e-5);
-        assert!(dot(&left, &related) > dot(&left, &unrelated));
-    }
 }

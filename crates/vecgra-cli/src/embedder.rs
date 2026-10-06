@@ -24,14 +24,11 @@ pub(crate) fn create_embedder(
     request_batch_size: usize,
 ) -> Result<Box<dyn Embedder>, Box<dyn Error>> {
     match name {
-        "hash" => Ok(Box::new(HashEmbedder::new(dimension)?)),
         "qwen" | QWEN_MODEL => Ok(Box::new(OpenRouterEmbedder::qwen(
             dimension,
             request_batch_size,
         )?)),
-        other => {
-            Err(format!("unknown embedder {other:?}; expected hash, qwen, or {QWEN_MODEL}").into())
-        }
+        other => Err(format!("unknown embedder {other:?}; expected qwen or {QWEN_MODEL}").into()),
     }
 }
 
@@ -96,40 +93,6 @@ impl EmbeddingCache {
             .get(text)
             .map(|vector| vector.to_vec())
             .ok_or_else(|| format!("embedding was not prepared for {text:?}").into())
-    }
-}
-
-pub(crate) struct HashEmbedder {
-    dimension: usize,
-}
-
-impl HashEmbedder {
-    fn new(dimension: usize) -> Result<Self, Box<dyn Error>> {
-        if dimension == 0 {
-            return Err("embedding dimension must be greater than zero".into());
-        }
-        Ok(Self { dimension })
-    }
-}
-
-impl Embedder for HashEmbedder {
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    fn name(&self) -> &str {
-        "hash"
-    }
-
-    fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
-        Ok(texts
-            .iter()
-            .map(|text| feature_vector(text, self.dimension))
-            .collect())
-    }
-
-    fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
-        Ok(feature_vector(text, self.dimension))
     }
 }
 
@@ -353,30 +316,45 @@ fn validate_dimension(vector: &[f32], dimension: usize) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-pub(crate) fn feature_vector(text: &str, dimension: usize) -> Vec<f32> {
-    vecgra_embedding::feature_vector(text, dimension)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn feature_vectors_are_normalized_and_related_tokens_overlap() {
-        let left = feature_vector("rust function parser", 128);
-        let right = feature_vector("parser function declaration", 128);
-        let unrelated = feature_vector("database transaction checksum", 128);
-        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
-        assert!((dot(&left, &left) - 1.0).abs() < 1e-5);
-        assert!(dot(&left, &right) > dot(&left, &unrelated));
+    struct CountingEmbedder {
+        dimension: usize,
+    }
+
+    impl Embedder for CountingEmbedder {
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+            Ok(texts
+                .iter()
+                .map(|text| vec![text.len() as f32; self.dimension])
+                .collect())
+        }
+
+        fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
+            Ok(vec![text.len() as f32; self.dimension])
+        }
     }
 
     #[test]
     fn cache_deduplicates_texts() {
-        let embedder = create_embedder("hash", 8, 2).unwrap();
-        let mut cache = EmbeddingCache::new(embedder);
+        let mut cache = EmbeddingCache::new(Box::new(CountingEmbedder { dimension: 8 }));
         cache.ensure(["same", "same", "different"]).unwrap();
         assert_eq!(cache.embedded_texts(), 2);
         assert_eq!(cache.vector("same").unwrap().len(), 8);
+    }
+
+    #[test]
+    fn unknown_embedders_are_rejected() {
+        assert!(create_embedder("hash", 8, 2).is_err());
     }
 }

@@ -198,6 +198,25 @@ pub fn search_database(
     embedding_model: &str,
     limit: usize,
 ) -> Result<SearchReport, String> {
+    search_database_with(
+        path,
+        query,
+        mode,
+        embedding_model,
+        limit,
+        |dimension, query| vecgra_embedding::embed_query(embedding_model, dimension, query),
+    )
+}
+
+/// Runs [`search_database`] with a caller-supplied query embedder.
+pub(crate) fn search_database_with(
+    path: &Path,
+    query: &str,
+    mode: SearchMode,
+    embedding_model: &str,
+    limit: usize,
+    embed_query: impl FnOnce(usize, &str) -> Result<Vec<f32>, String>,
+) -> Result<SearchReport, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("search query is empty".into());
@@ -210,11 +229,7 @@ pub fn search_database(
     let semantic_query = if mode == SearchMode::Text {
         None
     } else {
-        Some(vecgra_embedding::embed_query(
-            embedding_model,
-            database.vector_dimension(),
-            query,
-        ))
+        Some(embed_query(database.vector_dimension(), query))
     };
     let read = database.read();
     let lexical = if mode == SearchMode::Semantic {

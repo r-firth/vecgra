@@ -222,6 +222,14 @@ fn evidence_paths_preserve_direction_hydration_and_incomplete_outcomes() {
     assert!(error.contains("relationship label \"MISSING\" does not exist"));
 }
 
+fn axis_vector(dimension: usize, axes: &[usize]) -> Vec<f32> {
+    let mut vector = vec![0.0; dimension];
+    for &axis in axes {
+        vector[axis] = 1.0 / (axes.len() as f32).sqrt();
+    }
+    vector
+}
+
 #[test]
 fn hybrid_search_ranks_native_node_and_edge_vectors() {
     let file = TestFile::new();
@@ -240,18 +248,12 @@ fn hybrid_search_ranks_native_node_and_edge_vectors() {
     let rust = transaction.create_node(
         "Document",
         [("title", Value::String("Rust memory safety".into()))],
-        &[vecgra_embedding::feature_vector(
-            "ownership makes systems programming memory safe",
-            dimension,
-        )],
+        &[axis_vector(dimension, &[0])],
     );
     let fruit = transaction.create_node(
         "Document",
         [("title", Value::String("Banana bread recipe".into()))],
-        &[vecgra_embedding::feature_vector(
-            "fruit flour baking recipe",
-            dimension,
-        )],
+        &[axis_vector(dimension, &[1])],
     );
     let relationship = transaction.create_edge(
         rust,
@@ -261,19 +263,17 @@ fn hybrid_search_ranks_native_node_and_edge_vectors() {
             "body",
             Value::String("ownership prevents use after free".into()),
         )],
-        &[vecgra_embedding::feature_vector(
-            "ownership prevents memory bugs",
-            dimension,
-        )],
+        &[axis_vector(dimension, &[0, 2])],
     );
     transaction.commit().unwrap();
 
-    let report = search_database(
+    let report = search_database_with(
         &file.0,
         "ownership memory safety",
         SearchMode::Hybrid,
-        "hash",
+        "test",
         8,
+        |dimension, _| Ok(axis_vector(dimension, &[0])),
     )
     .unwrap();
     assert!(!report.hits.is_empty());
