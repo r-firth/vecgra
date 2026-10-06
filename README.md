@@ -156,11 +156,11 @@ cargo run -p vecgra --example custom_ingest -- customer-orders-rust.vg
 
 Create a real engineering-history graph from GitHub. Authentication comes from
 `GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session. Embeddings
-come from Qwen3-Embedding-8B through OpenRouter; use the same database-level
-model for queries:
+come from EmbeddingGemma 2 running locally in [Ollama](https://ollama.com); no
+API key is needed. Use the same database-level model for queries:
 
 ```sh
-export OPENROUTER_API_KEY=...
+ollama pull embeddinggemma-2
 
 target/release/vecgra import-github \
   BurntSushi/ripgrep ripgrep.vg
@@ -171,6 +171,10 @@ target/release/vecgra semantic-text \
 
 cargo run --release -p vecgra-studio -- ripgrep.vg
 ```
+
+Set `OLLAMA_HOST` if Ollama is not on `127.0.0.1:11434`. To use
+Qwen3-Embedding-8B through OpenRouter instead, set `VECGRA_EMBEDDER=qwen` and
+`OPENROUTER_API_KEY` for both the import and later queries.
 
 Fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter imports are also
 available. See the CLI help and the [GitHub importer schema](docs/github-import.md).

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+use vecgra_embedding::{GEMMA_MODEL, gemma_documents, gemma_query, validate_gemma_dimension};
 
 const OPENROUTER_ENDPOINT: &str = "https://openrouter.ai/api/v1/embeddings";
 const QWEN_MODEL: &str = "qwen/qwen3-embedding-8b";
@@ -24,11 +25,58 @@ pub(crate) fn create_embedder(
     request_batch_size: usize,
 ) -> Result<Box<dyn Embedder>, Box<dyn Error>> {
     match name {
+        "gemma" | GEMMA_MODEL => Ok(Box::new(GemmaEmbedder::new(dimension, request_batch_size)?)),
         "qwen" | QWEN_MODEL => Ok(Box::new(OpenRouterEmbedder::qwen(
             dimension,
             request_batch_size,
         )?)),
-        other => Err(format!("unknown embedder {other:?}; expected qwen or {QWEN_MODEL}").into()),
+        other => Err(format!(
+            "unknown embedder {other:?}; expected gemma, qwen, {GEMMA_MODEL}, or {QWEN_MODEL}"
+        )
+        .into()),
+    }
+}
+
+/// EmbeddingGemma 2 through a local Ollama server.
+pub(crate) struct GemmaEmbedder {
+    dimension: usize,
+    request_batch_size: usize,
+}
+
+impl GemmaEmbedder {
+    fn new(dimension: usize, request_batch_size: usize) -> Result<Self, Box<dyn Error>> {
+        validate_gemma_dimension(dimension)?;
+        Ok(Self {
+            dimension,
+            request_batch_size: request_batch_size.max(1),
+        })
+    }
+}
+
+impl Embedder for GemmaEmbedder {
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn name(&self) -> &str {
+        GEMMA_MODEL
+    }
+
+    fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+        let batch_count = texts.len().div_ceil(self.request_batch_size);
+        let mut vectors = Vec::with_capacity(texts.len());
+        for (index, batch) in texts.chunks(self.request_batch_size).enumerate() {
+            vectors.extend(gemma_documents(batch, self.dimension)?);
+            let done = index + 1;
+            if done == batch_count || done.is_multiple_of(10) {
+                eprintln!("embedded {done}/{batch_count} batches");
+            }
+        }
+        Ok(vectors)
+    }
+
+    fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
+        Ok(gemma_query(text, self.dimension)?)
     }
 }
 
@@ -355,6 +403,12 @@ mod tests {
 
     #[test]
     fn unknown_embedders_are_rejected() {
-        assert!(create_embedder("hash", 8, 2).is_err());
+        assert!(create_embedder("hash", 256, 2).is_err());
+    }
+
+    #[test]
+    fn gemma_requires_a_matryoshka_dimension() {
+        assert!(create_embedder("gemma", 256, 2).is_ok());
+        assert!(create_embedder("gemma", 300, 2).is_err());
     }
 }

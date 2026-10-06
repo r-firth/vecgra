@@ -14,5 +14,8 @@ description = "Embedding adapters shared by Vecgra tools and Studio"
 serde = { version = "1.0.229", features = ["derive"] }
 ureq = { version = "3.4.0", features = ["json"] }
 
+[dev-dependencies]
+serde_json = "1.0.145"
+
 [lints]
 workspace = true

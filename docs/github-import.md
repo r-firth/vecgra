@@ -8,11 +8,14 @@ discussion, commits, and changed files rather than a code AST.
 # Uses GITHUB_TOKEN, GH_TOKEN, or the token from `gh auth login`.
 target/release/vecgra import-github OWNER/REPOSITORY graph.vg \
   [issues] [pulls] [discussions] [releases] \
-  [dimension] [qwen] [batch-size]
+  [dimension] [gemma|qwen] [batch-size]
 ```
 
 The limits default to 1,000 issues, 1,000 pull requests, 300 discussions, and
-100 releases. Dimension defaults to 256 and the embedding batch defaults to 128. The `qwen`
+100 releases. Dimension defaults to 256 and the embedding batch defaults to 128. The default
+`gemma` embedder runs EmbeddingGemma 2 through a local Ollama server
+(`ollama pull embeddinggemma-2`; set `OLLAMA_HOST` if it is not on
+`127.0.0.1:11434`) and accepts 768, 512, 256, or 128 dimensions. The `qwen`
 embedder uses Qwen3-Embedding-8B through OpenRouter and requires
 `OPENROUTER_API_KEY`.
 The destination must not already exist.

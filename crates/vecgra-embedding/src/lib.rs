@@ -3,6 +3,11 @@
 //! A database records its vector dimension, not model
 //! metadata. Callers choose the one embedding model used for their database.
 
+mod gemma;
+
+pub use gemma::{
+    GEMMA_DIMENSIONS, GEMMA_MODEL, gemma_documents, gemma_query, validate_gemma_dimension,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::thread;
@@ -17,9 +22,10 @@ pub fn embed_query(model: &str, dimension: usize, text: &str) -> Result<Vec<f32>
         return Err("embedding dimension must be greater than zero".into());
     }
     match model {
+        "gemma" | GEMMA_MODEL => gemma_query(text, dimension),
         "qwen" | QWEN_MODEL => openrouter_qwen_query(dimension, text),
         other => Err(format!(
-            "unknown embedder {other:?}; expected qwen or {QWEN_MODEL}"
+            "unknown embedder {other:?}; expected gemma, qwen, {GEMMA_MODEL}, or {QWEN_MODEL}"
         )),
     }
 }
