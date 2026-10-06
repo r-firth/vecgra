@@ -17,11 +17,11 @@ doc = false
 
 [dependencies]
 chrono = { version = "0.4.42", default-features = false, features = ["std"] }
-dirs = "6.0.0"
+dirs = "7.0.0"
 regex = "1.12.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.145"
-tree-sitter = "0.26.12"
+tree-sitter = "0.27.0"
 tree-sitter-rust = "0.24.2"
 ureq = { version = "3.4.0", features = ["json"] }
 vecgra = { version = "=0.1.2", path = "../vecgra" }
