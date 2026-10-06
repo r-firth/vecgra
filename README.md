@@ -154,35 +154,26 @@ cargo run -p vecgra --example custom_ingest -- customer-orders-rust.vg
 
 ### Optional source adapters
 
-Create a real engineering-history graph from GitHub, using the deterministic
-offline embedder for a quick local run. Authentication comes from
-`GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session.
+Create a real engineering-history graph from GitHub. Authentication comes from
+`GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session. Embeddings
+come from EmbeddingGemma 2, which Vecgra runs locally; no API key or separate
+server is needed. Use the same database-level model for queries:
 
 ```sh
 target/release/vecgra import-github \
   BurntSushi/ripgrep ripgrep.vg
 
 target/release/vecgra stats ripgrep.vg
-target/release/vecgra check ripgrep.vg
+target/release/vecgra semantic-text \
+  ripgrep.vg "why was this behaviour changed"
+
 cargo run --release -p vecgra-studio -- ripgrep.vg
 ```
 
-The hash embedder tests storage and interaction; it is not a semantic model.
-For semantic quality, build with Qwen3-Embedding-8B through OpenRouter and use
-the same database-level model for queries:
-
-```sh
-export OPENROUTER_API_KEY=...
-export VECGRA_EMBEDDER=qwen
-
-target/release/vecgra import-github \
-  BurntSushi/ripgrep ripgrep-qwen.vg
-
-target/release/vecgra semantic-text \
-  ripgrep-qwen.vg "why was this behaviour changed"
-
-cargo run --release -p vecgra-studio -- ripgrep-qwen.vg
-```
+The first run downloads the quantized model (about 350 MB) into the platform
+cache directory, or into `VECGRA_MODEL_DIR` when set. To use
+Qwen3-Embedding-8B through OpenRouter instead, set `VECGRA_EMBEDDER=qwen` and
+`OPENROUTER_API_KEY` for both the import and later queries.
 
 Fbin plus typed metadata, Graphalytics, and Rust/Tree-sitter imports are also
 available. See the CLI help and the [GitHub importer schema](docs/github-import.md).

@@ -8,13 +8,16 @@ discussion, commits, and changed files rather than a code AST.
 # Uses GITHUB_TOKEN, GH_TOKEN, or the token from `gh auth login`.
 target/release/vecgra import-github OWNER/REPOSITORY graph.vg \
   [issues] [pulls] [discussions] [releases] \
-  [dimension] [hash|qwen] [batch-size]
+  [dimension] [gemma|qwen] [batch-size]
 ```
 
 The limits default to 1,000 issues, 1,000 pull requests, 300 discussions, and
-100 releases. Dimension defaults to 256, the deterministic `hash` embedder is
-the offline default, and the embedding batch defaults to 128. `qwen` uses
-Qwen3-Embedding-8B through OpenRouter and requires `OPENROUTER_API_KEY`.
+100 releases. Dimension defaults to 256 and the embedding batch defaults to 128.
+The default `gemma` embedder runs EmbeddingGemma 2 in-process with ONNX Runtime
+and accepts 768, 512, 256, or 128 dimensions. Its first use downloads the
+quantized model (about 350 MB) into the platform cache directory, or
+`VECGRA_MODEL_DIR`. The `qwen` embedder uses Qwen3-Embedding-8B through
+OpenRouter and requires `OPENROUTER_API_KEY`.
 The destination must not already exist.
 
 ## Graph shape
@@ -79,6 +82,3 @@ target/release/vecgra query-text graph.vg \
 target/release/vecgra semantic-text graph.vg \
   'regressions fixed after reviewer feedback' 20 3 qwen
 ```
-
-The hash embedder tests deterministic storage and query mechanics. Use a real
-model when judging semantic quality.

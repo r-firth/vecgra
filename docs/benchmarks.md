@@ -25,7 +25,7 @@ Every graph node and relationship owns an embedding. Exact-text deduplication
 reduced remote Qwen3-Embedding-8B calls by roughly 31× while preserving a
 vector for every element. The original Qwen import took about 169 seconds and
 was dominated by the remote provider. The same topology with the offline hash
-embedder imported in about 2.0 seconds, which is useful as a storage/parser
+embedder (since removed) imported in about 2.0 seconds, which is useful as a storage/parser
 smoke measurement but not a semantic-quality comparison.
 
 The indexed v5 form is 342,300,360 bytes (about 326 MiB): approximately 260 MB
@@ -149,9 +149,9 @@ target/release/vecgra bench-neighbors graph.vg NODE_ID 100000
 target/release/vecgra bench-pattern graph.vg \
   'MATCH (a:File)-[e:HAS_SYNTAX]->(b:Syntax) RETURN a,e,b LIMIT 100' 1000
 target/release/vecgra bench-search graph.vg 'regex configuration builder' \
-  25 hash both
+  25 qwen both
 target/release/vecgra bench-search graph.vg 'regex configuration builder' \
-  25 hash nodes File
+  25 qwen nodes File
 target/release/vecgra bench-ann graph.vg 100 20000 both
 target/release/vecgra plan-search graph.vg both
 ```

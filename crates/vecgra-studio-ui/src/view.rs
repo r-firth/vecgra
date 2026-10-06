@@ -386,7 +386,7 @@ impl StudioView {
             path_task: None,
             path_endpoints: None,
             embedding_model: std::env::var("VECGRA_EMBEDDER")
-                .unwrap_or_else(|_| "hash".into())
+                .unwrap_or_else(|_| "gemma".into())
                 .into(),
             layout_generation: 0,
             layout_task: None,

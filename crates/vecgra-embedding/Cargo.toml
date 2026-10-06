@@ -11,7 +11,11 @@ publish.workspace = true
 description = "Embedding adapters shared by Vecgra tools and Studio"
 
 [dependencies]
+dirs = "6.0.0"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "api-27"] }
 serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.10.9"
+tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 ureq = { version = "3.4.0", features = ["json"] }
 
 [lints]

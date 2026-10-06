@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+use vecgra_embedding::{GEMMA_MODEL, gemma_documents, gemma_query, validate_gemma_dimension};
 
 const OPENROUTER_ENDPOINT: &str = "https://openrouter.ai/api/v1/embeddings";
 const QWEN_MODEL: &str = "qwen/qwen3-embedding-8b";
@@ -24,14 +25,58 @@ pub(crate) fn create_embedder(
     request_batch_size: usize,
 ) -> Result<Box<dyn Embedder>, Box<dyn Error>> {
     match name {
-        "hash" => Ok(Box::new(HashEmbedder::new(dimension)?)),
+        "gemma" | GEMMA_MODEL => Ok(Box::new(GemmaEmbedder::new(dimension, request_batch_size)?)),
         "qwen" | QWEN_MODEL => Ok(Box::new(OpenRouterEmbedder::qwen(
             dimension,
             request_batch_size,
         )?)),
-        other => {
-            Err(format!("unknown embedder {other:?}; expected hash, qwen, or {QWEN_MODEL}").into())
+        other => Err(format!(
+            "unknown embedder {other:?}; expected gemma, qwen, {GEMMA_MODEL}, or {QWEN_MODEL}"
+        )
+        .into()),
+    }
+}
+
+/// EmbeddingGemma 2 running in-process.
+pub(crate) struct GemmaEmbedder {
+    dimension: usize,
+    request_batch_size: usize,
+}
+
+impl GemmaEmbedder {
+    fn new(dimension: usize, request_batch_size: usize) -> Result<Self, Box<dyn Error>> {
+        validate_gemma_dimension(dimension)?;
+        Ok(Self {
+            dimension,
+            request_batch_size: request_batch_size.max(1),
+        })
+    }
+}
+
+impl Embedder for GemmaEmbedder {
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn name(&self) -> &str {
+        GEMMA_MODEL
+    }
+
+    fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+        let batch_count = texts.len().div_ceil(self.request_batch_size);
+        let mut vectors = Vec::with_capacity(texts.len());
+        for (index, batch) in texts.chunks(self.request_batch_size).enumerate() {
+            vectors.extend(gemma_documents(batch, self.dimension)?);
+            let done = index + 1;
+            if done == batch_count || done.is_multiple_of(10) {
+                eprintln!("embedded {done}/{batch_count} batches");
+            }
         }
+        Ok(vectors)
+    }
+
+    fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
+        Ok(gemma_query(text, self.dimension)?)
     }
 }
 
@@ -96,40 +141,6 @@ impl EmbeddingCache {
             .get(text)
             .map(|vector| vector.to_vec())
             .ok_or_else(|| format!("embedding was not prepared for {text:?}").into())
-    }
-}
-
-pub(crate) struct HashEmbedder {
-    dimension: usize,
-}
-
-impl HashEmbedder {
-    fn new(dimension: usize) -> Result<Self, Box<dyn Error>> {
-        if dimension == 0 {
-            return Err("embedding dimension must be greater than zero".into());
-        }
-        Ok(Self { dimension })
-    }
-}
-
-impl Embedder for HashEmbedder {
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    fn name(&self) -> &str {
-        "hash"
-    }
-
-    fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
-        Ok(texts
-            .iter()
-            .map(|text| feature_vector(text, self.dimension))
-            .collect())
-    }
-
-    fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
-        Ok(feature_vector(text, self.dimension))
     }
 }
 
@@ -353,30 +364,51 @@ fn validate_dimension(vector: &[f32], dimension: usize) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-pub(crate) fn feature_vector(text: &str, dimension: usize) -> Vec<f32> {
-    vecgra_embedding::feature_vector(text, dimension)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn feature_vectors_are_normalized_and_related_tokens_overlap() {
-        let left = feature_vector("rust function parser", 128);
-        let right = feature_vector("parser function declaration", 128);
-        let unrelated = feature_vector("database transaction checksum", 128);
-        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
-        assert!((dot(&left, &left) - 1.0).abs() < 1e-5);
-        assert!(dot(&left, &right) > dot(&left, &unrelated));
+    struct CountingEmbedder {
+        dimension: usize,
+    }
+
+    impl Embedder for CountingEmbedder {
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+            Ok(texts
+                .iter()
+                .map(|text| vec![text.len() as f32; self.dimension])
+                .collect())
+        }
+
+        fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, Box<dyn Error>> {
+            Ok(vec![text.len() as f32; self.dimension])
+        }
     }
 
     #[test]
     fn cache_deduplicates_texts() {
-        let embedder = create_embedder("hash", 8, 2).unwrap();
-        let mut cache = EmbeddingCache::new(embedder);
+        let mut cache = EmbeddingCache::new(Box::new(CountingEmbedder { dimension: 8 }));
         cache.ensure(["same", "same", "different"]).unwrap();
         assert_eq!(cache.embedded_texts(), 2);
         assert_eq!(cache.vector("same").unwrap().len(), 8);
+    }
+
+    #[test]
+    fn unknown_embedders_are_rejected() {
+        assert!(create_embedder("hash", 256, 2).is_err());
+    }
+
+    #[test]
+    fn gemma_requires_a_matryoshka_dimension() {
+        assert!(create_embedder("gemma", 256, 2).is_ok());
+        assert!(create_embedder("gemma", 300, 2).is_err());
     }
 }

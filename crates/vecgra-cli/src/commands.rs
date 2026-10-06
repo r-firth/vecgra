@@ -134,7 +134,7 @@ fn run_import_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let batch_size = optional_usize(&mut arguments, "embedding batch size")?.unwrap_or(128);
             let embedder = embedder::create_embedder(&embedder_name, dimension, batch_size)?;
             importer::import_rust_repository(
@@ -156,7 +156,7 @@ fn run_import_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let batch_size = optional_usize(&mut arguments, "embedding batch size")?.unwrap_or(128);
             let embedder = embedder::create_embedder(&embedder_name, dimension, batch_size)?;
             github::import_github_repository(
@@ -351,7 +351,7 @@ fn run_benchmark_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let target = parse_vector_target(arguments.next().as_deref())?;
             let label_name = arguments.next().filter(|name| name != "-");
             let candidate_vectors =
@@ -876,7 +876,7 @@ fn run_graph_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
             let vector = embedder.embed_query(&query)?;
@@ -918,7 +918,7 @@ fn run_graph_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let direction = match arguments.next().as_deref() {
                 None | Some("both") => Direction::Both,
                 Some("out") => Direction::Outgoing,
@@ -996,7 +996,7 @@ fn run_graph_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let target = parse_vector_target(arguments.next().as_deref())?;
             let label_name = arguments.next().filter(|name| name != "-");
             let candidate_elements = optional_usize(&mut arguments, "candidate elements")?;
@@ -1071,7 +1071,7 @@ fn run_graph_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let database = Database::open_read_only(path)?;
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
@@ -1140,7 +1140,7 @@ fn run_graph_command(
             let embedder_name = arguments
                 .next()
                 .or_else(|| env::var("VECGRA_EMBEDDER").ok())
-                .unwrap_or_else(|| "hash".into());
+                .unwrap_or_else(|| "gemma".into());
             let mut embedder =
                 embedder::create_embedder(&embedder_name, database.vector_dimension(), 1)?;
             let vector = embedder.embed_query(&text)?;
@@ -1351,11 +1351,11 @@ const COMMAND_USAGES: &[(&str, &str)] = &[
     ),
     (
         "import-rust",
-        "import-rust <repository> <database> [dimension] [hash|qwen] [batch-size]",
+        "import-rust <repository> <database> [dimension] [gemma|qwen] [batch-size]",
     ),
     (
         "import-github",
-        "import-github <owner/repository> <database> [issues] [pulls] [discussions] [releases] [dimension] [hash|qwen] [batch-size]",
+        "import-github <owner/repository> <database> [issues] [pulls] [discussions] [releases] [dimension] [gemma|qwen] [batch-size]",
     ),
     ("stats", "stats <database>"),
     ("check", "check <database>"),
@@ -1379,23 +1379,23 @@ const COMMAND_USAGES: &[(&str, &str)] = &[
     ),
     (
         "search-text",
-        "search-text <database> <query> [limit] [hash|qwen]",
+        "search-text <database> <query> [limit] [gemma|qwen]",
     ),
     (
         "range-text",
-        "range-text <database> <seed-node-id> <query> [hops] [limit] [hash|qwen] [out|in|both] [edge-label|-] [node-label|-]",
+        "range-text <database> <seed-node-id> <query> [hops] [limit] [gemma|qwen] [out|in|both] [edge-label|-] [node-label|-]",
     ),
     (
         "search-facets",
-        "search-facets <database> '<facet-1> || <facet-2>' [limit] [hash|qwen] [nodes|edges|both] [label|-] [candidate-elements]",
+        "search-facets <database> '<facet-1> || <facet-2>' [limit] [gemma|qwen] [nodes|edges|both] [label|-] [candidate-elements]",
     ),
     (
         "semantic-text",
-        "semantic-text <database> <query> [limit] [max-hops] [hash|qwen]",
+        "semantic-text <database> <query> [limit] [max-hops] [gemma|qwen]",
     ),
     (
         "bench-search",
-        "bench-search <database> <query> [iterations] [hash|qwen] [nodes|edges|both] [label|-] [candidate-vectors]",
+        "bench-search <database> <query> [iterations] [gemma|qwen] [nodes|edges|both] [label|-] [candidate-vectors]",
     ),
     (
         "bench-ann",
@@ -1407,7 +1407,7 @@ const COMMAND_USAGES: &[(&str, &str)] = &[
     ),
     (
         "query-text",
-        "query-text <database> '<MATCH query>' <semantic-text> [hash|qwen]",
+        "query-text <database> '<MATCH query>' <semantic-text> [gemma|qwen]",
     ),
     (
         "bench-pattern",
@@ -1438,7 +1438,9 @@ fn print_help() {
     }
     println!(
         "\nRun `vecgra <command> --help` for command help.\n\
-         OPENROUTER_API_KEY is required for qwen. VECGRA_EMBEDDER sets the default embedder."
+         gemma (the default) runs EmbeddingGemma 2 locally; its first use downloads the \
+         model to the cache directory or VECGRA_MODEL_DIR. OPENROUTER_API_KEY is required for qwen. \
+         VECGRA_EMBEDDER sets the default embedder."
     );
 }
 
@@ -1465,11 +1467,13 @@ fn print_command_help(command: &str) -> Result<(), Box<dyn Error>> {
         ),
         "import-github" => println!(
             "\nDefaults: 1000 issues, 1000 pull requests, 300 discussions, \
-             100 releases, 256 dimensions, hash embeddings, batch size 128.\n\
+             100 releases, 256 dimensions, EmbeddingGemma 2 embeddings, batch size 128.\n\
              Authentication: GITHUB_TOKEN, GH_TOKEN, or `gh auth login`."
         ),
-        "import-rust" => println!("\nDefaults: 256 dimensions, hash embeddings, batch size 128."),
-        "semantic-text" => println!("\nDefaults: 20 results, 2 hops, hash embeddings."),
+        "import-rust" => {
+            println!("\nDefaults: 256 dimensions, EmbeddingGemma 2 embeddings, batch size 128.")
+        }
+        "semantic-text" => println!("\nDefaults: 20 results, 2 hops, EmbeddingGemma 2 embeddings."),
         _ => {}
     }
     Ok(())
