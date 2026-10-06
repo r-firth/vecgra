@@ -12,7 +12,7 @@ description = "Vector-native embedded labelled property graph database"
 
 [dependencies]
 memmap2 = "0.9.8"
-roaring = "=0.11.3"
+roaring = "=0.11.5"
 
 [lints]
 workspace = true
