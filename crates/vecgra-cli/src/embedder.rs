@@ -37,7 +37,7 @@ pub(crate) fn create_embedder(
     }
 }
 
-/// EmbeddingGemma 2 through a local Ollama server.
+/// EmbeddingGemma 2 running in-process.
 pub(crate) struct GemmaEmbedder {
     dimension: usize,
     request_batch_size: usize,

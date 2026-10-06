@@ -156,12 +156,10 @@ cargo run -p vecgra --example custom_ingest -- customer-orders-rust.vg
 
 Create a real engineering-history graph from GitHub. Authentication comes from
 `GITHUB_TOKEN`, `GH_TOKEN`, or an existing `gh auth login` session. Embeddings
-come from EmbeddingGemma 2 running locally in [Ollama](https://ollama.com); no
-API key is needed. Use the same database-level model for queries:
+come from EmbeddingGemma 2, which Vecgra runs locally; no API key or separate
+server is needed. Use the same database-level model for queries:
 
 ```sh
-ollama pull embeddinggemma-2
-
 target/release/vecgra import-github \
   BurntSushi/ripgrep ripgrep.vg
 
@@ -172,7 +170,8 @@ target/release/vecgra semantic-text \
 cargo run --release -p vecgra-studio -- ripgrep.vg
 ```
 
-Set `OLLAMA_HOST` if Ollama is not on `127.0.0.1:11434`. To use
+The first run downloads the quantized model (about 350 MB) into the platform
+cache directory, or into `VECGRA_MODEL_DIR` when set. To use
 Qwen3-Embedding-8B through OpenRouter instead, set `VECGRA_EMBEDDER=qwen` and
 `OPENROUTER_API_KEY` for both the import and later queries.
 

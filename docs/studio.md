@@ -21,7 +21,7 @@ This document describes the product, its interaction model, and its renderer.
 | Distribution | Unresolved; raw development binary is not a package |
 | Durable data | The selected `.vg` file; Studio preferences are separate |
 | Cache | Rebuildable layout and level-of-detail data, never graph truth |
-| Network | None for text search; semantic and hybrid queries call local Ollama (default) or OpenRouter for Qwen |
+| Network | None for text search; the default Gemma embedder runs locally after a one-time model download; Qwen query embedding uses OpenRouter |
 
 Studio uses [Bezel](https://github.com/crabtalk/bezel) for its material-aware
 application chrome and pins commit
@@ -225,7 +225,7 @@ does not introduce a GPU-to-CPU texture copy.
 ```text
 vecgra                       vecgra-embedding
 durable graph/vector truth        selected query embedding adapter
-and query execution               (Gemma/Ollama or Qwen/OpenRouter)
+and query execution               (local Gemma or Qwen/OpenRouter)
               \                    /
 vecgra-studio-core
     bounded search, owned snapshots, layout, LOD, projection, hit testing

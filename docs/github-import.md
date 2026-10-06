@@ -12,12 +12,12 @@ target/release/vecgra import-github OWNER/REPOSITORY graph.vg \
 ```
 
 The limits default to 1,000 issues, 1,000 pull requests, 300 discussions, and
-100 releases. Dimension defaults to 256 and the embedding batch defaults to 128. The default
-`gemma` embedder runs EmbeddingGemma 2 through a local Ollama server
-(`ollama pull embeddinggemma-2`; set `OLLAMA_HOST` if it is not on
-`127.0.0.1:11434`) and accepts 768, 512, 256, or 128 dimensions. The `qwen`
-embedder uses Qwen3-Embedding-8B through OpenRouter and requires
-`OPENROUTER_API_KEY`.
+100 releases. Dimension defaults to 256 and the embedding batch defaults to 128.
+The default `gemma` embedder runs EmbeddingGemma 2 in-process with ONNX Runtime
+and accepts 768, 512, 256, or 128 dimensions. Its first use downloads the
+quantized model (about 350 MB) into the platform cache directory, or
+`VECGRA_MODEL_DIR`. The `qwen` embedder uses Qwen3-Embedding-8B through
+OpenRouter and requires `OPENROUTER_API_KEY`.
 The destination must not already exist.
 
 ## Graph shape

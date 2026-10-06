@@ -1438,8 +1438,8 @@ fn print_help() {
     }
     println!(
         "\nRun `vecgra <command> --help` for command help.\n\
-         gemma (the default) runs EmbeddingGemma 2 through a local Ollama server; set \
-         OLLAMA_HOST if it is not on 127.0.0.1:11434. OPENROUTER_API_KEY is required for qwen. \
+         gemma (the default) runs EmbeddingGemma 2 locally; its first use downloads the \
+         model to the cache directory or VECGRA_MODEL_DIR. OPENROUTER_API_KEY is required for qwen. \
          VECGRA_EMBEDDER sets the default embedder."
     );
 }
