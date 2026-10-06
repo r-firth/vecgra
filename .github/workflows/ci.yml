@@ -34,8 +34,6 @@ jobs:
           shared-key: core-linux
       - name: Test headless crates
         run: cargo test --locked --all-targets -p vecgra -p vecgra-cli -p vecgra-embedding
-      - name: Check real EmbeddingGemma 2 model (temporary)
-        run: cargo test --locked -p vecgra-embedding -- --ignored --nocapture
       - name: Run native API quickstart
         run: cargo run --locked -p vecgra --example quickstart
       - name: Build release CLI
