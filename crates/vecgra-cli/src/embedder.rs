@@ -1,16 +1,65 @@
+use indicatif::{FormattedDuration, ProgressBar, ProgressFinish, ProgressState, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use vecgra_embedding::{GEMMA_MODEL, gemma_documents, gemma_query, validate_gemma_dimension};
+use vecgra_embedding::{
+    GEMMA_MODEL, gemma_documents_with_progress, gemma_query, validate_gemma_dimension,
+};
 
 const OPENROUTER_ENDPOINT: &str = "https://openrouter.ai/api/v1/embeddings";
 const QWEN_MODEL: &str = "qwen/qwen3-embedding-8b";
+
+fn embedding_progress(text_count: usize) -> ProgressBar {
+    let style = ProgressStyle::with_template(concat!(
+        "{spinner:.green} {msg} [{wide_bar:.cyan/blue}] {percent:>3}%\n",
+        "  {pos}/{len} texts | {elapsed_precise} elapsed | {speed} texts/s | ETA {remaining}",
+    ))
+    .expect("valid embedding progress template")
+    .with_key(
+        "speed",
+        |state: &ProgressState, output: &mut dyn std::fmt::Write| {
+            let _ = write!(output, "{:.1}", state.per_sec());
+        },
+    )
+    .with_key(
+        "remaining",
+        |state: &ProgressState, output: &mut dyn std::fmt::Write| {
+            if state.pos() == 0 {
+                let _ = output.write_str("--:--:--");
+            } else {
+                let _ = write!(output, "{}", FormattedDuration(state.eta()));
+            }
+        },
+    )
+    .progress_chars("=>-");
+    let progress = ProgressBar::new(text_count as u64)
+        .with_style(style)
+        .with_message("Embedding")
+        .with_finish(ProgressFinish::Abandon);
+    if !progress.is_hidden() {
+        progress.tick();
+        progress.enable_steady_tick(Duration::from_millis(100));
+    }
+    progress
+}
+
+fn update_embedding_progress(progress: &ProgressBar, completed: u64) {
+    let previous = progress.position();
+    progress.set_position(completed);
+    if progress.is_hidden() {
+        let total = progress.length().unwrap_or(completed);
+        if previous == 0 || completed == total || completed / 1024 > previous / 1024 {
+            eprintln!("embedded {completed}/{total} texts");
+        }
+    } else if previous == 0 {
+        progress.force_draw();
+    }
+}
 
 pub(crate) trait Embedder {
     fn dimension(&self) -> usize;
@@ -63,15 +112,18 @@ impl Embedder for GemmaEmbedder {
     }
 
     fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
-        let batch_count = texts.len().div_ceil(self.request_batch_size);
-        let mut vectors = Vec::with_capacity(texts.len());
-        for (index, batch) in texts.chunks(self.request_batch_size).enumerate() {
-            vectors.extend(gemma_documents(batch, self.dimension)?);
-            let done = index + 1;
-            if done == batch_count || done.is_multiple_of(10) {
-                eprintln!("embedded {done}/{batch_count} batches");
-            }
+        if texts.is_empty() {
+            return Ok(Vec::new());
         }
+        let progress = embedding_progress(texts.len());
+        let vectors = gemma_documents_with_progress(
+            texts,
+            self.dimension,
+            self.request_batch_size,
+            |completed| update_embedding_progress(&progress, completed as u64),
+        )
+        .inspect_err(|_| progress.abandon_with_message("Embedding failed"))?;
+        progress.finish_with_message("Embedded");
         Ok(vectors)
     }
 
@@ -223,18 +275,13 @@ impl OpenRouterEmbedder {
             return Ok(Vec::new());
         }
         let batch_count = texts.len().div_ceil(self.request_batch_size);
-        if batch_count == 1 {
-            return self.embed(texts);
-        }
-
+        let progress = embedding_progress(texts.len());
         let worker_count = self.concurrency.min(batch_count);
-        let completed = AtomicUsize::new(0);
         let (sender, receiver) = mpsc::channel();
         thread::scope(|scope| {
             for worker in 0..worker_count {
                 let sender = sender.clone();
                 let embedder = self.clone();
-                let completed = &completed;
                 scope.spawn(move || {
                     for batch_index in (worker..batch_count).step_by(worker_count) {
                         let start = batch_index * embedder.request_batch_size;
@@ -245,10 +292,6 @@ impl OpenRouterEmbedder {
                         if sender.send((batch_index, result)).is_err() {
                             return;
                         }
-                        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                        if done == batch_count || done.is_multiple_of(10) {
-                            eprintln!("embedded {done}/{batch_count} batches");
-                        }
                     }
                 });
             }
@@ -258,18 +301,26 @@ impl OpenRouterEmbedder {
             let mut first_error = None;
             for (batch_index, result) in receiver {
                 match result {
-                    Ok(vectors) => batches[batch_index] = Some(vectors),
+                    Ok(vectors) => {
+                        update_embedding_progress(
+                            &progress,
+                            progress.position() + vectors.len() as u64,
+                        );
+                        batches[batch_index] = Some(vectors);
+                    }
                     Err(error) if first_error.is_none() => first_error = Some(error),
                     Err(_) => {}
                 }
             }
             if let Some(error) = first_error {
+                progress.abandon_with_message("Embedding failed");
                 return Err(error.into());
             }
             let mut vectors = Vec::with_capacity(texts.len());
             for (index, batch) in batches.into_iter().enumerate() {
                 vectors.extend(batch.ok_or_else(|| format!("embedding batch {index} was lost"))?);
             }
+            progress.finish_with_message("Embedded");
             Ok(vectors)
         })
     }

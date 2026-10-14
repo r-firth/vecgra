@@ -20,6 +20,15 @@ quantized model (about 350 MB) into the platform cache directory, or
 OpenRouter and requires `OPENROUTER_API_KEY`.
 The destination must not already exist.
 
+Local Gemma inference groups similar-length texts and processes at most eight
+texts and 2,048 padded tokens per batch. Longer inputs run individually, retaining
+the model's 8,192-token limit. Tokenization uses bounded windows to avoid holding
+the whole import's token arrays in memory. A batch-size argument below eight
+lowers the inference batch ceiling; larger values do not override the token
+budget. The progress bar advances after each inference batch and shows completed
+texts, elapsed time, throughput, and estimated time remaining.
+Redirected output uses periodic text updates instead of terminal controls.
+
 ## Graph shape
 
 | Nodes | Relationships |
