@@ -6,7 +6,8 @@
 mod gemma;
 
 pub use gemma::{
-    GEMMA_DIMENSIONS, GEMMA_MODEL, gemma_documents, gemma_query, validate_gemma_dimension,
+    GEMMA_DIMENSIONS, GEMMA_MODEL, gemma_documents, gemma_documents_with_progress, gemma_query,
+    validate_gemma_dimension,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
