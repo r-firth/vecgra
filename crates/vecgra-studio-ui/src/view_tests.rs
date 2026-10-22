@@ -1175,6 +1175,63 @@ fn a_path_search_that_finds_nothing_offers_wider_searches(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn enter_activates_the_focused_path_step(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("step-keys");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::init_bezel(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([
+            KeyBinding::new("enter", ActivateSelection, Some("VecgraStudio")),
+            KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
+        ]);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let command = format!("path {} {}", live.files[0], live.files[3]);
+    view.update_in(cx, |view, window, cx| {
+        view.settle_presentation_for_capture();
+        view.execute_command(&command, window, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let step_edges: Vec<usize> = view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        let snapshot = view.snapshot().unwrap();
+        report
+            .path
+            .as_ref()
+            .unwrap()
+            .steps
+            .iter()
+            .map(|step| snapshot.edge_index(step.edge_id).unwrap())
+            .collect()
+    });
+
+    let first = cx.debug_bounds("evidence-path-step-0").unwrap();
+    cx.simulate_click(first.center(), Modifiers::none());
+    assert_eq!(
+        view.read_with(&*cx, |view, _| view.selection),
+        Some(SceneSelection::Edge(step_edges[0]))
+    );
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    cx.simulate_keystrokes("tab");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(
+        view.read_with(&*cx, |view, _| view.selection),
+        Some(SceneSelection::Edge(step_edges[1]))
+    );
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);

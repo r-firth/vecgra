@@ -2314,6 +2314,12 @@ impl StudioView {
         {
             return;
         }
+        // With a control focused, such as a path step, a list row or a
+        // button, Enter belongs to that control.
+        if !self.focus_handle.is_focused(window) {
+            cx.propagate();
+            return;
+        }
         if matches!(self.path_state, PathState::ChoosingEnd(_)) {
             if let Some(index) = self.path_destination_candidate() {
                 self.trace_path_to_node(index, window, cx);
