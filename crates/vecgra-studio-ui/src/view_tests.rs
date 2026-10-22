@@ -58,6 +58,20 @@ fn context_mixes_show_the_commonest_labels() {
     let two = counted_labels(&labels[..2]);
     assert_eq!(commonest(&two), (&two[..], 0));
     assert_eq!(commonest(&[]), (&[][..], 0));
+
+    // What a context holds includes the focus's own label.
+    let summary = ContextSummary {
+        node: 0,
+        direct: 2,
+        indirect: 0,
+        relationships: 3,
+        labels: counts,
+        types: counted_labels(&[Arc::from("READ")]),
+        focus_label: Arc::from("Repository"),
+    };
+    assert!(summary.has_label("Repository") && summary.has_label("Commit"));
+    assert!(!summary.has_label("Branch"));
+    assert!(summary.has_type("READ") && !summary.has_type("EDITED"));
 }
 
 #[gpui::test]

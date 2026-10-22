@@ -242,6 +242,7 @@ sit one and two hops away and their commonest labels, and how many
 relationships it shows and their commonest types, each label or type with its
 legend colour. Clicking the title
 selects the focus node again after walking away from it within the context.
+Overview rows for labels and types the context holds none of recede meanwhile.
 
 The relationship and node-label taxonomies are controls as well as the
 canvas's legend: each row carries the color its relationships or nodes are

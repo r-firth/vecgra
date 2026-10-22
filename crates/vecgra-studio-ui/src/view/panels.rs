@@ -258,9 +258,17 @@ impl StudioView {
                             let facet = FacetLens::Relationship(label.clone());
                             let selector = format!("relationship-facet:{label}");
                             let menu_facet = facet.clone();
+                            let outside_context = showing_context
+                                && self
+                                    .context_summary
+                                    .as_ref()
+                                    .is_some_and(|summary| !summary.has_type(label));
                             div()
                                 .w_full()
                                 .debug_selector(move || selector)
+                                // While a context is open, rows it holds
+                                // nothing of recede.
+                                .when(outside_context, |this| this.opacity(0.4))
                                 .on_mouse_down(
                                     MouseButton::Right,
                                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -349,9 +357,17 @@ impl StudioView {
                             let facet = FacetLens::NodeLabel(label.clone());
                             let selector = format!("node-label-facet:{label}");
                             let menu_facet = facet.clone();
+                            let outside_context = showing_context
+                                && self
+                                    .context_summary
+                                    .as_ref()
+                                    .is_some_and(|summary| !summary.has_label(label));
                             div()
                                 .w_full()
                                 .debug_selector(move || selector)
+                                // While a context is open, rows it holds
+                                // nothing of recede.
+                                .when(outside_context, |this| this.opacity(0.4))
                                 .on_mouse_down(
                                     MouseButton::Right,
                                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {

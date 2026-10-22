@@ -171,6 +171,16 @@ impl ContextSummary {
     fn type_mix(&self) -> (&[(Arc<str>, usize)], usize) {
         commonest(&self.types)
     }
+
+    /// Whether any node in the context, the focus included, has `label`.
+    fn has_label(&self, label: &str) -> bool {
+        &*self.focus_label == label || self.labels.iter().any(|(held, _)| &**held == label)
+    }
+
+    /// Whether any relationship in the context has the type `label`.
+    fn has_type(&self, label: &str) -> bool {
+        self.types.iter().any(|(held, _)| &**held == label)
+    }
 }
 
 /// The first three of a most-common-first count list, and how many more
@@ -211,6 +221,8 @@ struct ContextSummary {
     labels: Arc<[(Arc<str>, usize)]>,
     /// The types of the context's relationships, most common first.
     types: Arc<[(Arc<str>, usize)]>,
+    /// The focus node's own label, which `labels` leaves out.
+    focus_label: Arc<str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2611,6 +2623,7 @@ impl StudioView {
                     .map(|&node| &snapshot.nodes.labels[node]),
             ),
             types: counted_labels(focus.edges.iter().map(|&edge| &snapshot.edges.labels[edge])),
+            focus_label: snapshot.nodes.labels[index].clone(),
         };
         self.status = format!(
             "Context · {} · {} · Esc restores overview",
