@@ -867,6 +867,15 @@ fn node_captions(
         if !point_is_visible(position, context.viewport, 0.0) {
             continue;
         }
+        // A lens that dims the scene fades what it leaves out nearly to
+        // nothing; a name there would label an empty spot.
+        if !strong
+            && context
+                .emphasis
+                .is_some_and(|lens| lens.dim >= 0.35 && lens.node_score(index) <= 0.01)
+        {
+            continue;
+        }
         let text = node_caption_text(&snapshot.node_title(index));
         let width = text.chars().count() as f32 * 6.2 + 10.0;
         // Names sit right of their node unless that would run off the canvas.
@@ -1551,6 +1560,20 @@ mod caption_tests {
         assert!(
             captions.iter().any(|caption| caption.text == interior_name),
             "the path's interior node is named"
+        );
+        // The start's other neighbors are dimmed almost out of sight by the
+        // path, so they go unnamed.
+        let path_names =
+            [start, interior, end].map(|node| node_caption_text(&snapshot.node_title(node)));
+        assert!(
+            captions
+                .iter()
+                .all(|caption| path_names.contains(&caption.text)),
+            "only the path is named, not {:?}",
+            captions
+                .iter()
+                .map(|caption| &caption.text)
+                .collect::<Vec<_>>()
         );
     }
 
