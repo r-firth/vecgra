@@ -1047,6 +1047,14 @@ impl StudioView {
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.activate_search_result(index, window, cx);
                                     }))
+                                    .when(hit.kind_label() != "EDGE", |this| {
+                                        let node = hit.id();
+                                        this.on_hover(cx.listener(
+                                            move |this, hovered: &bool, _, cx| {
+                                                this.preview_node(node, *hovered, cx);
+                                            },
+                                        ))
+                                    })
                                     .child(
                                         h_flex()
                                             .gap_2()
@@ -1590,7 +1598,7 @@ impl StudioView {
                 });
             })
             .child(scene)
-            .when_some(self.render_hover_card(cx), |this, card| this.child(card))
+            .children(self.render_hover_card(cx))
             .when_some(navigator, |this, navigator| {
                 this.child(
                     div()
@@ -1851,9 +1859,11 @@ impl StudioView {
                         let neighbor = connection.neighbor;
                         let edge = connection.edge;
                         let edge_id = snapshot.edges.ids[edge];
+                        let neighbor_id = snapshot.nodes.ids[neighbor];
                         let title = scene_node_title(snapshot, neighbor);
                         h_flex()
                             .id(("inspector-connection", edge_id))
+                            .debug_selector(move || format!("inspector-connection:{neighbor_id}"))
                             .role(Role::Button)
                             .aria_label(format!(
                                 "Select {} {} node {}",
@@ -1871,6 +1881,9 @@ impl StudioView {
                             .hover(|style| style.bg(cx.theme().sidebar_accent))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.select_related_node(neighbor, Some(edge), window, cx);
+                            }))
+                            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                this.preview_node(neighbor_id, *hovered, cx);
                             }))
                             .child(title_line(&title, cx).flex_1().text_sm())
                             .child(
@@ -1959,9 +1972,18 @@ impl StudioView {
     /// A small card beside the node under the pointer naming it, so the graph
     /// can be read without selecting every node. It follows the node while
     /// the layout moves and stays out of the way of a drag.
-    fn render_hover_card(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+    /// The hovered node's card, and a ring that marks the node itself so a
+    /// node pointed at from a list can be found on the canvas. Nothing is
+    /// drawn for a node outside the visible canvas.
+    fn render_hover_card(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        self.hover_card_elements(cx)
+            .map_or_else(Vec::new, Vec::from)
+    }
+
+    fn hover_card_elements(&self, cx: &Context<Self>) -> Option<[gpui::AnyElement; 2]> {
         const WIDTH: f32 = 260.0;
         const OFFSET: f32 = 14.0;
+        const RING: f32 = 22.0;
         if self.drag.is_some() {
             return None;
         }
@@ -1971,6 +1993,19 @@ impl StudioView {
         let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
         let world = self.workspace.as_ref()?.borrow().position(index)?;
         let anchor = self.camera.project(world, self.world_bounds, viewport);
+        if anchor.x < 0.0 || anchor.y < 0.0 || anchor.x > viewport.x || anchor.y > viewport.y {
+            return None;
+        }
+        let ring = div()
+            .debug_selector(|| "graph-hover-ring".into())
+            .absolute()
+            .left(px(anchor.x - RING / 2.0))
+            .top(px(anchor.y - RING / 2.0))
+            .size(px(RING))
+            .rounded_full()
+            .border_2()
+            .border_color(palette().mist.opacity(0.85))
+            .into_any_element();
         // Open to the right of the node unless that would leave the canvas.
         let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
             anchor.x + OFFSET
@@ -1980,42 +2015,41 @@ impl StudioView {
         let top = (anchor.y - 18.0).clamp(8.0, (viewport.y - 64.0).max(8.0));
         let label = snapshot.nodes.labels[index].clone();
         let color = label_color(&label);
-        Some(
-            v_flex()
-                .debug_selector(|| "graph-hover-card".into())
-                .absolute()
-                .left(px(left))
-                .top(px(top))
-                .max_w(px(WIDTH))
-                .px_2p5()
-                .py_1p5()
-                .gap_0p5()
-                .rounded(px(8.0))
-                .bg(rgb(0x10181e).opacity(0.94))
-                .border_1()
-                .border_color(cx.theme().border)
-                .shadow_md()
-                .child(
-                    title_line(&scene_node_title(snapshot, index), cx)
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD),
-                )
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .items_center()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(div().size(px(6.0)).rounded_full().bg(color))
-                        .child(label.to_string())
-                        .child("·")
-                        .child(format!(
-                            "{} relationships",
-                            format_count(snapshot.nodes.degrees[index] as usize)
-                        )),
-                )
-                .into_any_element(),
-        )
+        let card = v_flex()
+            .debug_selector(|| "graph-hover-card".into())
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .max_w(px(WIDTH))
+            .px_2p5()
+            .py_1p5()
+            .gap_0p5()
+            .rounded(px(8.0))
+            .bg(rgb(0x10181e).opacity(0.94))
+            .border_1()
+            .border_color(cx.theme().border)
+            .shadow_md()
+            .child(
+                title_line(&scene_node_title(snapshot, index), cx)
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD),
+            )
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div().size(px(6.0)).rounded_full().bg(color))
+                    .child(label.to_string())
+                    .child("·")
+                    .child(format!(
+                        "{} relationships",
+                        format_count(snapshot.nodes.degrees[index] as usize)
+                    )),
+            )
+            .into_any_element();
+        Some([ring, card])
     }
 
     /// Recently opened databases, offered while nothing is selected.
@@ -2456,6 +2490,9 @@ fn endpoint_row(
         .hover(|style| style.bg(cx.theme().sidebar_accent))
         .on_click(cx.listener(move |this, _, window, cx| {
             this.select_related_node(index, None, window, cx);
+        }))
+        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.preview_node(id, *hovered, cx);
         }))
         .child(
             div()

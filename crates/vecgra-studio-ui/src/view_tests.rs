@@ -1549,6 +1549,60 @@ fn hovering_a_node_names_it_beside_the_pointer(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn hovering_an_inspector_connection_points_out_the_node(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, cx| {
+        view.settle_presentation_for_capture();
+        view.set_selection(Some(SceneSelection::Node(5)));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    draw(cx);
+    let row = cx
+        .debug_bounds("inspector-connection:6")
+        .expect("node 5 lists its NEXT neighbor");
+    let header = cx.debug_bounds("inspector-connections").unwrap();
+
+    cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, Some(6)));
+    draw(cx);
+    assert!(cx.debug_bounds("graph-hover-ring").is_some());
+    assert!(cx.debug_bounds("graph-hover-card").is_some());
+
+    cx.simulate_mouse_move(
+        header.origin + point(px(4.0), px(4.0)),
+        None,
+        Modifiers::none(),
+    );
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, None));
+    draw(cx);
+    assert!(cx.debug_bounds("graph-hover-ring").is_none());
+
+    cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+    cx.simulate_click(row.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(6)));
+        // The new selection's rows replace the hovered one. Whatever row is
+        // now under the pointer may preview its own node, but not this one.
+        assert_ne!(
+            view.hovered_node,
+            Some(6),
+            "walking to a node ends its preview"
+        );
+    });
+}
+
+#[gpui::test]
 fn opened_databases_are_offered_again_while_nothing_is_selected(cx: &mut TestAppContext) {
     let first = LiveDatabase::new("recent-first");
     let second = LiveDatabase::new("recent-second");

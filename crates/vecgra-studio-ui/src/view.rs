@@ -925,6 +925,9 @@ impl StudioView {
             return;
         }
         self.set_selection(Some(SceneSelection::Node(index)));
+        // The row that previewed this node is replaced by the new
+        // selection's rows, so it will not report the pointer leaving.
+        self.hovered_node = None;
         if let Some(position) = self
             .workspace
             .as_ref()
@@ -2552,6 +2555,16 @@ impl StudioView {
                 .map(|index| snapshot.nodes.ids[index])
             });
         self.set_hovered_node(hovered, cx);
+    }
+
+    /// Points out a node on the canvas while a list row that names it is
+    /// hovered, and stops when the pointer leaves that row.
+    fn preview_node(&mut self, node: u64, hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            self.set_hovered_node(Some(node), cx);
+        } else if self.hovered_node == Some(node) {
+            self.set_hovered_node(None, cx);
+        }
     }
 
     fn set_hovered_node(&mut self, node: Option<u64>, cx: &mut Context<Self>) {

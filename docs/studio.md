@@ -57,7 +57,9 @@ attempt to draw every record as a giant hairball.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout. Hovering
    a node shows its title, label, and relationship count beside it without
-   changing the selection. Below the overview, the canvas names the
+   changing the selection; hovering a node in the inspector's connections,
+   a relationship's endpoints, or the search results shows the same card
+   and rings the node on the canvas. Below the overview, the canvas names the
    selection, its best-connected neighbors, path endpoints, and the
    strongest search matches; zoomed in to individual elements with nothing
    selected, it names the best-connected nodes in view. Names never overlap
