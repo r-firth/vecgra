@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use gpui::{
-    App, AppContext as _, KeyBinding, Styled as _, WindowBounds, WindowOptions, actions, px, size,
+    App, AppContext as _, KeyBinding, Menu, MenuItem, Styled as _, WindowBounds, WindowOptions,
+    actions, px, size,
 };
 #[cfg(feature = "visual-test")]
 use gpui::{Entity, Window};
@@ -77,6 +78,7 @@ fn main() {
             KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+        cx.set_menus(app_menus());
 
         let mut window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(
@@ -119,6 +121,44 @@ fn main() {
         })
         .detach();
     });
+}
+
+/// The menu bar, which also lists each command's shortcut. Items act on the
+/// focused Studio window.
+fn app_menus() -> Vec<Menu> {
+    vec![
+        Menu::new("Vecgra Studio").items([
+            MenuItem::action("Shortcuts and Commands", ToggleHelp),
+            MenuItem::separator(),
+            MenuItem::action("Quit Vecgra Studio", Quit),
+        ]),
+        Menu::new("File").items([
+            MenuItem::action("Open…", OpenDatabase),
+            MenuItem::action("Reload", ReloadDatabase),
+            MenuItem::action("Live Refresh", ToggleLiveRefresh),
+        ]),
+        Menu::new("View").items([
+            MenuItem::action("Search", FocusSearch),
+            MenuItem::separator(),
+            MenuItem::action("Fit Graph", FitView),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::separator(),
+            MenuItem::action("Auto Layout", ArrangeAuto),
+            MenuItem::action("Force Layout", ArrangeForce),
+            MenuItem::action("Orbit Layout", ArrangeOrbit),
+            MenuItem::action("Structure Layout", ArrangeStructure),
+            MenuItem::separator(),
+            MenuItem::action("Release Pinned Node", ReleaseSelected),
+        ]),
+        Menu::new("Go").items([
+            MenuItem::action("Back", SelectionBack),
+            MenuItem::action("Forward", SelectionForward),
+            MenuItem::separator(),
+            MenuItem::action("Return to Overview", ClearSelection),
+        ]),
+        Menu::new("Help").items([MenuItem::action("Shortcuts and Commands", ToggleHelp)]),
+    ]
 }
 
 fn window_dimension(variable: &str, default: f32, minimum: f32) -> f32 {

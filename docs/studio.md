@@ -138,7 +138,8 @@ The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
 the status bar opens a dialog listing every shortcut and command; clicking a
 command closes the dialog and starts that command in the input. While the
 dialog is open, Escape and Enter dismiss it rather than acting on the graph
-behind it.
+behind it. On macOS the same commands appear in the menu bar (Vecgra Studio,
+File, View, Go, Help) with their shortcuts.
 
 A successful query retargets an interruptible camera spring to frame its
 visible matches and fades in a score-weighted graph lens. Nodes receive ranked
