@@ -1327,3 +1327,44 @@ fn typing_help_opens_it_without_activating_the_selection(cx: &mut TestAppContext
         assert!(!view.context_focus_active);
     });
 }
+
+#[gpui::test]
+fn hovering_a_node_names_it_beside_the_pointer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let (point, id, empty) = view.read_with(&*cx, |view, _| {
+        let bounds = view.canvas_bounds.unwrap();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let workspace = view.workspace.as_ref().unwrap().borrow();
+        let local =
+            view.camera
+                .project(workspace.position(4).unwrap(), view.world_bounds, viewport);
+        let node = bounds.origin + point(px(local.x), px(local.y));
+        // A corner of the canvas far from every node.
+        let empty = bounds.origin + point(px(4.0), bounds.size.height - px(4.0));
+        (node, view.snapshot().unwrap().nodes.ids[4], empty)
+    });
+
+    cx.simulate_mouse_move(point, None, Modifiers::none());
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, Some(id)));
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("graph-hover-card").is_some());
+
+    cx.simulate_mouse_move(empty, None, Modifiers::none());
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, None));
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("graph-hover-card").is_none());
+}

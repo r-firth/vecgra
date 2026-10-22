@@ -41,7 +41,7 @@ use panels::path_direction_label;
 use panels::visible_facet_counts;
 
 use crate::graph_canvas::{
-    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, graph_canvas,
+    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, graph_canvas, label_color,
 };
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
@@ -393,6 +393,9 @@ pub struct StudioView {
     selection_back: Vec<SelectedElement>,
     selection_forward: Vec<SelectedElement>,
     help_visible: bool,
+    /// The node under the pointer, by ID so a reload cannot point it at
+    /// another node.
+    hovered_node: Option<u64>,
     generation: u64,
     load_task: Option<Task<()>>,
     fingerprint: Option<DatabaseFingerprint>,
@@ -493,6 +496,7 @@ impl StudioView {
             selection_back: Vec::new(),
             selection_forward: Vec::new(),
             help_visible: false,
+            hovered_node: None,
             generation: 0,
             load_task: None,
             fingerprint: None,
@@ -2356,8 +2360,10 @@ impl StudioView {
         cx: &mut Context<Self>,
     ) {
         if !event.dragging() {
+            self.update_hover(event.position, cx);
             return;
         }
+        self.set_hovered_node(None, cx);
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -2418,6 +2424,39 @@ impl StudioView {
             }
         }
         cx.notify();
+    }
+
+    /// Tracks the node under a pointer that is not dragging, within the same
+    /// radius a click would select it.
+    fn update_hover(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        let hovered = self
+            .canvas_bounds
+            .filter(|bounds| bounds.contains(&position))
+            .zip(self.snapshot().zip(self.workspace.as_ref()))
+            .and_then(|(bounds, (snapshot, workspace))| {
+                let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+                let local = Vec2::new(
+                    (position.x - bounds.origin.x).into(),
+                    (position.y - bounds.origin.y).into(),
+                );
+                hit_test_positions(
+                    workspace.borrow().positions(),
+                    self.camera,
+                    self.world_bounds,
+                    viewport,
+                    local,
+                    15.0,
+                )
+                .map(|index| snapshot.nodes.ids[index])
+            });
+        self.set_hovered_node(hovered, cx);
+    }
+
+    fn set_hovered_node(&mut self, node: Option<u64>, cx: &mut Context<Self>) {
+        if self.hovered_node != node {
+            self.hovered_node = node;
+            cx.notify();
+        }
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {

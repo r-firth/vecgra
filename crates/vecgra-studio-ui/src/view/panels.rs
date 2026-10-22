@@ -1564,7 +1564,13 @@ impl StudioView {
             .bg(palette().graphite)
             .track_focus(&self.focus_handle)
             .cursor_grab()
+            .when(self.hovered_node.is_some(), |this| this.cursor_pointer())
             .when(self.drag.is_some(), |this| this.cursor_grabbing())
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !hovered {
+                    this.set_hovered_node(None, cx);
+                }
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -1577,6 +1583,7 @@ impl StudioView {
                 });
             })
             .child(scene)
+            .when_some(self.render_hover_card(cx), |this, card| this.child(card))
             .when_some(navigator, |this, navigator| {
                 this.child(
                     div()
@@ -1914,6 +1921,68 @@ impl StudioView {
 }
 
 impl StudioView {
+    /// A small card beside the node under the pointer naming it, so the graph
+    /// can be read without selecting every node. It follows the node while
+    /// the layout moves and stays out of the way of a drag.
+    fn render_hover_card(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        const WIDTH: f32 = 260.0;
+        const OFFSET: f32 = 14.0;
+        if self.drag.is_some() {
+            return None;
+        }
+        let snapshot = self.snapshot()?;
+        let index = snapshot.node_index(self.hovered_node?)?;
+        let bounds = self.canvas_bounds?;
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let world = self.workspace.as_ref()?.borrow().position(index)?;
+        let anchor = self.camera.project(world, self.world_bounds, viewport);
+        // Open to the right of the node unless that would leave the canvas.
+        let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
+            anchor.x + OFFSET
+        } else {
+            (anchor.x - OFFSET - WIDTH).max(8.0)
+        };
+        let top = (anchor.y - 18.0).clamp(8.0, (viewport.y - 64.0).max(8.0));
+        let label = snapshot.nodes.labels[index].clone();
+        let color = label_color(&label);
+        Some(
+            v_flex()
+                .debug_selector(|| "graph-hover-card".into())
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .max_w(px(WIDTH))
+                .px_2p5()
+                .py_1p5()
+                .gap_0p5()
+                .rounded(px(8.0))
+                .bg(rgb(0x10181e).opacity(0.94))
+                .border_1()
+                .border_color(cx.theme().border)
+                .shadow_md()
+                .child(
+                    title_line(&scene_node_title(snapshot, index), cx)
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD),
+                )
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(div().size(px(6.0)).rounded_full().bg(color))
+                        .child(label.to_string())
+                        .child("·")
+                        .child(format!(
+                            "{} relationships",
+                            format_count(snapshot.nodes.degrees[index] as usize)
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn history_button(&self, backward: bool, cx: &Context<Self>) -> impl IntoElement {
         let (id, glyph, label, keystroke, shortcut) = if backward {
             ("inspector-back", "←", "Back", "⌘[", "Meta+BracketLeft")

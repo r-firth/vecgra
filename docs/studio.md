@@ -52,7 +52,9 @@ attempt to draw every record as a giant hairball.
    drop the file on the window. Opening another file retires every search,
    path, lens, and selection from the previous one before the load starts.
 2. Search semantically, structurally, or with both in one command box.
-3. Pan and zoom without waiting for database work or graph layout.
+3. Pan and zoom without waiting for database work or graph layout. Hovering
+   a node shows its title, label, and relationship count beside it without
+   changing the selection.
 4. Select a node or relationship and inspect its label, properties, vectors,
    neighbors, and provenance without losing the current view. A node's
    heading is its title, name, or path when it has one; wherever a path
