@@ -126,6 +126,13 @@ so relevance is not encoded by a single opaque score or color alone. Search
 failures are visible, and Hybrid can retain text results with an explicit
 warning if its remote embedding provider is unavailable.
 
+The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
+`layout`, `open`, and others). `Cmd-/`, `F1`, `help`, or the `?` at the end of
+the status bar opens a dialog listing every shortcut and command; clicking a
+command closes the dialog and starts that command in the input. While the
+dialog is open, Escape and Enter dismiss it rather than acting on the graph
+behind it.
+
 A successful query retargets an interruptible camera spring to frame its
 visible matches and fades in a score-weighted graph lens. Nodes receive ranked
 halos; matching relationships remain directed, colored, and captioned; all

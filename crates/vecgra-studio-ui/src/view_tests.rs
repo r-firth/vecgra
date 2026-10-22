@@ -1237,3 +1237,93 @@ fn inspector_header_buttons_step_through_selection_history(cx: &mut TestAppConte
         assert_eq!(view.selection, Some(SceneSelection::Node(7)));
     });
 }
+
+#[gpui::test]
+fn help_lists_commands_and_starts_one_in_the_search_box(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("help-overlay").is_none());
+
+    let toggle = cx
+        .debug_bounds("help-toggle")
+        .expect("status bar offers help");
+    cx.simulate_click(toggle.center(), Modifiers::none());
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(view.read_with(&*cx, |view, _| view.help_visible));
+    assert!(cx.debug_bounds("help-overlay").is_some());
+
+    // Escape closes the help before it touches the selection.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("node 3", window, cx);
+        view.execute_command("help", window, cx);
+        assert!(view.help_visible);
+        view.escape(window, cx);
+        assert!(!view.help_visible);
+        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+        view.set_help_visible(true, window, cx);
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+
+    let command = cx
+        .debug_bounds("help-command:path ")
+        .expect("path command is listed");
+    cx.simulate_click(command.center(), Modifiers::none());
+    view.update_in(cx, |view, window, cx| {
+        assert!(!view.help_visible);
+        assert_eq!(view.query_input.read(cx).value().as_ref(), "path ");
+        assert!(
+            view.query_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+    });
+}
+
+#[gpui::test]
+fn typing_help_opens_it_without_activating_the_selection(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([KeyBinding::new(
+            "enter",
+            ActivateSelection,
+            Some("VecgraStudio"),
+        )]);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("node 3", window, cx);
+        view.focus_search(window, cx);
+        view.query_input
+            .update(cx, |input, cx| input.set_value("help", window, cx));
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    cx.simulate_keystrokes("enter");
+    view.read_with(&*cx, |view, _| {
+        assert!(view.help_visible);
+        assert!(!view.context_focus_active);
+        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+    });
+    // A second Enter dismisses the help instead of acting on the graph
+    // behind it.
+    cx.simulate_keystrokes("enter");
+    view.read_with(&*cx, |view, _| {
+        assert!(!view.help_visible);
+        assert!(!view.context_focus_active);
+    });
+}

@@ -9,8 +9,8 @@ use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
     FitView, FocusSearch, NextSearchResult, OpenDatabase, PreviousSearchResult, ReleaseSelected,
-    ReloadDatabase, SelectionBack, SelectionForward, StudioView, ToggleLiveRefresh, ZoomIn,
-    ZoomOut, apply_studio_theme, init_bezel,
+    ReloadDatabase, SelectionBack, SelectionForward, StudioView, ToggleHelp, ToggleLiveRefresh,
+    ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -68,6 +68,8 @@ fn main() {
             KeyBinding::new("cmd-[", SelectionBack, Some("VecgraStudio")),
             KeyBinding::new("cmd-]", SelectionForward, Some("VecgraStudio")),
             KeyBinding::new("cmd-shift-l", ToggleLiveRefresh, Some("VecgraStudio")),
+            KeyBinding::new("cmd-/", ToggleHelp, Some("VecgraStudio")),
+            KeyBinding::new("f1", ToggleHelp, Some("VecgraStudio")),
             KeyBinding::new("enter", ActivateSelection, Some("VecgraStudio")),
             KeyBinding::new("cmd-k", FocusSearch, Some("VecgraStudio")),
             KeyBinding::new("down", NextSearchResult, Some("VecgraStudio")),

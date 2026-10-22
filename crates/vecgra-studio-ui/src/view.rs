@@ -33,6 +33,7 @@ use vecgra_studio_core::{
 };
 
 mod bezel_controls;
+mod help;
 mod panels;
 
 use panels::path_direction_label;
@@ -67,7 +68,8 @@ actions!(
         ToggleLiveRefresh,
         OpenDatabase,
         SelectionBack,
-        SelectionForward
+        SelectionForward,
+        ToggleHelp
     ]
 );
 
@@ -390,6 +392,7 @@ pub struct StudioView {
     connection_cache: RefCell<Option<ConnectionCache>>,
     selection_back: Vec<SelectedElement>,
     selection_forward: Vec<SelectedElement>,
+    help_visible: bool,
     generation: u64,
     load_task: Option<Task<()>>,
     fingerprint: Option<DatabaseFingerprint>,
@@ -424,8 +427,9 @@ pub struct StudioView {
 impl StudioView {
     pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::ensure_bezel_theme(cx);
-        let query_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search nodes + relationships…"));
+        let query_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search nodes + relationships, or type help")
+        });
         let subscription = cx.subscribe_in(&query_input, window, Self::on_query_event);
         let focus_handle = cx.focus_handle().tab_stop(true);
         let bezel_search_focus = std::array::from_fn(|_| cx.focus_handle());
@@ -488,6 +492,7 @@ impl StudioView {
             connection_cache: RefCell::new(None),
             selection_back: Vec::new(),
             selection_forward: Vec::new(),
+            help_visible: false,
             generation: 0,
             load_task: None,
             fingerprint: None,
@@ -1996,6 +2001,10 @@ impl StudioView {
     }
 
     fn activate_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.help_visible {
+            self.set_help_visible(false, window, cx);
+            return;
+        }
         if self
             .query_input
             .read(cx)
@@ -2045,7 +2054,9 @@ impl StudioView {
     }
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.context_focus_active
+        if self.help_visible {
+            self.set_help_visible(false, window, cx);
+        } else if self.context_focus_active
             || self.active_facet.is_some()
             || !matches!(self.search_state, SearchState::Idle)
             || !matches!(self.path_state, PathState::Idle)
@@ -2553,6 +2564,11 @@ impl StudioView {
             }
             Some("clear") => self.clear_selection(cx),
             Some("reload") | Some("refresh") => self.reload(window, cx),
+            Some("help") | Some("?") | Some("shortcuts") => {
+                self.query_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.set_help_visible(true, window, cx);
+            }
             Some("back") => self.navigate_selection_history(true, window, cx),
             Some("forward") => self.navigate_selection_history(false, window, cx),
             Some("open") => {
@@ -2898,6 +2914,7 @@ impl Render for StudioView {
                 this.activate_selection(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.set_help_visible(false, window, cx);
                 this.focus_search(window, cx);
             }))
             .on_action(cx.listener(|this, _: &NextSearchResult, _, cx| {
@@ -2921,6 +2938,9 @@ impl Render for StudioView {
             .on_action(cx.listener(|this, _: &SelectionForward, window, cx| {
                 this.navigate_selection_history(false, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleHelp, window, cx| {
+                this.set_help_visible(!this.help_visible, window, cx);
+            }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.on_external_paths_dropped(paths, window, cx);
             }))
@@ -2940,6 +2960,9 @@ impl Render for StudioView {
                     .when(show_inspector, |this| this.child(self.render_inspector(cx))),
             )
             .child(self.render_status_bar(cx))
+            .when(self.help_visible, |this| {
+                this.child(self.render_help(window, cx))
+            })
     }
 }
 

@@ -1705,6 +1705,26 @@ impl StudioView {
             .when_some(self.load_ms, |this, load_ms| {
                 this.child(format!("{load_ms:.1} ms load+layout"))
             })
+            .child(
+                div()
+                    .id("help-toggle")
+                    .debug_selector(|| "help-toggle".into())
+                    .role(Role::Button)
+                    .aria_label("Shortcuts and commands")
+                    .aria_keyshortcuts("Meta+Slash")
+                    .px_1()
+                    .rounded(px(4.0))
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .tooltip(|window, cx| {
+                        Tooltip::with_keystroke("Shortcuts and commands", "⌘/", window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let visible = !this.help_visible;
+                        this.set_help_visible(visible, window, cx);
+                    }))
+                    .child("?"),
+            )
     }
 }
 
