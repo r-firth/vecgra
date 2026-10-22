@@ -22,7 +22,7 @@ pub fn palette() -> StudioPalette {
     }
 }
 
-pub const RELATIONSHIP_COLOR_COUNT: usize = 7;
+pub const RELATIONSHIP_COLOR_COUNT: usize = 9;
 
 /// How many colours node labels take before one repeats.
 pub const NODE_COLOR_COUNT: usize = 9;
@@ -51,10 +51,6 @@ pub fn relationship_color_index(label: &str) -> usize {
     hash as usize % RELATIONSHIP_COLOR_COUNT
 }
 
-pub fn relationship_color(label: &str) -> Hsla {
-    relationship_color_for_index(relationship_color_index(label))
-}
-
 pub fn relationship_color_for_index(index: usize) -> Hsla {
     let colors = palette();
     match index % RELATIONSHIP_COLOR_COUNT {
@@ -64,7 +60,9 @@ pub fn relationship_color_for_index(index: usize) -> Hsla {
         3 => rgb(0x9b8cf2).into(),
         4 => rgb(0xd6c56b).into(),
         5 => rgb(0xd47c9c).into(),
-        _ => rgb(0x60b8c9).into(),
+        6 => rgb(0x60b8c9).into(),
+        7 => rgb(0xa6d36a).into(),
+        _ => rgb(0xc98be6).into(),
     }
 }
 

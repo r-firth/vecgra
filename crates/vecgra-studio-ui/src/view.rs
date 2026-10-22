@@ -54,7 +54,7 @@ use crate::graph_canvas::{
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
 };
-use crate::theme::{palette, relationship_color};
+use crate::theme::palette;
 
 actions!(
     vecgra_studio,

@@ -301,7 +301,7 @@ impl StudioView {
                                                     div()
                                                         .size(px(7.0))
                                                         .rounded_full()
-                                                        .bg(relationship_color(label)),
+                                                        .bg(self.label_colors.relationship(label)),
                                                 )
                                                 .child(div().flex_1())
                                                 .when(active, |this| {
@@ -491,7 +491,7 @@ impl StudioView {
                     ),
                     SceneSelection::Edge(index) => {
                         let label = snapshot.edges.labels[index].clone();
-                        let color = relationship_color(&label);
+                        let color = self.label_colors.relationship(&label);
                         (
                             "edge",
                             label,
@@ -956,7 +956,7 @@ impl StudioView {
                                     div()
                                         .font_family(cx.theme().mono_font_family.clone())
                                         .text_xs()
-                                        .text_color(relationship_color(&label))
+                                        .text_color(self.label_colors.relationship(&label))
                                         .child(format!("relationship:{label}")),
                                 )
                             })
@@ -1047,7 +1047,7 @@ impl StudioView {
                                     .py_1()
                                     .rounded(px(5.0))
                                     .border_l_2()
-                                    .border_color(relationship_color(&step.label))
+                                    .border_color(self.label_colors.relationship(&step.label))
                                     .when(selected, |this| {
                                         this.bg(cx.theme().sidebar_accent)
                                             .border_1()
@@ -1088,7 +1088,7 @@ impl StudioView {
                                                     .font_family(cx.theme().mono_font_family.clone())
                                                     .text_xs()
                                                     .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(relationship_color(&step.label))
+                                                    .text_color(self.label_colors.relationship(&step.label))
                                                     .child(format!("{:02}", index + 1)),
                                             )
                                             .child(
@@ -1112,7 +1112,7 @@ impl StudioView {
                                                                         .clone(),
                                                                 )
                                                                 .text_xs()
-                                                                .text_color(relationship_color(
+                                                                .text_color(self.label_colors.relationship(
                                                                     &step.label,
                                                                 ))
                                                                 .truncate()
@@ -1347,7 +1347,7 @@ impl StudioView {
                                     _ => ("search-result-node", hit.id()),
                                 };
                                 let kind_color = if hit.kind_label() == "EDGE" {
-                                    relationship_color(&hit.label)
+                                    self.label_colors.relationship(&hit.label)
                                 } else {
                                     palette().celadon
                                 };
@@ -1725,7 +1725,7 @@ impl StudioView {
                                     .child(copyable_id(
                                         "inspector-copy-edge-id",
                                         format!("edge:{}", snapshot.edges.ids[index]),
-                                        relationship_color(label),
+                                        self.label_colors.relationship(label),
                                         cx,
                                     )),
                             )
@@ -1759,7 +1759,7 @@ impl StudioView {
                             .child(
                                 div()
                                     .pl_2()
-                                    .text_color(relationship_color(label))
+                                    .text_color(self.label_colors.relationship(label))
                                     .text_sm()
                                     .child("↓"),
                             )
@@ -2199,7 +2199,7 @@ impl StudioView {
                 )
             })
             .children(groups.into_iter().map(|group| {
-                let color = relationship_color(&group.label);
+                let color = self.label_colors.relationship(&group.label);
                 let arrow = if group.outgoing { "→" } else { "←" };
                 let key = (group.label.clone(), group.outgoing);
                 let expanded = self.expanded_connections.contains(&key);
@@ -2406,7 +2406,7 @@ impl StudioView {
         };
         let top = (anchor.y + OFFSET).clamp(8.0, (viewport.y - 84.0).max(8.0));
         let label = snapshot.edges.labels[edge].clone();
-        let color = relationship_color(&label);
+        let color = self.label_colors.relationship(&label);
         elements.push(
             v_flex()
                 .debug_selector(|| "graph-hover-edge-card".into())

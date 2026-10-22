@@ -89,7 +89,9 @@ pub(crate) fn scene_svg(
             from.y,
             to.x,
             to.y,
-            hex(relationship_color(&snapshot.edges.labels[edge]))
+            hex(presentation
+                .label_colors
+                .relationship(&snapshot.edges.labels[edge]))
         );
     }
     svg.push_str("</g>\n");

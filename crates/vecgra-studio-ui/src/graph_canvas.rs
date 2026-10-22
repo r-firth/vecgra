@@ -16,8 +16,8 @@ use vecgra_studio_core::{
 };
 
 use crate::theme::{
-    RELATIONSHIP_COLOR_COUNT, node_color_for_index, palette, relationship_color,
-    relationship_color_for_index, relationship_color_index,
+    RELATIONSHIP_COLOR_COUNT, node_color_for_index, palette, relationship_color_for_index,
+    relationship_color_index,
 };
 
 mod svg;
@@ -249,28 +249,51 @@ pub(crate) struct GraphPathEndpoints {
     pub end: Option<usize>,
 }
 
-/// The colour each node label is drawn in. Labels take the palette's
-/// colours in the order they first appear, by node ID, and keep them, so a
-/// label added later, or hidden and shown again, never recolours the rest.
+/// The colour each node label and relationship type is drawn in. Each
+/// takes its palette's colours in the order it first appears, by ID, and
+/// keeps them, so one added later, or hidden and shown again, never
+/// recolours the rest.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct LabelColors(HashMap<Arc<str>, usize>);
+pub(crate) struct LabelColors {
+    nodes: HashMap<Arc<str>, usize>,
+    relationships: HashMap<Arc<str>, usize>,
+}
 
 impl LabelColors {
-    /// Gives each label in `snapshot` that has no colour yet the next one.
+    /// Gives each label and type in `snapshot` that has no colour yet the
+    /// next one.
     pub(crate) fn extend(&mut self, snapshot: &SceneSnapshot) {
-        for label in snapshot.nodes.labels.iter() {
-            if !self.0.contains_key(label) {
-                let next = self.0.len();
-                self.0.insert(label.clone(), next);
+        for (seen, labels) in [
+            (&mut self.nodes, &snapshot.nodes.labels),
+            (&mut self.relationships, &snapshot.edges.labels),
+        ] {
+            for label in labels {
+                if !seen.contains_key(label) {
+                    let next = seen.len();
+                    seen.insert(label.clone(), next);
+                }
             }
         }
     }
 
+    /// A node label's colour.
     pub(crate) fn color(&self, label: &str) -> Hsla {
-        match self.0.get(label) {
+        match self.nodes.get(label) {
             Some(&index) => node_color_for_index(index),
             None => label_color(label),
         }
+    }
+
+    /// Which of the relationship colours a type is drawn in.
+    pub(crate) fn relationship_index(&self, label: &str) -> usize {
+        self.relationships.get(label).map_or_else(
+            || relationship_color_index(label),
+            |&index| index % RELATIONSHIP_COLOR_COUNT,
+        )
+    }
+
+    pub(crate) fn relationship(&self, label: &str) -> Hsla {
+        relationship_color_for_index(self.relationship_index(label))
     }
 }
 
@@ -418,7 +441,9 @@ fn prepare_scene(
                     // remain in their dedicated passes below.
                     continue;
                 }
-                let color_index = relationship_color_index(&snapshot.edges.labels[edge_index]);
+                let color_index = presentation
+                    .label_colors
+                    .relationship_index(&snapshot.edges.labels[edge_index]);
                 builders[color_index]
                     .segment(absolute_point(bounds, from), absolute_point(bounds, to));
                 segment_counts[color_index] += 1;
@@ -477,7 +502,10 @@ fn prepare_scene(
                 continue;
             }
             let label = &snapshot.edges.labels[edge_index];
-            let color = relationship_color(label).opacity(0.42 + score * 0.58);
+            let color = presentation
+                .label_colors
+                .relationship(label)
+                .opacity(0.42 + score * 0.58);
             let mut builder = LinePathBuilder::stroke(px(1.2 + score * 1.5));
             builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
             if let Some(path) = builder.build() {
@@ -529,7 +557,7 @@ fn prepare_scene(
                 continue;
             }
             let label = &snapshot.edges.labels[edge_index];
-            let color_index = relationship_color_index(label);
+            let color_index = presentation.label_colors.relationship_index(label);
             builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
             segment_counts[color_index] += 1;
             if arrows.len() < LOCAL_ARROW_BUDGET
@@ -577,12 +605,12 @@ fn prepare_scene(
         {
             incident_edge_paths.extend(hover_edge_paths(
                 snapshot,
+                presentation.label_colors,
                 &projected,
                 |source, target| source == node_index || target == node_index,
                 1.4,
                 0.7,
                 bounds,
-                viewport,
             ));
         }
         if let Some(edge_index) = presentation
@@ -599,7 +627,9 @@ fn prepare_scene(
             if let Some(path) = builder.build() {
                 incident_edge_paths.push(PaintPath {
                     path,
-                    color: relationship_color(&snapshot.edges.labels[edge_index]),
+                    color: presentation
+                        .label_colors
+                        .relationship(&snapshot.edges.labels[edge_index]),
                 });
             }
         }
@@ -611,7 +641,7 @@ fn prepare_scene(
         let from = projected[source];
         let to = projected[target];
         let label = &snapshot.edges.labels[edge_index];
-        let color = relationship_color(label);
+        let color = presentation.label_colors.relationship(label);
         let mut builder = LinePathBuilder::stroke(px(2.5));
         builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
         if let Some((path, corners)) = arrowhead(bounds, from, to) {
@@ -637,7 +667,7 @@ fn prepare_scene(
             .into_iter()
             .take(REPRESENTATIVE_CAPTION_BUDGET)
         {
-            let color = relationship_color(&label);
+            let color = presentation.label_colors.relationship(&label);
             if push_caption(
                 &mut captions,
                 label,
@@ -757,13 +787,14 @@ fn prepare_scene(
 /// `width` wide at `opacity`.
 fn hover_edge_paths(
     snapshot: &SceneSnapshot,
+    colors: &LabelColors,
     projected: &[Vec2],
     include: impl Fn(usize, usize) -> bool,
     width: f32,
     opacity: f32,
     bounds: Bounds<Pixels>,
-    viewport: Vec2,
 ) -> Vec<PaintPath> {
+    let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
     let mut builders: [LinePathBuilder; RELATIONSHIP_COLOR_COUNT] =
         std::array::from_fn(|_| LinePathBuilder::stroke(px(width)));
     let mut segment_counts = [0_usize; RELATIONSHIP_COLOR_COUNT];
@@ -777,7 +808,7 @@ fn hover_edge_paths(
         if !segment_may_be_visible(from, to, viewport) {
             continue;
         }
-        let color_index = relationship_color_index(&snapshot.edges.labels[edge_index]);
+        let color_index = colors.relationship_index(&snapshot.edges.labels[edge_index]);
         builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
         segment_counts[color_index] += 1;
     }
@@ -1346,8 +1377,18 @@ mod label_color_tests {
             snapshot.nodes.labels[index] = Arc::from(*label);
         }
         snapshot.nodes.labels.truncate(labels.len());
+        let types = ["READ", "CONTAINS", "READ", "EDITED"];
+        for (index, label) in types.iter().enumerate() {
+            snapshot.edges.labels[index] = Arc::from(*label);
+        }
+        snapshot.edges.labels.truncate(types.len());
         let mut colors = LabelColors::default();
         colors.extend(&snapshot);
+        // Relationship types take theirs the same way, from their own list.
+        assert_eq!(
+            ["READ", "CONTAINS", "EDITED"].map(|label| colors.relationship_index(label)),
+            [0, 1, 2]
+        );
         let first: Vec<Hsla> = ["Repository", "File", "Session", "Commit", "Branch"]
             .iter()
             .map(|label| colors.color(label))
@@ -1364,7 +1405,10 @@ mod label_color_tests {
         // A label that appears later takes the next colour, and the others
         // keep theirs, even when a scene without them is read.
         snapshot.nodes.labels = vec![Arc::from("ErrorSignature"), Arc::from("File")];
+        snapshot.edges.labels = vec![Arc::from("HIT"), Arc::from("READ")];
         colors.extend(&snapshot);
+        assert_eq!(colors.relationship_index("HIT"), 3);
+        assert_eq!(colors.relationship_index("READ"), 0);
         assert_eq!(colors.color("ErrorSignature"), node_color_for_index(5));
         assert_eq!(colors.color("Repository"), first[0]);
         assert_eq!(colors.color("Branch"), first[4]);
