@@ -1,6 +1,5 @@
 use super::*;
 
-use std::collections::VecDeque;
 use std::time::SystemTime;
 
 /// Cheap identity of a database file. Another process appending a
@@ -173,13 +172,15 @@ impl SceneSnapshot {
         let previous_bounds =
             Rect::from_points(&positions.iter().flatten().copied().collect::<Vec<_>>());
         let mut entrances = vec![None; count];
-        let mut queue: VecDeque<usize> = (0..count).filter(|&i| positions[i].is_some()).collect();
+        let mut fanned = vec![0_u32; count];
+        let placed: Vec<usize> = (0..count).filter(|&i| positions[i].is_some()).collect();
         grow_from_anchors(
             &self.nodes.ids,
             &adjacency,
             &mut positions,
             &mut entrances,
-            &mut queue,
+            &mut fanned,
+            placed,
             spacing,
         );
 
@@ -196,13 +197,13 @@ impl SceneSnapshot {
             let radius = clearance + spacing * 2.5 * (slot as f32).sqrt();
             positions[seed] = Some(center + Vec2::new(angle.cos(), angle.sin()) * radius);
             slot += 1;
-            queue.push_back(seed);
             grow_from_anchors(
                 &self.nodes.ids,
                 &adjacency,
                 &mut positions,
                 &mut entrances,
-                &mut queue,
+                &mut fanned,
+                vec![seed],
                 spacing,
             );
         }
@@ -223,33 +224,87 @@ impl SceneSnapshot {
 
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
 
-/// Breadth-first placement of unplaced nodes around placed neighbors. Each
-/// parent fans its new children along a golden-angle spiral, so a hub that
-/// gains many neighbors at once spreads them instead of stacking them.
+/// Places unplaced nodes in breadth-first waves out from the placed ones.
+///
+/// A node with one placed neighbor fans out from it along a golden-angle
+/// spiral, so a hub that gains many leaves spreads them instead of stacking
+/// them. A node with several placed neighbors sits near their centroid, which
+/// is roughly where a force layout would settle it, rather than orbiting
+/// whichever neighbor happened to be visited first. Either way it enters from
+/// its nearest placed neighbor. Only earlier waves count as placed, so the
+/// result does not depend on visiting order within a wave.
 fn grow_from_anchors(
     ids: &[NodeId],
     adjacency: &[Vec<usize>],
     positions: &mut [Option<Vec2>],
     entrances: &mut [Option<Vec2>],
-    queue: &mut VecDeque<usize>,
+    fanned: &mut [u32],
+    mut wave: Vec<usize>,
     spacing: f32,
 ) {
-    while let Some(parent) = queue.pop_front() {
-        let Some(origin) = positions[parent] else {
-            continue;
-        };
-        let base = stable_unit(ids[parent]) * std::f32::consts::TAU;
-        let mut fanned = 0_usize;
-        for &child in &adjacency[parent] {
-            if positions[child].is_some() {
-                continue;
-            }
-            let angle = base + fanned as f32 * GOLDEN_ANGLE;
-            let radius = spacing * (1.0 + 0.45 * (fanned as f32).sqrt());
-            positions[child] = Some(origin + Vec2::new(angle.cos(), angle.sin()) * radius);
-            entrances[child] = Some(origin);
-            fanned += 1;
-            queue.push_back(child);
+    let mut frontier = Vec::new();
+    let mut anchors = Vec::new();
+    while !wave.is_empty() {
+        frontier.clear();
+        for &placed in &wave {
+            frontier.extend(
+                adjacency[placed]
+                    .iter()
+                    .copied()
+                    .filter(|&node| positions[node].is_none()),
+            );
         }
+        frontier.sort_unstable();
+        frontier.dedup();
+        let mut next = Vec::with_capacity(frontier.len());
+        for &node in &frontier {
+            anchors.clear();
+            anchors.extend(
+                adjacency[node]
+                    .iter()
+                    .filter_map(|&neighbor| positions[neighbor].map(|point| (neighbor, point))),
+            );
+            let (position, entrance) = match anchors.as_slice() {
+                [] => continue,
+                &[(parent, origin)] => {
+                    let base = stable_unit(ids[parent]) * std::f32::consts::TAU;
+                    let order = fanned[parent] as f32;
+                    fanned[parent] += 1;
+                    let angle = base + order * GOLDEN_ANGLE;
+                    let radius = spacing * (1.0 + 0.45 * order.sqrt());
+                    (
+                        origin + Vec2::new(angle.cos(), angle.sin()) * radius,
+                        origin,
+                    )
+                }
+                several => {
+                    let centroid = several
+                        .iter()
+                        .fold(Vec2::ZERO, |sum, &(_, point)| sum + point)
+                        / several.len() as f32;
+                    let angle = stable_unit(ids[node]) * std::f32::consts::TAU;
+                    let position = centroid + Vec2::new(angle.cos(), angle.sin()) * (spacing * 0.5);
+                    let nearest = several
+                        .iter()
+                        .map(|&(_, point)| point)
+                        .min_by(|left, right| {
+                            (*left - position)
+                                .length_squared()
+                                .total_cmp(&(*right - position).length_squared())
+                        })
+                        .unwrap_or(centroid);
+                    (position, nearest)
+                }
+            };
+            next.push((node, position, entrance));
+        }
+        wave = next
+            .into_iter()
+            .map(|(node, position, entrance)| {
+                positions[node] = Some(position);
+                entrances[node] = Some(entrance);
+                node
+            })
+            .collect();
     }
 }

@@ -933,3 +933,43 @@ fn workspace_entrances_spring_new_nodes_into_place() {
     }
     assert!((workspace.positions()[3] - target).length() < 0.05);
 }
+
+#[test]
+fn reload_places_a_node_with_several_anchors_between_them() {
+    fn scene(node_count: u64, edges: &[(u32, u32)]) -> SceneSnapshot {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.nodes = SceneNodes {
+            ids: (0..node_count).collect(),
+            labels: vec!["Node".into(); node_count as usize],
+            positions: vec![Vec2::ZERO; node_count as usize],
+            degrees: vec![0; node_count as usize],
+            vector_counts: vec![0; node_count as usize],
+            properties: vec![Arc::from([]); node_count as usize],
+        };
+        snapshot.edges = SceneEdges {
+            ids: (0..edges.len() as u64).collect(),
+            sources: edges.iter().map(|&(source, _)| source).collect(),
+            targets: edges.iter().map(|&(_, target)| target).collect(),
+            labels: vec!["LINKS".into(); edges.len()],
+            vector_counts: vec![0; edges.len()],
+            properties: vec![Arc::from([]); edges.len()],
+        };
+        snapshot
+    }
+    let previous = scene(3, &[]);
+    let presented = [
+        Vec2::new(-200.0, 0.0),
+        Vec2::new(200.0, 0.0),
+        Vec2::new(0.0, 300.0),
+    ];
+    let reloaded =
+        scene(4, &[(3, 0), (3, 1)]).anchored_on(&previous, &presented, LayoutOptions::default());
+    assert!(!reloaded.relaid);
+    let placed = reloaded.snapshot.nodes.positions[3];
+    assert!(
+        placed.length() <= LayoutOptions::default().edge_length * 0.5 + 0.01,
+        "{placed:?} should sit near the anchors' centroid"
+    );
+    let entrance = reloaded.entrances[3].unwrap();
+    assert!(entrance == presented[0] || entrance == presented[1]);
+}
