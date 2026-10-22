@@ -648,6 +648,7 @@ impl StudioView {
                 let total_nodes = report.path.as_ref().map_or(2, |path| path.nodes.len());
                 let total_edges = report.path.as_ref().map_or(0, |path| path.steps.len());
                 let partial = visible_nodes < total_nodes || visible_edges < total_edges;
+                let retries = path_retries(report);
                 let summary = match report.termination {
                     EvidencePathTermination::Found if hop_count == 0 => {
                         format!("Same node · {elapsed_ms:.1} ms")
@@ -919,7 +920,7 @@ impl StudioView {
                                     })
                                     .child(match report.termination {
                                         EvidencePathTermination::NotFoundWithinHops => format!(
-                                            "The complete search found no matching chain up to {} hops. Increase max-hops to widen the proof boundary.",
+                                            "The complete search found no matching chain up to {} hops.",
                                             report.max_hops
                                         ),
                                         EvidencePathTermination::ExpansionLimit => format!(
@@ -931,6 +932,16 @@ impl StudioView {
                                         }
                                     }),
                             )
+                            .when(!retries.is_empty(), |this| {
+                                this.child(
+                                    h_flex()
+                                        .flex_wrap()
+                                        .gap_1()
+                                        .children(retries.iter().map(|&retry| {
+                                            path_retry_button(retry, cx)
+                                        })),
+                                )
+                            })
                             .into_any_element(),
                     })
                     .into_any_element()
@@ -2471,6 +2482,22 @@ pub(super) fn evidence_step_names(
     let from = path.nodes.get(index)?;
     let to = path.nodes.get(index + 1)?;
     Some(format!("{} → {}", short(&from.title), short(&to.title)))
+}
+
+fn path_retry_button(retry: PathRetry, cx: &Context<StudioView>) -> impl IntoElement {
+    let (selector, label) = match retry {
+        PathRetry::EitherDirection => ("path-retry-direction", "Either direction".to_string()),
+        PathRetry::AnyRelationship => ("path-retry-relationship", "Any relationship".to_string()),
+        PathRetry::MoreHops(max_hops) => ("path-retry-hops", format!("Up to {max_hops} hops")),
+    };
+    div().debug_selector(move || selector.into()).child(
+        Button::new(selector)
+            .label(label)
+            .small()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.retry_evidence_path(retry, window, cx);
+            })),
+    )
 }
 
 fn path_hop_button(max_hops: usize, selected_max_hops: usize, cx: &Context<StudioView>) -> Button {

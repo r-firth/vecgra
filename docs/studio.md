@@ -237,7 +237,10 @@ The path state owns both a generation and its held task. A new path, search,
 facet, context, Escape, or Overview retires stale work and prevents a late
 background result from overwriting the current presentation. `Found`,
 `NotFoundWithinHops`, and `ExpansionLimit` have different language: the latter
-is explicitly incomplete and never presented as graph absence. When an exact
+is explicitly incomplete and never presented as graph absence. After a
+`NotFoundWithinHops` result, the rail offers to search again with one bound
+widened: either direction, any relationship type, or twice the hops (up to
+64), whichever apply. When an exact
 path includes elements outside the bounded snapshot, a background scene step
 injects their fully hydrated records and exact relationships before
 presentation. Existing overview positions and pins are preserved; missing path

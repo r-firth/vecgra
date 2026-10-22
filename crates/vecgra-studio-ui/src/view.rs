@@ -76,6 +76,8 @@ actions!(
 
 /// How many earlier selections Back can return to.
 const SELECTION_HISTORY_LIMIT: usize = 64;
+/// The longest path, in hops, Studio asks the engine for.
+const MAX_PATH_HOPS: usize = 64;
 
 /// How often live refresh checks the database file for new commits. Only file
 /// metadata is read on each tick; the database is reopened when it changes.
@@ -143,6 +145,36 @@ struct EvidencePathQuery {
     direction: PathDirection,
     relationship_label: Option<String>,
     max_hops: usize,
+}
+
+/// A wider search to offer when an exact path search finds nothing within
+/// its bounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PathRetry {
+    EitherDirection,
+    AnyRelationship,
+    MoreHops(usize),
+}
+
+/// The wider searches worth offering after `report`, which are none unless it
+/// proved there is no path within its bounds.
+fn path_retries(report: &EvidencePathReport) -> Vec<PathRetry> {
+    if report.termination != EvidencePathTermination::NotFoundWithinHops {
+        return Vec::new();
+    }
+    let mut retries = Vec::new();
+    if report.direction != PathDirection::Both {
+        retries.push(PathRetry::EitherDirection);
+    }
+    if report.relationship_label.is_some() {
+        retries.push(PathRetry::AnyRelationship);
+    }
+    if report.max_hops < MAX_PATH_HOPS {
+        retries.push(PathRetry::MoreHops(
+            (report.max_hops.max(1) * 2).min(MAX_PATH_HOPS),
+        ));
+    }
+    retries
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1923,7 +1955,7 @@ impl StudioView {
         let PathState::ChoosingEnd(draft) = &mut self.path_state else {
             return;
         };
-        if draft.max_hops == max_hops || !(1..=64).contains(&max_hops) {
+        if draft.max_hops == max_hops || !(1..=MAX_PATH_HOPS).contains(&max_hops) {
             return;
         }
         draft.max_hops = max_hops;
@@ -1956,6 +1988,31 @@ impl StudioView {
         }
         self.trace_path_to_node(index, window, cx);
         true
+    }
+
+    /// Runs the shown path search again with one of its bounds widened.
+    fn retry_evidence_path(
+        &mut self,
+        retry: PathRetry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let PathState::Ready(report) = &self.path_state else {
+            return;
+        };
+        let mut query = EvidencePathQuery {
+            start: report.start.id,
+            end: report.end.id,
+            direction: report.direction,
+            relationship_label: report.relationship_label.as_deref().map(str::to_owned),
+            max_hops: report.max_hops,
+        };
+        match retry {
+            PathRetry::EitherDirection => query.direction = PathDirection::Both,
+            PathRetry::AnyRelationship => query.relationship_label = None,
+            PathRetry::MoreHops(max_hops) => query.max_hops = max_hops,
+        }
+        self.start_evidence_path(query, window, cx);
     }
 
     fn trace_path_to_node(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -3135,7 +3192,7 @@ impl StudioView {
                 let max_hops = match parts.next() {
                     None => 6,
                     Some(value) => match value.parse::<usize>() {
-                        Ok(value) if value <= 64 => value,
+                        Ok(value) if value <= MAX_PATH_HOPS => value,
                         _ => {
                             self.status = "Path max-hops must be an integer from 0 to 64".into();
                             cx.notify();

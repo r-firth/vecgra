@@ -1118,6 +1118,63 @@ fn path_steps_name_their_nodes_and_point_out_their_relationship(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn a_path_search_that_finds_nothing_offers_wider_searches(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("path-retry");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    // The files import each other in order, so nothing leads back out.
+    let command = format!("path {} {} out IMPORTS 4", live.files[3], live.files[0]);
+    view.update_in(cx, |view, window, cx| {
+        view.settle_presentation_for_capture();
+        view.execute_command(&command, window, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("the search finishes, not {:?}", view.status);
+        };
+        assert!(report.path.is_none());
+        assert_eq!(
+            path_retries(report),
+            [
+                PathRetry::EitherDirection,
+                PathRetry::AnyRelationship,
+                PathRetry::MoreHops(8)
+            ]
+        );
+    });
+    assert!(cx.debug_bounds("path-retry-relationship").is_some());
+    assert!(cx.debug_bounds("path-retry-hops").is_some());
+
+    let either = cx.debug_bounds("path-retry-direction").unwrap();
+    cx.simulate_click(either.center(), Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("the wider search finishes, not {:?}", view.status);
+        };
+        assert_eq!(report.direction, PathDirection::Both);
+        assert_eq!(report.relationship_label.as_deref(), Some("IMPORTS"));
+        assert_eq!(report.max_hops, 4);
+        assert_eq!(report.path.as_ref().unwrap().steps.len(), 3);
+        assert!(path_retries(report).is_empty());
+    });
+    assert!(cx.debug_bounds("path-retry-direction").is_none());
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);
