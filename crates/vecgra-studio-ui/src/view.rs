@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -91,6 +92,9 @@ actions!(
 const SELECTION_HISTORY_LIMIT: usize = 64;
 /// The longest path, in hops, Studio asks the engine for.
 const MAX_PATH_HOPS: usize = 64;
+/// How far below the canvas's top edge framing starts: under the graph
+/// navigator (12 px from the top and 104 px tall) with room for a name.
+const FRAMING_TOP: f32 = 132.0;
 
 /// How often live refresh checks the database file for new commits. Only file
 /// metadata is read on each tick; the database is reopened when it changes.
@@ -1518,6 +1522,22 @@ impl StudioView {
         }
     }
 
+    /// The camera that frames `focus` on the canvas with `padding` around
+    /// it, at a zoom within `zoom`, and below the graph navigator in the
+    /// canvas's top-right corner so that it covers none of what is framed.
+    fn framing(&self, focus: Rect, padding: f32, zoom: RangeInclusive<f32>) -> Option<Camera> {
+        let bounds = self.canvas_bounds?;
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        Some(Camera::framed_below(
+            focus,
+            self.world_bounds,
+            viewport,
+            padding,
+            FRAMING_TOP,
+            zoom,
+        ))
+    }
+
     fn zoom(&mut self, factor: f32, cx: &mut Context<Self>) {
         if self.snapshot().is_none() {
             return;
@@ -1895,17 +1915,9 @@ impl StudioView {
         drop(workspace);
         self.retarget_lens(node_scores, edge_scores, 0.84);
         self.saved_overview_camera.get_or_insert(self.camera);
-        if let Some(bounds) = self.canvas_bounds
-            && !focus_points.is_empty()
+        if !focus_points.is_empty()
+            && let Some(target) = self.framing(Rect::from_points(&focus_points), 96.0, 0.08..=4.8)
         {
-            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
-            let mut target = Camera::framed(
-                Rect::from_points(&focus_points),
-                self.world_bounds,
-                viewport,
-                96.0,
-            );
-            target.zoom = target.zoom.min(4.8);
             self.camera_motion.retarget(target);
         }
         self.begin_presentation_motion(window, cx);
@@ -2355,17 +2367,9 @@ impl StudioView {
             },
         );
         self.saved_overview_camera.get_or_insert(self.camera);
-        if let Some(bounds) = self.canvas_bounds
-            && !focus_points.is_empty()
+        if !focus_points.is_empty()
+            && let Some(target) = self.framing(Rect::from_points(&focus_points), 116.0, 1.8..=24.0)
         {
-            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
-            let mut target = Camera::framed(
-                Rect::from_points(&focus_points),
-                self.world_bounds,
-                viewport,
-                116.0,
-            );
-            target.zoom = target.zoom.clamp(1.8, 24.0);
             self.camera_motion.retarget(target);
         }
         self.set_selection(
@@ -2407,21 +2411,17 @@ impl StudioView {
             return;
         };
         self.set_selection(Some(SceneSelection::Edge(edge_index)));
-        if let (Some(bounds), Some(workspace)) = (self.canvas_bounds, self.workspace.as_ref()) {
-            let workspace = workspace.borrow();
-            let endpoints = snapshot
-                .node_index(from)
-                .zip(snapshot.node_index(to))
-                .and_then(|(from, to)| workspace.position(from).zip(workspace.position(to)));
-            if let Some((from, to)) = endpoints {
-                let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
-                let mut target = Camera::framed(
-                    Rect::from_points(&[from, to]),
-                    self.world_bounds,
-                    viewport,
-                    164.0,
-                );
-                target.zoom = target.zoom.clamp(3.0, 24.0);
+        if let Some(workspace) = self.workspace.as_ref() {
+            let endpoints = {
+                let workspace = workspace.borrow();
+                snapshot
+                    .node_index(from)
+                    .zip(snapshot.node_index(to))
+                    .and_then(|(from, to)| workspace.position(from).zip(workspace.position(to)))
+            };
+            if let Some(target) = endpoints.and_then(|(from, to)| {
+                self.framing(Rect::from_points(&[from, to]), 164.0, 3.0..=24.0)
+            }) {
                 self.camera_motion.retarget(target);
             }
         }
@@ -2467,10 +2467,7 @@ impl StudioView {
             edge_scores[index] = 1.0;
         }
         self.retarget_lens(node_scores, edge_scores, 0.96);
-        if let (Some(bounds), Some(focus_bounds)) = (self.canvas_bounds, focus_bounds) {
-            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
-            let mut target = Camera::framed(focus_bounds, self.world_bounds, viewport, 112.0);
-            target.zoom = target.zoom.clamp(2.2, 9.0);
+        if let Some(target) = focus_bounds.and_then(|focus| self.framing(focus, 112.0, 2.2..=9.0)) {
             self.camera_motion.retarget(target);
         }
         self.begin_presentation_motion(window, cx);
@@ -2521,10 +2518,7 @@ impl StudioView {
         self.context_focus_active = true;
         self.active_facet = None;
         self.set_selection(Some(SceneSelection::Node(index)));
-        if let (Some(bounds), Some(focus_bounds)) = (self.canvas_bounds, focus_bounds) {
-            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
-            let mut target = Camera::framed(focus_bounds, self.world_bounds, viewport, 112.0);
-            target.zoom = target.zoom.clamp(1.4, 9.0);
+        if let Some(target) = focus_bounds.and_then(|focus| self.framing(focus, 112.0, 1.4..=9.0)) {
             self.camera_motion.retarget(target);
         }
         let direct = focus.layers.get(1).map_or(0, Vec::len);

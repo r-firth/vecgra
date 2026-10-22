@@ -671,6 +671,19 @@ fn framed_camera_and_interruptible_motion_converge() {
     assert_eq!(target.center, focus.center());
     assert!(target.zoom > 1.0);
 
+    // Framing below an overlay keeps the focus clear of it, centred in the
+    // room that is left, and honours the zoom range.
+    let below = Camera::framed_below(focus, world, viewport, 100.0, 160.0, 0.08..=24.0);
+    let top = below.project(focus.min, world, viewport).y;
+    let bottom = below.project(focus.max, world, viewport).y;
+    assert!(top >= 159.9, "the focus starts at {top}");
+    assert!(bottom <= viewport.y - 99.9, "the focus ends at {bottom}");
+    assert!(((top - 160.0) - (viewport.y - 100.0 - bottom)).abs() < 0.1);
+    let capped = Camera::framed_below(focus, world, viewport, 100.0, 160.0, 0.08..=1.5);
+    assert_eq!(capped.zoom, 1.5);
+    let middle = capped.project(focus.center(), world, viewport).y;
+    assert!((middle - (viewport.y * 0.5 + 30.0)).abs() < 0.1);
+
     let mut camera = Camera::fit(world);
     let mut motion = CameraMotion::new(camera);
     motion.retarget(target);
