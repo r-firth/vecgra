@@ -244,7 +244,7 @@ pub(crate) fn search_database_with(
         Some(Ok(query_vector)) => semantic_candidates(&read, &query_vector, candidate_limit)?,
         Some(Err(error)) if mode == SearchMode::Hybrid => {
             warning = Some(Arc::from(format!(
-                "Semantic retrieval unavailable ({error}); showing text matches"
+                "Text matches only: semantic retrieval unavailable ({error})"
             )));
             Vec::new()
         }

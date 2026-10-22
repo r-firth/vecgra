@@ -9,7 +9,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
         "Navigate",
         &[
             ("⌘K", "Search or run a command"),
-            ("↑  ↓", "Step through results, or earlier commands"),
+            ("↑  ↓", "Results, or earlier commands"),
             ("⌘0", "Fit the graph"),
             ("⌘=  ⌘-", "Zoom in and out"),
             ("Enter", "Lay out the selection's context"),
@@ -23,7 +23,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("⌘C", "Copy the selection as text"),
             ("⇧ click", "Trace a path from the selection"),
             ("Right click", "A node's actions"),
-            ("Tab  Enter", "Walk the inspector from the keyboard"),
+            ("Tab  Enter", "Walk the inspector by keyboard"),
             ("⇧⌘R", "Release a pinned node"),
         ],
     ),

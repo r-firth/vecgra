@@ -291,6 +291,24 @@ fn hybrid_search_ranks_native_node_and_edge_vectors() {
     );
     assert!(report.hits[0].semantic_score.is_some());
     assert!(report.hits.iter().any(|hit| hit.lexical_score.is_some()));
+    assert_eq!(report.warning, None);
+
+    // Without an embedding, hybrid search falls back to text and says so
+    // first, so the point survives a one-line display.
+    let report = search_database_with(
+        &file.0,
+        "ownership memory safety",
+        SearchMode::Hybrid,
+        "test",
+        8,
+        |_, _| Err("model unavailable".into()),
+    )
+    .unwrap();
+    assert!(!report.hits.is_empty());
+    assert_eq!(
+        report.warning.as_deref(),
+        Some("Text matches only: semantic retrieval unavailable (model unavailable)")
+    );
 }
 
 #[test]

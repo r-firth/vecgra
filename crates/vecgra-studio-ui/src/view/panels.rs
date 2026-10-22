@@ -1051,21 +1051,37 @@ impl StudioView {
                                             .child(summary),
                                     ),
                             )
-                            .when_some(report.embedding_model.clone(), |this, model| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .truncate()
-                                        .child(format!("Vectors · {model}")),
-                                )
-                            })
+                            // Without the semantic half, naming the vectors
+                            // would suggest they ranked these results.
+                            .when_some(
+                                report
+                                    .embedding_model
+                                    .clone()
+                                    .filter(|_| report.warning.is_none()),
+                                |this, model| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .truncate()
+                                            .child(format!("Vectors · {model}")),
+                                    )
+                                },
+                            )
+                            // One line, with the reason on hover: it repeats
+                            // on every search of a database the model cannot
+                            // embed for.
                             .when_some(report.warning.clone(), |this, warning| {
+                                let detail = warning.clone();
                                 this.child(
                                     div()
+                                        .id("search-warning")
                                         .text_xs()
-                                        .line_height(px(16.0))
+                                        .truncate()
                                         .text_color(cx.theme().warning)
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::text(detail.to_string(), window, cx)
+                                        })
                                         .child(warning.to_string()),
                                 )
                             }),
