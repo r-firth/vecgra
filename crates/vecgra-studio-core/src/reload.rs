@@ -94,6 +94,80 @@ impl SceneSnapshot {
         Ok(snapshot.anchored_on(previous, previous_positions, layout_options))
     }
 
+    /// Like [`SceneSnapshot::reload`], but leaves `hidden` nodes out of the
+    /// anchored scene. The full scene as read is returned beside it, unlaid,
+    /// so the hidden nodes can be shown again without rereading.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database cannot be opened or read.
+    pub fn reload_without(
+        path: impl AsRef<Path>,
+        previous: &SceneSnapshot,
+        previous_positions: &[Vec2],
+        hidden: &std::collections::BTreeSet<NodeId>,
+        snapshot_options: SnapshotOptions,
+        layout_options: LayoutOptions,
+    ) -> vecgra::Result<(ReloadedScene, SceneSnapshot)> {
+        let database = Database::open_read_only(path)?;
+        let full = Self::from_database(&database, snapshot_options)?;
+        let reloaded =
+            full.without_nodes(hidden)
+                .anchored_on(previous, previous_positions, layout_options);
+        Ok((reloaded, full))
+    }
+
+    /// This scene without the given nodes and the relationships that touch
+    /// them, for hiding nodes from view. Everything about the elements that
+    /// remain is kept, including their positions and degrees.
+    pub fn without_nodes(&self, hidden: &std::collections::BTreeSet<NodeId>) -> SceneSnapshot {
+        let mut kept = vec![None; self.nodes.ids.len()];
+        let mut nodes = SceneNodes::default();
+        for (index, &id) in self.nodes.ids.iter().enumerate() {
+            if hidden.contains(&id) {
+                continue;
+            }
+            kept[index] = Some(nodes.ids.len() as u32);
+            nodes.ids.push(id);
+            nodes.labels.push(self.nodes.labels[index].clone());
+            if let Some(&position) = self.nodes.positions.get(index) {
+                nodes.positions.push(position);
+            }
+            nodes.degrees.push(self.nodes.degrees[index]);
+            nodes.vector_counts.push(self.nodes.vector_counts[index]);
+            nodes.properties.push(self.nodes.properties[index].clone());
+        }
+        let mut edges = SceneEdges::default();
+        for index in 0..self.edges.ids.len() {
+            let (Some(source), Some(target)) = (
+                kept[self.edges.sources[index] as usize],
+                kept[self.edges.targets[index] as usize],
+            ) else {
+                continue;
+            };
+            edges.ids.push(self.edges.ids[index]);
+            edges.sources.push(source);
+            edges.targets.push(target);
+            edges.labels.push(self.edges.labels[index].clone());
+            edges.vector_counts.push(self.edges.vector_counts[index]);
+            edges.properties.push(self.edges.properties[index].clone());
+        }
+        let bounds = if nodes.positions.is_empty() {
+            self.bounds
+        } else {
+            Rect::from_points(&nodes.positions)
+        };
+        SceneSnapshot {
+            revision: self.revision,
+            database_name: self.database_name.clone(),
+            source_stats: self.source_stats,
+            nodes,
+            edges,
+            bounds,
+            sampled: self.sampled,
+        }
+    }
+
     /// Anchors this unlaid snapshot on a previous scene's presented positions.
     /// See [`SceneSnapshot::reload`].
     pub fn anchored_on(

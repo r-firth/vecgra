@@ -9,10 +9,10 @@ use gpui::{Entity, Window};
 use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
-    CopySelection, ExportView, FitView, FocusSearch, NextSearchResult, OpenDatabase,
+    CopySelection, ExportView, FitView, FocusSearch, HideSelection, NextSearchResult, OpenDatabase,
     PreviousSearchResult, ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp,
-    SelectionBack, SelectionForward, StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn, ZoomOut,
-    apply_studio_theme, init_bezel,
+    SelectionBack, SelectionForward, ShowHidden, StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn,
+    ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -84,6 +84,11 @@ fn main() {
             KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
             // The command box keeps its own Copy, bound deeper in the Input context.
             KeyBinding::new("cmd-c", CopySelection, Some("VecgraStudio")),
+            // The command box keeps Backspace and Delete, bound deeper in the
+            // Input context.
+            KeyBinding::new("backspace", HideSelection, Some("VecgraStudio")),
+            KeyBinding::new("delete", HideSelection, Some("VecgraStudio")),
+            KeyBinding::new("cmd-shift-h", ShowHidden, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
         cx.set_menus(app_menus());
@@ -160,6 +165,8 @@ fn app_menus() -> Vec<Menu> {
             MenuItem::action("Structure Layout", ArrangeStructure),
             MenuItem::separator(),
             MenuItem::action("Release Pinned Node", ReleaseSelected),
+            MenuItem::action("Hide Selected Node", HideSelection),
+            MenuItem::action("Show Hidden Nodes", ShowHidden),
         ]),
         Menu::new("Go").items([
             MenuItem::action("Back", SelectionBack),

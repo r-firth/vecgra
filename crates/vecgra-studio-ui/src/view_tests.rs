@@ -1482,6 +1482,9 @@ fn command_words_followed_by_other_words_are_searched() {
         "export",
         "export ~/graph.svg",
         "export view.svg",
+        "hide",
+        "hide 54",
+        "unhide",
         "text graph",
         "semantic",
     ] {
@@ -1504,6 +1507,8 @@ fn command_words_followed_by_other_words_are_searched() {
         "facet lens accessibility",
         "open dialog for files",
         "export controls",
+        "hide hub nodes",
+        "unhide toolbar",
     ] {
         assert!(!reads_as_command(search), "{search} is a search");
     }
@@ -2688,6 +2693,7 @@ fn right_clicking_a_node_opens_its_menu(cx: &mut TestAppContext) {
                 "Open connected context",
                 "Trace path from 0.rs",
                 "Set as path origin",
+                "Hide from view",
                 "Copy as text",
                 "Copy ID"
             ]
@@ -2817,4 +2823,105 @@ fn hover_cards_read_dates_as_ages() {
             "comments: 3"
         ]
     );
+}
+
+#[gpui::test]
+fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("hide-nodes");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([KeyBinding::new(
+            "backspace",
+            HideSelection,
+            Some("VecgraStudio"),
+        )]);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let (middle, other, kept) = (live.files[3], live.files[6], live.files[0]);
+    let position_of = |view: &StudioView, id| {
+        let index = view.snapshot().unwrap().node_index(id).unwrap();
+        view.workspace
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .overview_positions()[index]
+    };
+    let kept_position = |view: &StudioView| position_of(view, kept);
+    let (before, middle_before) = view.update(cx, |view, _| {
+        view.settle_presentation_for_capture();
+        let index = view.snapshot().unwrap().node_index(middle).unwrap();
+        view.set_selection(Some(SceneSelection::Node(index)));
+        (kept_position(view), position_of(view, middle))
+    });
+
+    // Backspace hides the selection and the relationships that touch it;
+    // everything else stays where it was.
+    cx.update(|window, cx| {
+        let focus_handle = view.read(cx).focus_handle.clone();
+        window.focus(&focus_handle, cx);
+        _ = window.draw(cx);
+    });
+    cx.simulate_keystrokes("backspace");
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(snapshot.node_index(middle), None);
+        assert_eq!((snapshot.nodes.ids.len(), snapshot.edges.ids.len()), (7, 5));
+        assert_eq!(view.selection, None);
+        assert_eq!(view.hidden_count(), 1);
+        assert!(
+            view.status.starts_with("Hid 3.rs · 1 hidden"),
+            "{}",
+            view.status
+        );
+        assert_eq!(kept_position(view), before);
+    });
+
+    // So does `hide <id>`, and the status bar counts them.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command(&format!("hide {other}"), window, cx);
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("show-hidden").is_some());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.snapshot().unwrap().node_index(other), None);
+        assert_eq!(view.hidden_count(), 2);
+    });
+
+    // A reload keeps them hidden and still brings in what is new.
+    let session = live.add_session();
+    view.update_in(cx, |view, window, cx| view.reload(window, cx));
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert!(snapshot.node_index(session).is_some());
+        assert_eq!(snapshot.node_index(middle), None);
+        assert_eq!(snapshot.node_index(other), None);
+        assert_eq!(kept_position(view), before);
+    });
+
+    // Showing them puts both back where they were, ringed like nodes a
+    // reload adds, and the new session stays.
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let show = cx.debug_bounds("show-hidden").unwrap();
+    cx.simulate_click(show.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        for id in [middle, other, session] {
+            assert!(snapshot.node_index(id).is_some());
+        }
+        assert_eq!(view.hidden_count(), 0);
+        let fresh = &view.fresh_nodes.as_ref().unwrap().ids;
+        assert!(fresh.contains(&middle) && fresh.contains(&other));
+        assert_eq!(kept_position(view), before);
+        assert_eq!(position_of(view, middle), middle_before);
+        assert_eq!(view.status.as_ref(), "Showing 2 hidden nodes");
+    });
 }

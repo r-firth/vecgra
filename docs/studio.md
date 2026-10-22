@@ -103,9 +103,16 @@ attempt to draw every record as a giant hairball.
    selects it and opens a menu of what can be done with it: open its
    connected context, trace a path to it from the node selected before (or
    from the chosen path origin), set it as the path origin, release it when
-   pinned, and copy it as text or by ID. Escape, a click elsewhere, or a
-   scroll closes the menu.
+   pinned, hide it, and copy it as text or by ID. Escape, a click
+   elsewhere, or a scroll closes the menu.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
+   Backspace or Delete with the graph focused, **Hide from view** in a
+   node's menu, or `hide [id]` takes a node and its relationships off the
+   canvas, such as a repository hub that every session touches; everything
+   else stays where it is. Hidden nodes stay hidden across reloads and live
+   refresh, and the status bar counts them. Clicking that count,
+   `Shift-Cmd-H`, or `unhide` brings them back where they were, ringed like
+   nodes a reload adds. Opening another database forgets them.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.
 7. Make query cost, result count, vector score, and structural distance

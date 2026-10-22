@@ -34,9 +34,11 @@ use vecgra_studio_core::{
 
 mod bezel_controls;
 mod help;
+mod hidden;
 mod node_menu;
 mod panels;
 
+use hidden::HiddenNodes;
 use node_menu::NodeMenu;
 use panels::path_direction_label;
 #[cfg(test)]
@@ -76,7 +78,9 @@ actions!(
         ExportView,
         SearchBoxUp,
         SearchBoxDown,
-        CopySelection
+        CopySelection,
+        HideSelection,
+        ShowHidden
     ]
 );
 
@@ -368,7 +372,8 @@ fn reads_as_command(query: &str) -> bool {
     let is_id = |word: &str| word.parse::<u64>().is_ok();
     match first {
         "fit" | "clear" | "reload" | "refresh" | "help" | "?" | "shortcuts" | "back"
-        | "forward" | "release" => rest.is_empty(),
+        | "forward" | "release" | "unhide" => rest.is_empty(),
+        "hide" => matches!(rest.as_slice(), [] | [_]) && rest.iter().all(|id| is_id(id)),
         "zoom" => matches!(rest.as_slice(), [factor] if parse_zoom(factor).is_some()),
         "live" | "watch" => matches!(rest.as_slice(), [] | ["on" | "off"]),
         "layout" => matches!(rest.as_slice(), ["auto" | "force" | "structure" | "orbit"]),
@@ -467,6 +472,27 @@ fn openable_database_path(path: &std::path::Path) -> Result<(), String> {
         }
         Err(error) => Err(format!("Cannot open {} · {error}", path.display())),
     }
+}
+
+/// Where each node of the scene in view should stay when another scene is
+/// anchored on it (pinned nodes where they are presented, others where the
+/// layout put them), and the IDs of the pinned ones.
+fn anchor_positions(workspace: &GraphWorkspace, snapshot: &SceneSnapshot) -> (Vec<Vec2>, Vec<u64>) {
+    let positions = workspace
+        .overview_positions()
+        .iter()
+        .zip(workspace.positions())
+        .zip(workspace.pins())
+        .map(|((&overview, &presented), &pinned)| if pinned { presented } else { overview })
+        .collect();
+    let pinned_ids = workspace
+        .pins()
+        .iter()
+        .enumerate()
+        .filter(|&(_, &pinned)| pinned)
+        .map(|(index, _)| snapshot.nodes.ids[index])
+        .collect();
+    (positions, pinned_ids)
 }
 
 fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
@@ -578,6 +604,8 @@ pub struct StudioView {
     /// under a still pointer, the hover no longer names what is under it.
     hover_camera: Option<Camera>,
     fresh_nodes: Option<FreshNodes>,
+    /// Nodes taken out of view, and the scene they were taken from.
+    hidden: Option<HiddenNodes>,
     recent: RecentDatabases,
     /// Where the recent list is saved; `None` keeps it in memory, as tests do.
     recent_file: Option<PathBuf>,
@@ -707,6 +735,7 @@ impl StudioView {
             hover_camera: None,
             hovered_edge: None,
             fresh_nodes: None,
+            hidden: None,
             recent: recent_file
                 .as_deref()
                 .map(RecentDatabases::load)
@@ -960,6 +989,7 @@ impl StudioView {
         self.database_path = Some(path.clone());
         self.recent_current = None;
         self.fresh_nodes = None;
+        self.hidden = None;
         self.workspace = None;
         self.graph_navigator_cache.borrow_mut().clear();
         self.node_label_counts = Arc::from([]);
@@ -1181,28 +1211,9 @@ impl StudioView {
         if self.has_transient_presentation() {
             self.retire_transient_presentation();
         }
-        let (previous_positions, pinned_ids) = {
-            let workspace = workspace.borrow();
-            let positions: Vec<_> = workspace
-                .overview_positions()
-                .iter()
-                .zip(workspace.positions())
-                .zip(workspace.pins())
-                .map(|((&overview, &presented), &pinned)| if pinned { presented } else { overview })
-                .collect();
-            let pinned_ids: Vec<_> = workspace
-                .pins()
-                .iter()
-                .enumerate()
-                .filter(|&(_, &pinned)| pinned)
-                .map(|(index, _)| previous.nodes.ids[index])
-                .collect();
-            (positions, pinned_ids)
-        };
-        let selected = self.selection.map(|selection| match selection {
-            SceneSelection::Node(index) => SelectedElement::Node(previous.nodes.ids[index]),
-            SceneSelection::Edge(index) => SelectedElement::Edge(previous.edges.ids[index]),
-        });
+        let (previous_positions, pinned_ids) = anchor_positions(&workspace.borrow(), &previous);
+        let selected = self.selected_element(self.selection);
+        let hidden = self.hidden.as_ref().map(|hidden| hidden.ids.clone());
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.reload_in_progress = true;
@@ -1211,13 +1222,27 @@ impl StudioView {
             let result = cx
                 .background_spawn(async move {
                     let fingerprint = DatabaseFingerprint::read(&path).ok();
-                    let reloaded = SceneSnapshot::reload(
-                        &path,
-                        &previous,
-                        &previous_positions,
-                        SnapshotOptions::default(),
-                        LayoutOptions::default(),
-                    );
+                    // Hidden nodes stay hidden; the full scene is kept so
+                    // they can be shown again.
+                    let reloaded = match hidden {
+                        None => SceneSnapshot::reload(
+                            &path,
+                            &previous,
+                            &previous_positions,
+                            SnapshotOptions::default(),
+                            LayoutOptions::default(),
+                        )
+                        .map(|reloaded| (reloaded, None)),
+                        Some(hidden) => SceneSnapshot::reload_without(
+                            &path,
+                            &previous,
+                            &previous_positions,
+                            &hidden,
+                            SnapshotOptions::default(),
+                            LayoutOptions::default(),
+                        )
+                        .map(|(reloaded, full)| (reloaded, Some(full))),
+                    };
                     (reloaded, fingerprint)
                 })
                 .await;
@@ -1227,8 +1252,11 @@ impl StudioView {
                 }
                 this.reload_in_progress = false;
                 match result {
-                    (Ok(reloaded), fingerprint) => {
+                    (Ok((reloaded, full)), fingerprint) => {
                         this.fingerprint = fingerprint;
+                        if let (Some(hidden), Some(full)) = (this.hidden.as_mut(), full) {
+                            hidden.full = Arc::new(full);
+                        }
                         this.install_reloaded_scene(reloaded, &pinned_ids, selected);
                     }
                     (Err(error), _) => {
@@ -3301,6 +3329,17 @@ impl StudioView {
                 }
             },
             Some("release") => self.release_selected(cx),
+            Some("hide") => match parts.next().and_then(|id| id.parse::<u64>().ok()) {
+                None => self.hide_selected(cx),
+                Some(id) => match self.snapshot().and_then(|snapshot| snapshot.node_index(id)) {
+                    Some(index) => self.hide_node(index, cx),
+                    None => {
+                        self.status = format!("Node {id} is not in this view").into();
+                        cx.notify();
+                    }
+                },
+            },
+            Some("unhide") => self.show_hidden_nodes(cx),
             Some("layout") => match parts.next() {
                 Some("auto") => self.arrange(LayoutKind::Auto, window, cx),
                 Some("force") => self.arrange(LayoutKind::Force, window, cx),
@@ -3646,6 +3685,12 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &CopySelection, _, cx| {
                 this.copy_selection(cx);
+            }))
+            .on_action(cx.listener(|this, _: &HideSelection, _, cx| {
+                this.hide_selected(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowHidden, _, cx| {
+                this.show_hidden_nodes(cx);
             }))
             .on_action(cx.listener(|this, _: &SearchBoxUp, window, cx| {
                 this.step_search_box(true, window, cx);

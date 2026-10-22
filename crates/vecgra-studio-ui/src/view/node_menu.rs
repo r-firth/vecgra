@@ -22,6 +22,7 @@ pub(super) enum NodeMenuItem {
     TracePathFrom(u64),
     SetPathOrigin,
     Release,
+    Hide,
     CopyText,
     CopyId,
 }
@@ -112,6 +113,11 @@ impl StudioView {
                 "⇧⌘R",
             )));
         }
+        items.push(Some((
+            NodeMenuItem::Hide,
+            "Hide from view".to_string(),
+            "⌫",
+        )));
         items.push(None);
         items.push(Some((
             NodeMenuItem::CopyText,
@@ -157,6 +163,7 @@ impl StudioView {
             }
             NodeMenuItem::SetPathOrigin => self.choose_path_start(index, window, cx),
             NodeMenuItem::Release => self.release_selected(cx),
+            NodeMenuItem::Hide => self.hide_node(index, cx),
             NodeMenuItem::CopyText => self.copy_selection(cx),
             NodeMenuItem::CopyId => {
                 let id = format!("node:{}", menu.node);

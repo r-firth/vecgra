@@ -1488,3 +1488,54 @@ fn date_properties_read_as_ages() {
         None
     );
 }
+
+#[test]
+fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
+    let mut full = SceneSnapshot::demo();
+    full.layout(LayoutOptions::default());
+    // The best-connected node, so hiding it removes many relationships.
+    let hub = (0..full.nodes.ids.len())
+        .max_by_key(|&index| full.nodes.degrees[index])
+        .unwrap();
+    let hub_id = full.nodes.ids[hub];
+    let touching = (0..full.edges.ids.len())
+        .filter(|&edge| {
+            full.edges.sources[edge] as usize == hub || full.edges.targets[edge] as usize == hub
+        })
+        .count();
+    let hidden = std::collections::BTreeSet::from([hub_id]);
+
+    let shown = full.without_nodes(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - 1);
+    assert_eq!(shown.edges.ids.len(), full.edges.ids.len() - touching);
+    assert_eq!(shown.node_index(hub_id), None);
+    for edge in 0..shown.edges.ids.len() {
+        let original = full.edge_index(shown.edges.ids[edge]).unwrap();
+        for (now, then) in [
+            (shown.edges.sources[edge], full.edges.sources[original]),
+            (shown.edges.targets[edge], full.edges.targets[original]),
+        ] {
+            assert_eq!(shown.nodes.ids[now as usize], full.nodes.ids[then as usize]);
+        }
+    }
+    for (index, &id) in shown.nodes.ids.iter().enumerate() {
+        let original = full.node_index(id).unwrap();
+        assert_eq!(shown.nodes.positions[index], full.nodes.positions[original]);
+    }
+
+    // Showing it again anchors the full scene on the one in view: everything
+    // else stays put and the hub enters from a neighbor.
+    let restored = full.anchored_on(&shown, &shown.nodes.positions, LayoutOptions::default());
+    assert!(!restored.relaid);
+    assert_eq!(restored.delta.added_nodes, 1);
+    assert_eq!(restored.delta.added_edges, touching);
+    assert_eq!(restored.delta.removed_nodes, 0);
+    assert!(restored.entrances[hub].is_some());
+    for (index, &id) in shown.nodes.ids.iter().enumerate() {
+        let back = restored.snapshot.node_index(id).unwrap();
+        assert_eq!(
+            restored.snapshot.nodes.positions[back],
+            shown.nodes.positions[index]
+        );
+    }
+}

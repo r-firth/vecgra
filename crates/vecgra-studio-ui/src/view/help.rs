@@ -25,6 +25,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("Right click", "A node's actions"),
             ("Tab  Enter", "Walk the inspector by keyboard"),
             ("⇧⌘R", "Release a pinned node"),
+            ("⌫  ⇧⌘H", "Hide a node, show hidden"),
         ],
     ),
     (
@@ -83,6 +84,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "reload  ·  live on|off",
         "live ",
         "Reread or watch the file",
+    ),
+    (
+        "hide [id]  ·  unhide",
+        "hide ",
+        "Hide a node, or show them all",
     ),
     (
         "back  ·  forward  ·  clear",

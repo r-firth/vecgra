@@ -1854,6 +1854,26 @@ impl StudioView {
                 self.layout_kind.label().to_lowercase()
             ))
             .when(pinned > 0, |this| this.child(format!("{pinned} pinned")))
+            .when(self.hidden_count() > 0, |this| {
+                this.child(
+                    div()
+                        .id("show-hidden")
+                        .debug_selector(|| "show-hidden".into())
+                        .role(Role::Button)
+                        .aria_label("Show hidden nodes")
+                        .aria_keyshortcuts("Shift+Meta+H")
+                        .px_1()
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .text_color(palette().copper)
+                        .hover(|this| this.bg(cx.theme().secondary_hover))
+                        .tooltip(|window, cx| {
+                            Tooltip::with_keystroke("Show hidden nodes", "⇧⌘H", window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.show_hidden_nodes(cx)))
+                        .child(format!("{} hidden", self.hidden_count())),
+                )
+            })
             .when(moving, |this| this.child("settling"))
             .when(self.database_path.is_some(), |this| {
                 this.child(self.render_live_refresh_toggle(cx))
