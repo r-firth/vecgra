@@ -28,8 +28,8 @@ use vecgra_studio_core::{
     EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions,
     MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue,
     RecentDatabases, Rect, ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode,
-    SearchReport, SnapshotOptions, Vec2, detail_level, display_path, evidence_path_database,
-    hit_test_edges, hit_test_positions, search_database, split_path_title,
+    SearchReport, SnapshotOptions, Vec2, detail_level, display_path, element_title,
+    evidence_path_database, hit_test_edges, hit_test_positions, search_database, split_path_title,
 };
 
 mod bezel_controls;
@@ -42,7 +42,7 @@ use panels::visible_facet_counts;
 
 use crate::graph_canvas::{
     GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, PATH_INTERIOR_SCORE, graph_canvas,
-    label_color, scene_svg,
+    label_color, node_caption_text, scene_svg,
 };
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
@@ -313,6 +313,28 @@ enum SelectedElement {
 
 fn live_refresh_default() -> bool {
     std::env::var("VECGRA_STUDIO_LIVE").map_or(true, |value| value != "0")
+}
+
+/// A node as the status bar names it: its canvas name, or its label and ID
+/// when it has no title.
+fn status_node_name(snapshot: &SceneSnapshot, index: usize) -> String {
+    match element_title(&snapshot.nodes.properties[index]) {
+        Some(title) => node_caption_text(&title).to_string(),
+        None => format!(
+            "{} {}",
+            snapshot.nodes.labels[index], snapshot.nodes.ids[index]
+        ),
+    }
+}
+
+/// A relationship as the status bar names it: its type and both ends.
+fn status_edge_name(snapshot: &SceneSnapshot, index: usize) -> String {
+    format!(
+        "{} · {} → {}",
+        snapshot.edges.labels[index],
+        status_node_name(snapshot, snapshot.edges.sources[index] as usize),
+        status_node_name(snapshot, snapshot.edges.targets[index] as usize)
+    )
 }
 
 /// Resolves the argument of the `open` command: surrounding quotes are
@@ -1105,10 +1127,11 @@ impl StudioView {
         }
         self.status = match via_edge {
             Some(edge) => format!(
-                "Selected node {} · via {} {}",
-                snapshot.nodes.ids[index], snapshot.edges.labels[edge], snapshot.edges.ids[edge]
+                "Selected {} · via {}",
+                status_node_name(&snapshot, index),
+                snapshot.edges.labels[edge]
             ),
-            None => format!("Selected node {}", snapshot.nodes.ids[index]),
+            None => format!("Selected {}", status_node_name(&snapshot, index)),
         }
         .into();
         self.begin_presentation_motion(window, cx);
@@ -1560,16 +1583,11 @@ impl StudioView {
             self.inspector_scroll_handle.set_offset(Default::default());
             self.selection = Some(selection);
             self.spring_to_selection(false);
-            self.status = match element {
-                SelectedElement::Node(id) => {
-                    format!("{} · node {id}", if backward { "Back" } else { "Forward" })
-                }
-                SelectedElement::Edge(id) => format!(
-                    "{} · relationship {id}",
-                    if backward { "Back" } else { "Forward" }
-                ),
-            }
-            .into();
+            let name = match selection {
+                SceneSelection::Node(index) => status_node_name(&snapshot, index),
+                SceneSelection::Edge(index) => status_edge_name(&snapshot, index),
+            };
+            self.status = format!("{} · {name}", if backward { "Back" } else { "Forward" }).into();
             self.begin_presentation_motion(window, cx);
             return;
         }
@@ -1862,7 +1880,12 @@ impl StudioView {
         };
         let generation = self.path_generation;
         self.path_state = PathState::Searching { start, end };
-        self.status = format!("Tracing exact path · node:{start} → node:{end}…").into();
+        self.status = format!(
+            "Tracing exact path · {} → {}…",
+            self.status_node_name_by_id(start),
+            self.status_node_name_by_id(end)
+        )
+        .into();
         self.path_task = Some(cx.spawn_in(window, async move |this, cx| {
             let worker_label = relationship_label.clone();
             let result = cx
@@ -2108,21 +2131,30 @@ impl StudioView {
             .then_some(index)
     }
 
+    /// A node as the status bar names it, or `node:<id>` when it is not in
+    /// the current scene.
+    fn status_node_name_by_id(&self, id: u64) -> String {
+        self.snapshot()
+            .and_then(|snapshot| Some(status_node_name(snapshot, snapshot.node_index(id)?)))
+            .unwrap_or_else(|| format!("node:{id}"))
+    }
+
     fn path_draft_status(&self, draft: PathDraft) -> SharedString {
         if let Some(end) = self
             .path_destination_candidate()
             .and_then(|index| self.snapshot()?.nodes.ids.get(index).copied())
         {
             format!(
-                "Destination ready · node:{end} · {} · up to {} hops · Enter traces exact path",
+                "Destination ready · {} · {} · up to {} hops · Enter traces exact path",
+                self.status_node_name_by_id(end),
                 path_direction_label(draft.direction),
                 draft.max_hops
             )
             .into()
         } else {
             format!(
-                "Path origin · node:{} · {} · up to {} hops · select a destination",
-                draft.start,
+                "Path origin · {} · {} · up to {} hops · select a destination",
+                self.status_node_name_by_id(draft.start),
                 path_direction_label(draft.direction),
                 draft.max_hops
             )
@@ -2268,7 +2300,14 @@ impl StudioView {
                 self.camera_motion.retarget(target);
             }
         }
-        self.status = format!("Evidence step {} · relationship:{edge_id}", step_index + 1).into();
+        self.status = match self.snapshot().and_then(|snapshot| {
+            let index = snapshot.edge_index(edge_id)?;
+            Some(status_edge_name(snapshot, index))
+        }) {
+            Some(name) => format!("Evidence step {} · {name}", step_index + 1),
+            None => format!("Evidence step {} · relationship:{edge_id}", step_index + 1),
+        }
+        .into();
         self.begin_presentation_motion(window, cx);
     }
 
@@ -2672,15 +2711,16 @@ impl StudioView {
             let position = workspace.position(index).unwrap_or(pointer_world);
             let was_pinned = workspace.begin_drag(index);
             self.set_selection(Some(SceneSelection::Node(index)));
-            let node_id = snapshot.nodes.ids[index];
             self.status = match self.path_state {
                 PathState::ChoosingEnd(draft) => self.path_draft_status(draft),
                 PathState::Idle
                 | PathState::Searching { .. }
                 | PathState::Ready(_)
-                | PathState::Failed { .. } => {
-                    format!("Selected node {node_id} · drag to arrange").into()
-                }
+                | PathState::Failed { .. } => format!(
+                    "Selected {} · drag to arrange",
+                    status_node_name(&snapshot, index)
+                )
+                .into(),
             };
             self.drag = Some(DragState::Node {
                 index,
@@ -2949,11 +2989,8 @@ impl StudioView {
                 if let Some(edge_index) = pressed_edge {
                     self.set_selection(Some(SceneSelection::Edge(edge_index)));
                     if let Some(snapshot) = self.snapshot() {
-                        self.status = format!(
-                            "Selected relationship {} · {}",
-                            snapshot.edges.ids[edge_index], snapshot.edges.labels[edge_index]
-                        )
-                        .into();
+                        self.status =
+                            format!("Selected {}", status_edge_name(snapshot, edge_index)).into();
                     }
                 } else {
                     self.set_selection(None);
@@ -3150,14 +3187,13 @@ impl StudioView {
                 let Some(snapshot) = self.snapshot() else {
                     return;
                 };
-                let selection = snapshot.node_index(id).map(SceneSelection::Node);
-                self.set_selection(selection);
-                self.spring_to_selection(true);
-                self.status = if self.selection.is_some() {
-                    format!("Selected node {id}").into()
-                } else {
-                    format!("Node {id} is not in this view").into()
+                let index = snapshot.node_index(id);
+                self.status = match index {
+                    Some(index) => format!("Selected {}", status_node_name(snapshot, index)).into(),
+                    None => format!("Node {id} is not in this view").into(),
                 };
+                self.set_selection(index.map(SceneSelection::Node));
+                self.spring_to_selection(true);
                 self.begin_presentation_motion(window, cx);
             }
             Some("center") => {
@@ -3182,7 +3218,7 @@ impl StudioView {
                 self.camera.center = position;
                 self.camera_motion.cancel_at(self.camera);
                 self.set_selection(Some(SceneSelection::Node(index)));
-                self.status = format!("Centered node {id}").into();
+                self.status = format!("Centered {}", self.status_node_name_by_id(id)).into();
                 cx.notify();
             }
             Some("focus") | Some("context") => {
@@ -3208,14 +3244,13 @@ impl StudioView {
                 let Some(snapshot) = self.snapshot() else {
                     return;
                 };
-                let selection = snapshot.edge_index(id).map(SceneSelection::Edge);
-                self.set_selection(selection);
-                self.spring_to_selection(true);
-                self.status = if self.selection.is_some() {
-                    format!("Selected relationship {id}").into()
-                } else {
-                    format!("Relationship {id} is not in this view").into()
+                let index = snapshot.edge_index(id);
+                self.status = match index {
+                    Some(index) => format!("Selected {}", status_edge_name(snapshot, index)).into(),
+                    None => format!("Relationship {id} is not in this view").into(),
                 };
+                self.set_selection(index.map(SceneSelection::Edge));
+                self.spring_to_selection(true);
                 self.begin_presentation_motion(window, cx);
             }
             Some("path-start") => {

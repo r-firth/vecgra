@@ -894,7 +894,7 @@ fn node_captions(
 }
 
 /// A canvas-length name: a path's file name, or the title cut to fit.
-fn node_caption_text(title: &str) -> SharedString {
+pub(crate) fn node_caption_text(title: &str) -> SharedString {
     let name = split_path_title(title).map_or(title, |(name, _)| name);
     if name.chars().count() <= NODE_CAPTION_CHARS {
         return SharedString::new(name);

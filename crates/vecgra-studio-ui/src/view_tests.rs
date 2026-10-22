@@ -1793,7 +1793,10 @@ fn back_and_forward_retrace_selections_by_id(cx: &mut TestAppContext) {
             assert_eq!(view.selection, Some(SceneSelection::Node(9)));
             view.execute_command("back", window, cx);
             assert_eq!(view.selection, Some(SceneSelection::Edge(0)));
-            assert_eq!(view.status.as_ref(), "Back · relationship 0");
+            assert_eq!(
+                view.status.as_ref(),
+                "Back · NEXT · Context element 0 → Context element 1"
+            );
             view.execute_command("back", window, cx);
             assert_eq!(view.selection, Some(SceneSelection::Node(3)));
             view.execute_command("back", window, cx);
@@ -2396,4 +2399,45 @@ fn shortcuts_work_before_anything_is_clicked(cx: &mut TestAppContext) {
     });
     cx.simulate_keystrokes("cmd-/");
     view.read_with(&*cx, |view, _| assert!(view.help_visible));
+}
+
+#[gpui::test]
+fn the_status_bar_names_what_was_selected(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("status-names");
+    let mut transaction = live.database.transaction();
+    let marker =
+        transaction.create_node("Marker", std::iter::empty::<(&str, vecgra::Value)>(), &[]);
+    transaction.commit().unwrap();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let (first, last) = (live.files[0], live.files[3]);
+    view.update_in(cx, |view, window, cx| {
+        let snapshot = view.snapshot().unwrap().clone();
+        let source = snapshot.node_index(first).unwrap() as u32;
+        let edge = (0..snapshot.edges.ids.len())
+            .find(|&edge| snapshot.edges.sources[edge] == source)
+            .map(|edge| snapshot.edges.ids[edge])
+            .unwrap();
+
+        // Files go by their file name, as on the canvas.
+        view.execute_command(&format!("node {}", live.files[2]), window, cx);
+        assert_eq!(view.status.as_ref(), "Selected 2.rs");
+        // A node with nothing to call it by keeps its label and ID.
+        view.execute_command(&format!("node {marker}"), window, cx);
+        assert_eq!(view.status.as_ref(), format!("Selected Marker {marker}"));
+        view.execute_command(&format!("edge {edge}"), window, cx);
+        assert_eq!(view.status.as_ref(), "Selected IMPORTS · 0.rs → 1.rs");
+        view.execute_command("back", window, cx);
+        assert_eq!(view.status.as_ref(), format!("Back · Marker {marker}"));
+        view.execute_command(&format!("center {last}"), window, cx);
+        assert_eq!(view.status.as_ref(), "Centered 3.rs");
+        view.execute_command(&format!("path {first} {last}"), window, cx);
+        assert_eq!(view.status.as_ref(), "Tracing exact path · 0.rs → 3.rs…");
+    });
 }
