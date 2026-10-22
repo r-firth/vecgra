@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -24,11 +24,11 @@ use gpui_component::{
     v_flex,
 };
 use vecgra_studio_core::{
-    Camera, CameraMotion, DetailLevel, EvidenceNode, EvidencePathReport, EvidencePathStrategy,
-    EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions, MAX_CAMERA_ZOOM,
-    MIN_CAMERA_ZOOM, PathDirection, PropertyValue, Rect, SceneSelection, SceneSnapshot, SearchMode,
-    SearchReport, SnapshotOptions, Vec2, detail_level, evidence_path_database, hit_test_edges,
-    hit_test_positions, search_database,
+    Camera, CameraMotion, DatabaseFingerprint, DetailLevel, EvidenceNode, EvidencePathReport,
+    EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions,
+    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, PathDirection, PropertyValue, Rect, ReloadedScene,
+    SceneDelta, SceneSelection, SceneSnapshot, SearchMode, SearchReport, SnapshotOptions, Vec2,
+    detail_level, evidence_path_database, hit_test_edges, hit_test_positions, search_database,
 };
 
 mod bezel_controls;
@@ -61,9 +61,15 @@ actions!(
         ActivateSelection,
         FocusSearch,
         NextSearchResult,
-        PreviousSearchResult
+        PreviousSearchResult,
+        ReloadDatabase,
+        ToggleLiveRefresh
     ]
 );
+
+/// How often live refresh checks the database file for new commits. Only file
+/// metadata is read on each tick; the database is reopened when it changes.
+const LIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(1_000);
 
 enum LoadState {
     Loading { name: SharedString },
@@ -256,6 +262,36 @@ fn interpolate_scores(from: &[f32], target: &[f32], mix: f32) -> Arc<[f32]> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SelectedElement {
+    Node(u64),
+    Edge(u64),
+}
+
+fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
+    let prefix = if live { "Live" } else { "Reloaded" };
+    if delta.is_empty() {
+        return format!("{prefix} · up to date");
+    }
+    let mut parts = Vec::new();
+    let mut push = |count: usize, sign: &str, noun: &str| {
+        if count > 0 {
+            let plural = if count == 1 { "" } else { "s" };
+            parts.push(format!("{sign}{count} {noun}{plural}"));
+        }
+    };
+    push(delta.added_nodes, "+", "node");
+    push(delta.removed_nodes, "−", "node");
+    push(delta.added_edges, "+", "relationship");
+    push(delta.removed_edges, "−", "relationship");
+    let updated = delta.updated_nodes + delta.updated_edges;
+    if updated > 0 {
+        parts.push(format!("{updated} updated"));
+    }
+    let suffix = if relaid { " · new layout" } else { "" };
+    format!("{prefix} · {}{suffix}", parts.join(" · "))
+}
+
 type ReadyCallback = Box<dyn FnOnce(&mut Window, &mut Context<StudioView>)>;
 
 pub struct StudioView {
@@ -286,6 +322,11 @@ pub struct StudioView {
     inspector_scroll_handle: ScrollHandle,
     generation: u64,
     load_task: Option<Task<()>>,
+    fingerprint: Option<DatabaseFingerprint>,
+    live_refresh: bool,
+    live_task: Option<Task<()>>,
+    reload_in_progress: bool,
+    reload_waiting: bool,
     search_state: SearchState,
     search_mode: SearchMode,
     search_generation: u64,
@@ -376,6 +417,12 @@ impl StudioView {
             inspector_scroll_handle: ScrollHandle::new(),
             generation: 0,
             load_task: None,
+            fingerprint: None,
+            live_refresh: path.is_some()
+                && std::env::var("VECGRA_STUDIO_LIVE").map_or(true, |value| value != "0"),
+            live_task: None,
+            reload_in_progress: false,
+            reload_waiting: false,
             search_state: SearchState::Idle,
             search_mode: SearchMode::Hybrid,
             search_generation: 0,
@@ -407,6 +454,9 @@ impl StudioView {
         };
         if let Some(path) = path {
             view.open(path, window, cx);
+            if view.live_refresh {
+                view.start_live_refresh(window, cx);
+            }
         } else if matches!(view.state, LoadState::Ready(_)) {
             view.camera = Camera::fit(view.world_bounds);
             view.camera_motion.cancel_at(view.camera);
@@ -511,22 +561,28 @@ impl StudioView {
             let result = cx
                 .background_spawn(async move {
                     let started = Instant::now();
+                    // Fingerprint before opening: a commit that lands during
+                    // the open then reads as a change on the next live tick.
+                    let fingerprint = DatabaseFingerprint::read(&path).ok();
                     let snapshot = SceneSnapshot::open(
                         path,
                         SnapshotOptions::default(),
                         LayoutOptions::default(),
                     );
-                    (snapshot, started.elapsed())
+                    (snapshot, fingerprint, started.elapsed())
                 })
                 .await;
             this.update_in(cx, |this, window, cx| {
                 if this.generation != generation {
                     return;
                 }
-                let (snapshot, elapsed) = result;
+                let (snapshot, fingerprint, elapsed) = result;
                 this.load_ms = Some(elapsed.as_secs_f64() * 1_000.0);
+                this.reload_in_progress = false;
+                this.reload_waiting = false;
                 match snapshot {
                     Ok(snapshot) => {
+                        this.fingerprint = fingerprint;
                         let snapshot = Arc::new(snapshot);
                         this.camera = Camera::fit(snapshot.bounds);
                         this.camera_motion.cancel_at(this.camera);
@@ -565,6 +621,236 @@ impl StudioView {
             })
             .ok();
         }));
+    }
+
+    /// Rereads the open database and swaps in the new scene without moving
+    /// anything that survived. A manual reload first retires any search,
+    /// path, lens, or context so their per-element state cannot outlive the
+    /// scene it was computed for.
+    fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.database_path.clone() else {
+            self.status = "The demo scene has no database to reload".into();
+            cx.notify();
+            return;
+        };
+        let (Some(previous), Some(workspace)) = (self.snapshot().cloned(), self.workspace.clone())
+        else {
+            return;
+        };
+        if self.has_transient_presentation() {
+            self.retire_transient_presentation();
+        }
+        let (previous_positions, pinned_ids) = {
+            let workspace = workspace.borrow();
+            let positions: Vec<_> = workspace
+                .overview_positions()
+                .iter()
+                .zip(workspace.positions())
+                .zip(workspace.pins())
+                .map(|((&overview, &presented), &pinned)| if pinned { presented } else { overview })
+                .collect();
+            let pinned_ids: Vec<_> = workspace
+                .pins()
+                .iter()
+                .enumerate()
+                .filter(|&(_, &pinned)| pinned)
+                .map(|(index, _)| previous.nodes.ids[index])
+                .collect();
+            (positions, pinned_ids)
+        };
+        let selected = self.selection.map(|selection| match selection {
+            SceneSelection::Node(index) => SelectedElement::Node(previous.nodes.ids[index]),
+            SceneSelection::Edge(index) => SelectedElement::Edge(previous.edges.ids[index]),
+        });
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        self.reload_in_progress = true;
+        self.reload_waiting = false;
+        self.load_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let fingerprint = DatabaseFingerprint::read(&path).ok();
+                    let reloaded = SceneSnapshot::reload(
+                        &path,
+                        &previous,
+                        &previous_positions,
+                        SnapshotOptions::default(),
+                        LayoutOptions::default(),
+                    );
+                    (reloaded, fingerprint)
+                })
+                .await;
+            this.update_in(cx, |this, _window, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                this.reload_in_progress = false;
+                match result {
+                    (Ok(reloaded), fingerprint) => {
+                        this.fingerprint = fingerprint;
+                        this.install_reloaded_scene(reloaded, &pinned_ids, selected);
+                    }
+                    (Err(error), _) => {
+                        this.status = format!("Reload failed · {error}").into();
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        self.status = "Reloading database…".into();
+        cx.notify();
+    }
+
+    fn install_reloaded_scene(
+        &mut self,
+        reloaded: ReloadedScene,
+        pinned_ids: &[u64],
+        selected: Option<SelectedElement>,
+    ) {
+        if self.has_transient_presentation() {
+            // A search or context began while the reload was in flight; its
+            // state indexes the current scene, so keep it and retry later.
+            self.reload_waiting = true;
+            self.fingerprint = None;
+            self.status = "Reload waiting · return to overview to apply it".into();
+            return;
+        }
+        let ReloadedScene {
+            snapshot,
+            entrances,
+            delta,
+            relaid,
+        } = reloaded;
+        let snapshot = Arc::new(snapshot);
+        let mut workspace = GraphWorkspace::new(&snapshot);
+        for &id in pinned_ids {
+            if let Some(index) = snapshot.node_index(id) {
+                workspace.set_pinned(index, true);
+            }
+        }
+        workspace.enter_from(&entrances);
+        let moving = workspace.is_moving();
+        self.workspace = Some(Rc::new(RefCell::new(workspace)));
+        self.graph_navigator_cache.borrow_mut().clear();
+        self.node_label_counts = Arc::from(snapshot.label_counts());
+        self.relationship_counts = Arc::from(snapshot.relationship_counts());
+        let selection = selected.and_then(|selected| match selected {
+            SelectedElement::Node(id) => snapshot.node_index(id).map(SceneSelection::Node),
+            SelectedElement::Edge(id) => snapshot.edge_index(id).map(SceneSelection::Edge),
+        });
+        self.set_selection(selection);
+        if relaid {
+            self.world_bounds = snapshot.bounds;
+            self.camera = Camera::fit(snapshot.bounds);
+            self.camera_motion.cancel_at(self.camera);
+            self.layout_kind = LayoutKind::Auto;
+        }
+        self.last_motion_frame = moving.then(Instant::now);
+        self.status = reload_status(delta, relaid, self.live_refresh).into();
+        self.state = LoadState::Ready(snapshot);
+    }
+
+    /// Search results, paths, lenses, and context layouts all hold per-index
+    /// state for the current scene. Live refresh waits while any is active.
+    fn has_transient_presentation(&self) -> bool {
+        self.context_focus_active
+            || self.active_facet.is_some()
+            || self.lens.is_some()
+            || self.drag.is_some()
+            || self.layout_in_progress
+            || !matches!(self.search_state, SearchState::Idle)
+            || !matches!(self.path_state, PathState::Idle)
+    }
+
+    fn retire_transient_presentation(&mut self) {
+        self.search_generation = self.search_generation.wrapping_add(1);
+        drop(self.search_task.take());
+        self.search_state = SearchState::Idle;
+        self.path_generation = self.path_generation.wrapping_add(1);
+        drop(self.path_task.take());
+        self.path_state = PathState::Idle;
+        self.path_endpoints = None;
+        self.layout_generation = self.layout_generation.wrapping_add(1);
+        drop(self.layout_task.take());
+        self.layout_in_progress = false;
+        self.context_focus_active = false;
+        self.active_facet = None;
+        self.lens = None;
+        self.drag = None;
+        if let Some(camera) = self.saved_overview_camera.take() {
+            self.camera = camera;
+            self.camera_motion.cancel_at(camera);
+        }
+    }
+
+    fn set_live_refresh(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.database_path.is_none() {
+            self.status = "Live refresh needs a .vg database".into();
+            cx.notify();
+            return;
+        }
+        self.live_refresh = enabled;
+        if enabled {
+            self.start_live_refresh(window, cx);
+            self.status = "Live refresh on · new commits appear as they land".into();
+        } else {
+            self.live_task = None;
+            self.reload_waiting = false;
+            self.status = "Live refresh off · ⌘R reloads on demand".into();
+        }
+        cx.notify();
+    }
+
+    fn start_live_refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.live_task = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(LIVE_REFRESH_INTERVAL).await;
+                let Ok(Some(path)) = this.update(cx, |this, _| {
+                    this.live_refresh
+                        .then(|| this.database_path.clone())
+                        .flatten()
+                }) else {
+                    break;
+                };
+                let fingerprint = cx
+                    .background_spawn(async move { DatabaseFingerprint::read(&path).ok() })
+                    .await;
+                let keep_polling = this.update_in(cx, |this, window, cx| {
+                    this.on_live_fingerprint(fingerprint, window, cx);
+                    this.live_refresh
+                });
+                if !matches!(keep_polling, Ok(true)) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn on_live_fingerprint(
+        &mut self,
+        fingerprint: Option<DatabaseFingerprint>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A missing file is usually a compaction swap in progress.
+        let Some(fingerprint) = fingerprint else {
+            return;
+        };
+        if self.reload_in_progress || !self.is_ready() {
+            return;
+        }
+        if self.fingerprint == Some(fingerprint) && !self.reload_waiting {
+            return;
+        }
+        if self.has_transient_presentation() {
+            if !self.reload_waiting {
+                self.reload_waiting = true;
+                cx.notify();
+            }
+            return;
+        }
+        self.reload(window, cx);
     }
 
     fn snapshot(&self) -> Option<&Arc<SceneSnapshot>> {
@@ -1946,6 +2232,16 @@ impl StudioView {
                 cx.notify();
             }
             Some("clear") => self.clear_selection(cx),
+            Some("reload") | Some("refresh") => self.reload(window, cx),
+            Some("live") | Some("watch") => match parts.next() {
+                None => self.set_live_refresh(!self.live_refresh, window, cx),
+                Some("on") => self.set_live_refresh(true, window, cx),
+                Some("off") => self.set_live_refresh(false, window, cx),
+                Some(_) => {
+                    self.status = "Expected: live | live on | live off".into();
+                    cx.notify();
+                }
+            },
             Some("release") => self.release_selected(cx),
             Some("layout") => match parts.next() {
                 Some("auto") => self.arrange(LayoutKind::Auto, window, cx),
@@ -2273,6 +2569,12 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &PreviousSearchResult, _, cx| {
                 this.move_search_selection(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ReloadDatabase, window, cx| {
+                this.reload(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleLiveRefresh, window, cx| {
+                this.set_live_refresh(!this.live_refresh, window, cx);
             }))
             .child(self.render_top_bar(compact_toolbar, cx))
             .child(

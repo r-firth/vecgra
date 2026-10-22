@@ -849,6 +849,29 @@ impl GraphWorkspace {
         Some(Rect::from_points(&focus_targets))
     }
 
+    /// Moves newly arrived nodes to an entrance position, leaving their
+    /// targets unchanged, so they spring out of the structure they attached
+    /// to instead of appearing in place. Pinned and out-of-range entries and
+    /// non-finite positions are ignored.
+    pub fn enter_from(&mut self, entrances: &[Option<Vec2>]) {
+        let mut entered = false;
+        for (index, entrance) in entrances.iter().enumerate().take(self.positions.len()) {
+            let Some(entrance) = *entrance else {
+                continue;
+            };
+            if self.pinned[index] || !entrance.x.is_finite() || !entrance.y.is_finite() {
+                continue;
+            }
+            self.positions[index] = entrance;
+            self.velocities[index] = Vec2::ZERO;
+            entered = true;
+        }
+        if entered {
+            self.position_revision = self.position_revision.wrapping_add(1);
+            self.moving = true;
+        }
+    }
+
     pub fn restore_layout(&mut self) {
         self.restore_targets();
         self.moving = self.positions.iter().zip(&self.targets).enumerate().any(

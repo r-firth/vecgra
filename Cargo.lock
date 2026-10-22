@@ -8209,6 +8209,7 @@ dependencies = [
  "lyon_geom",
  "theme",
  "ui",
+ "vecgra",
  "vecgra-studio-core",
 ]
 

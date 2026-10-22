@@ -717,3 +717,219 @@ fn edge_hit_testing_uses_screen_space_and_nearest_segment() {
         None
     );
 }
+
+fn create_test_database(file: &TestFile) -> Database {
+    Database::create(
+        &file.0,
+        DatabaseOptions {
+            vector_dimension: 4,
+            similarity: Similarity::Cosine,
+            vector_encoding: VectorEncoding::F32,
+            sync_on_commit: false,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn fingerprint_notices_commits_from_another_handle() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let before = DatabaseFingerprint::read(&file.0).unwrap();
+    assert_eq!(before, DatabaseFingerprint::read(&file.0).unwrap());
+
+    let mut transaction = database.transaction();
+    transaction.create_node("Session", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.commit().unwrap();
+    assert_ne!(before, DatabaseFingerprint::read(&file.0).unwrap());
+}
+
+#[test]
+fn reload_keeps_surviving_positions_and_grows_new_nodes_from_their_anchors() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let chain: Vec<_> = (0..6)
+        .map(|index| {
+            transaction.create_node(
+                "File",
+                [("path", Value::String(format!("src/{index}.rs").into()))],
+                &[],
+            )
+        })
+        .collect();
+    for pair in chain.windows(2) {
+        transaction.create_edge(
+            pair[0],
+            pair[1],
+            "IMPORTS",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        );
+    }
+    transaction.commit().unwrap();
+
+    let previous = SceneSnapshot::open(
+        &file.0,
+        SnapshotOptions::default(),
+        LayoutOptions::default(),
+    )
+    .unwrap();
+    // Simulate a user-adjusted presentation that differs from the layout.
+    let presented: Vec<_> = previous
+        .nodes
+        .positions
+        .iter()
+        .map(|&position| position + Vec2::new(500.0, -250.0))
+        .collect();
+
+    let mut transaction = database.transaction();
+    let session = transaction.create_node("Session", std::iter::empty::<(&str, Value)>(), &[]);
+    let edited = transaction.create_edge(
+        session,
+        chain[2],
+        "EDITED",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let island_a = transaction.create_node("Command", std::iter::empty::<(&str, Value)>(), &[]);
+    let island_b =
+        transaction.create_node("ErrorSignature", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.create_edge(
+        island_a,
+        island_b,
+        "HIT",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.delete_node(chain[5], true);
+    transaction
+        .update_node(
+            chain[0],
+            "File",
+            [("path", Value::String("src/renamed.rs".into()))],
+            &[],
+        )
+        .unwrap();
+    transaction.commit().unwrap();
+
+    let reloaded = SceneSnapshot::reload(
+        &file.0,
+        &previous,
+        &presented,
+        SnapshotOptions::default(),
+        LayoutOptions::default(),
+    )
+    .unwrap();
+    assert!(!reloaded.relaid);
+    assert_eq!(
+        reloaded.delta,
+        SceneDelta {
+            added_nodes: 3,
+            removed_nodes: 1,
+            updated_nodes: 1,
+            added_edges: 2,
+            removed_edges: 1,
+            updated_edges: 0,
+        }
+    );
+    let snapshot = &reloaded.snapshot;
+    for &id in &chain[..5] {
+        let before = presented[previous.node_index(id).unwrap()];
+        let after = snapshot.nodes.positions[snapshot.node_index(id).unwrap()];
+        assert_eq!(before, after, "surviving node {id} must not move");
+        assert_eq!(reloaded.entrances[snapshot.node_index(id).unwrap()], None);
+    }
+    assert!(snapshot.node_index(chain[5]).is_none());
+    assert!(snapshot.edge_index(edited).is_some());
+
+    let anchor = presented[previous.node_index(chain[2]).unwrap()];
+    let session_index = snapshot.node_index(session).unwrap();
+    assert_eq!(reloaded.entrances[session_index], Some(anchor));
+    let offset = (snapshot.nodes.positions[session_index] - anchor).length();
+    assert!(
+        (LayoutOptions::default().edge_length * 0.9..=LayoutOptions::default().edge_length * 1.1)
+            .contains(&offset),
+        "new neighbor sits one edge length from its anchor, got {offset}"
+    );
+
+    // The unanchored component enters outside the surviving scene, and its
+    // second node grows from the first rather than stacking on it.
+    let surviving = Rect::from_points(
+        &chain[..5]
+            .iter()
+            .map(|&id| snapshot.nodes.positions[snapshot.node_index(id).unwrap()])
+            .collect::<Vec<_>>(),
+    );
+    let a = snapshot.nodes.positions[snapshot.node_index(island_a).unwrap()];
+    let b = snapshot.nodes.positions[snapshot.node_index(island_b).unwrap()];
+    let outside = |point: Vec2| {
+        point.x < surviving.min.x
+            || point.x > surviving.max.x
+            || point.y < surviving.min.y
+            || point.y > surviving.max.y
+    };
+    assert!(
+        outside(a),
+        "island seed {a:?} must be outside {surviving:?}"
+    );
+    assert!((a - b).length() > 1.0);
+    assert!(
+        snapshot
+            .nodes
+            .positions
+            .iter()
+            .all(|point| point.x.is_finite() && point.y.is_finite())
+    );
+}
+
+#[test]
+fn reload_lays_out_from_scratch_when_most_of_the_scene_is_new() {
+    let previous = SceneSnapshot::demo();
+    let mut grown = previous.clone();
+    let base = grown.nodes.ids.len() as u64;
+    for offset in 0..grown.nodes.ids.len() as u64 * 2 {
+        grown.nodes.ids.push(base + offset);
+        grown.nodes.labels.push("Fresh".into());
+        grown.nodes.positions.push(Vec2::ZERO);
+        grown.nodes.degrees.push(0);
+        grown.nodes.vector_counts.push(0);
+        grown.nodes.properties.push(Arc::from([]));
+    }
+    let reloaded = grown.anchored_on(
+        &previous,
+        &previous.nodes.positions,
+        LayoutOptions::default(),
+    );
+    assert!(reloaded.relaid);
+    assert!(reloaded.entrances.iter().all(Option::is_none));
+    assert_eq!(reloaded.delta.added_nodes, previous.nodes.ids.len() * 2);
+
+    // A mismatched presentation is never trusted for anchoring.
+    let unchanged =
+        previous
+            .clone()
+            .anchored_on(&previous, &[Vec2::ZERO], LayoutOptions::default());
+    assert!(unchanged.relaid);
+    assert!(unchanged.delta.is_empty());
+}
+
+#[test]
+fn workspace_entrances_spring_new_nodes_into_place() {
+    let snapshot = SceneSnapshot::demo();
+    let mut workspace = GraphWorkspace::new(&snapshot);
+    let target = workspace.positions()[3];
+    let origin = workspace.positions()[0];
+    let mut entrances = vec![None; snapshot.nodes.ids.len()];
+    entrances[3] = Some(origin);
+    workspace.set_pinned(5, true);
+    entrances[5] = Some(origin);
+    workspace.enter_from(&entrances);
+    assert_eq!(workspace.positions()[3], origin);
+    assert_ne!(workspace.positions()[5], origin, "pinned nodes stay put");
+    assert!(workspace.is_moving());
+    for _ in 0..240 {
+        workspace.step(1.0 / 60.0, false);
+    }
+    assert!((workspace.positions()[3] - target).length() < 0.05);
+}

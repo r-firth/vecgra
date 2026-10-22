@@ -86,6 +86,21 @@ empty, or failed. Each request has a generation; superseded work cannot replace
 a newer scene. CPU layout and database reads never run on the GPUI application
 thread.
 
+Studio follows a database that another process is still writing. The
+read-only open coexists with the writer, and live refresh checks the file's
+metadata once a second; when a commit or a compaction swap changes it, Studio
+rereads the file off the application thread. Nodes that survive keep their
+presented positions and pins, the selection follows its element ID, and the
+camera stays put, so the view does not jump. New nodes spring out of the
+surviving neighbor they attach to, and new components with no surviving
+anchor enter just outside the existing scene. If fewer than half of the new
+scene's nodes survive, Studio lays it out from scratch instead. A search,
+path, lens, or context layout holds state for the current scene, so live
+refresh waits while one is active and the status bar shows `updates waiting`
+until the overview returns. `Cmd-R` or `reload` rereads on demand and first
+retires any such state; `Shift-Cmd-L`, `live on|off`, or the status-bar
+toggle switches live refresh, and `VECGRA_STUDIO_LIVE=0` starts with it off.
+
 The title-bar input is a maintained Unicode/IME-aware component. `Cmd-K`
 focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
 moves the ranked selection; a second Enter or click selects and frames the

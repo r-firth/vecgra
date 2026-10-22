@@ -1638,11 +1638,52 @@ impl StudioView {
             ))
             .when(pinned > 0, |this| this.child(format!("{pinned} pinned")))
             .when(moving, |this| this.child("settling"))
+            .when(self.database_path.is_some(), |this| {
+                this.child(self.render_live_refresh_toggle(cx))
+            })
             .child(div().flex_1())
             .child(self.status.clone())
             .when_some(self.load_ms, |this, load_ms| {
                 this.child(format!("{load_ms:.1} ms load+layout"))
             })
+    }
+}
+
+impl StudioView {
+    fn render_live_refresh_toggle(&self, cx: &Context<Self>) -> impl IntoElement {
+        let colors = palette();
+        let (marker, label, color) = if !self.live_refresh {
+            ("○", "live off", cx.theme().muted_foreground)
+        } else if self.reload_waiting {
+            ("●", "updates waiting", colors.copper)
+        } else if self.reload_in_progress {
+            ("●", "refreshing", colors.celadon)
+        } else {
+            ("●", "live", colors.celadon)
+        };
+        h_flex()
+            .id("live-refresh-toggle")
+            .debug_selector(|| "live-refresh-toggle".into())
+            .role(Role::Switch)
+            .aria_label("Live refresh")
+            .aria_toggled(if self.live_refresh {
+                gpui::Toggled::True
+            } else {
+                gpui::Toggled::False
+            })
+            .gap_1()
+            .px_1()
+            .rounded(px(4.0))
+            .cursor_pointer()
+            .text_color(color)
+            .hover(|this| this.bg(cx.theme().secondary_hover))
+            .tooltip(|window, cx| Tooltip::with_keystroke("Toggle live refresh", "⇧⌘L", window, cx))
+            .on_click(cx.listener(|this, _, window, cx| {
+                let enabled = !this.live_refresh;
+                this.set_live_refresh(enabled, window, cx);
+            }))
+            .child(marker)
+            .child(label)
     }
 }
 

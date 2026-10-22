@@ -20,6 +20,7 @@ vecgra-studio-core = { version = "=0.1.3", path = "../vecgra-studio-core" }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+vecgra = { version = "=0.1.3", path = "../vecgra" }
 
 [lints]
 workspace = true

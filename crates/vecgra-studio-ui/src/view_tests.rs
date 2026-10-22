@@ -697,3 +697,261 @@ fn inspector_scrolls_long_properties_without_zooming_the_canvas(cx: &mut TestApp
     });
     assert_eq!(scroll_handle.offset().y, px(0.0));
 }
+
+struct LiveDatabase {
+    path: PathBuf,
+    database: vecgra::Database,
+    files: Vec<u64>,
+}
+
+impl LiveDatabase {
+    fn new(name: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("vecgra-studio-ui-{name}-{}.vg", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let database = vecgra::Database::create(
+            &path,
+            vecgra::DatabaseOptions {
+                vector_dimension: 4,
+                similarity: vecgra::Similarity::Cosine,
+                vector_encoding: vecgra::VectorEncoding::F32,
+                sync_on_commit: false,
+            },
+        )
+        .unwrap();
+        let mut transaction = database.transaction();
+        let files: Vec<_> = (0..8)
+            .map(|index| {
+                transaction.create_node(
+                    "File",
+                    [(
+                        "path",
+                        vecgra::Value::String(format!("src/{index}.rs").into()),
+                    )],
+                    &[],
+                )
+            })
+            .collect();
+        for pair in files.windows(2) {
+            transaction.create_edge(
+                pair[0],
+                pair[1],
+                "IMPORTS",
+                std::iter::empty::<(&str, vecgra::Value)>(),
+                &[],
+            );
+        }
+        transaction.commit().unwrap();
+        Self {
+            path,
+            database,
+            files,
+        }
+    }
+
+    /// Commits one new session that edited the third file.
+    fn add_session(&self) -> u64 {
+        let mut transaction = self.database.transaction();
+        let session = transaction.create_node(
+            "Session",
+            [("title", vecgra::Value::String("Live session".into()))],
+            &[],
+        );
+        transaction.create_edge(
+            session,
+            self.files[2],
+            "EDITED",
+            std::iter::empty::<(&str, vecgra::Value)>(),
+            &[],
+        );
+        transaction.commit().unwrap();
+        session
+    }
+}
+
+impl Drop for LiveDatabase {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn open_live_window(
+    cx: &mut TestAppContext,
+    path: &std::path::Path,
+) -> gpui::WindowHandle<StudioView> {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = path.to_path_buf();
+    let window = cx.add_window(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| assert!(view.is_ready(), "{}", view.status))
+        .unwrap();
+    window
+}
+
+#[gpui::test]
+fn reload_keeps_the_presentation_and_grows_new_commits_into_place(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("reload");
+    let window = open_live_window(cx, &live.path);
+
+    let (before_positions, before_camera, pinned_id, selected_id) = window
+        .update(cx, |view, window, cx| {
+            view.set_live_refresh(false, window, cx);
+            let snapshot = view.snapshot().unwrap().clone();
+            let pinned = snapshot.node_index(live.files[4]).unwrap();
+            view.workspace
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .set_pinned(pinned, true);
+            let selected = snapshot.node_index(live.files[6]).unwrap();
+            view.set_selection(Some(SceneSelection::Node(selected)));
+            view.execute_command("zoom 3", window, cx);
+            let positions: Vec<_> = live
+                .files
+                .iter()
+                .map(|&id| {
+                    view.workspace
+                        .as_ref()
+                        .unwrap()
+                        .borrow()
+                        .position(snapshot.node_index(id).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            (positions, view.camera, live.files[4], live.files[6])
+        })
+        .unwrap();
+
+    let session = live.add_session();
+    window
+        .update(cx, |view, window, cx| {
+            view.execute_command("reload", window, cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    window
+        .update(cx, |view, _, _| {
+            let snapshot = view.snapshot().unwrap().clone();
+            let workspace = view.workspace.as_ref().unwrap().borrow();
+            assert!(snapshot.node_index(session).is_some());
+            assert_eq!(view.status.as_ref(), "Reloaded · +1 node · +1 relationship");
+            assert_eq!(view.camera, before_camera);
+            let after_positions: Vec<_> = live
+                .files
+                .iter()
+                .map(|&id| {
+                    workspace
+                        .position(snapshot.node_index(id).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(after_positions, before_positions);
+            assert!(workspace.is_pinned(snapshot.node_index(pinned_id).unwrap()));
+            assert_eq!(
+                view.selection,
+                snapshot.node_index(selected_id).map(SceneSelection::Node)
+            );
+            // The new session starts at the file it edited and springs out.
+            let anchor = workspace
+                .position(snapshot.node_index(live.files[2]).unwrap())
+                .unwrap();
+            let entering = workspace
+                .position(snapshot.node_index(session).unwrap())
+                .unwrap();
+            assert!(
+                (entering - anchor).length() < 4.0,
+                "{entering:?} vs {anchor:?}"
+            );
+            assert!(workspace.is_moving());
+            assert!(view.fingerprint.is_some());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("live");
+    let window = open_live_window(cx, &live.path);
+    window
+        .update(cx, |view, _, _| assert!(view.live_refresh))
+        .unwrap();
+
+    let first = live.add_session();
+    cx.executor().advance_clock(LIVE_REFRESH_INTERVAL);
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert!(view.snapshot().unwrap().node_index(first).is_some());
+            assert_eq!(view.status.as_ref(), "Live · +1 node · +1 relationship");
+        })
+        .unwrap();
+
+    // An active lens holds per-element state, so the new commit waits.
+    window
+        .update(cx, |view, window, cx| {
+            view.execute_command("facet node File", window, cx);
+            view.settle_presentation_for_capture();
+        })
+        .unwrap();
+    let second = live.add_session();
+    cx.executor().advance_clock(LIVE_REFRESH_INTERVAL);
+    cx.run_until_parked();
+    window
+        .update(cx, |view, window, cx| {
+            assert!(view.reload_waiting);
+            assert!(view.snapshot().unwrap().node_index(second).is_none());
+            assert!(view.active_facet.is_some());
+            view.escape(window, cx);
+            view.settle_presentation_for_capture();
+            assert!(view.lens.is_none());
+        })
+        .unwrap();
+    cx.executor().advance_clock(LIVE_REFRESH_INTERVAL);
+    cx.run_until_parked();
+    window
+        .update(cx, |view, window, cx| {
+            assert!(!view.reload_waiting);
+            assert!(view.snapshot().unwrap().node_index(second).is_some());
+
+            view.execute_command("live off", window, cx);
+            assert!(!view.live_refresh);
+        })
+        .unwrap();
+
+    let third = live.add_session();
+    cx.executor().advance_clock(LIVE_REFRESH_INTERVAL * 3);
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert!(view.snapshot().unwrap().node_index(third).is_none());
+        })
+        .unwrap();
+}
+
+#[test]
+fn reload_status_names_every_kind_of_change() {
+    assert_eq!(
+        reload_status(SceneDelta::default(), false, true),
+        "Live · up to date"
+    );
+    assert_eq!(
+        reload_status(
+            SceneDelta {
+                added_nodes: 2,
+                removed_nodes: 1,
+                updated_nodes: 3,
+                added_edges: 1,
+                removed_edges: 0,
+                updated_edges: 1,
+            },
+            true,
+            false,
+        ),
+        "Reloaded · +2 nodes · −1 node · +1 relationship · 4 updated · new layout"
+    );
+}
