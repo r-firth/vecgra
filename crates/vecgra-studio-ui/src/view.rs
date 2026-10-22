@@ -354,9 +354,6 @@ fn status_edge_name(snapshot: &SceneSnapshot, index: usize) -> String {
     )
 }
 
-/// Resolves the argument of the `open` command: surrounding quotes are
-/// stripped, `~` expands to the home directory, and relative paths resolve
-/// against the working directory Studio was started from.
 /// Whether command-box text is a command rather than a search. A command
 /// word followed by words that do not fit that command, such as
 /// "layout refresh", "release notes", or "open dialog for files", is
@@ -432,10 +429,60 @@ fn enter_hint(query: &str) -> Option<&str> {
     })
 }
 
+/// What a label or type typed in a command matches among those in view.
+#[derive(Debug, PartialEq, Eq)]
+enum LabelMatch {
+    Found(Arc<str>),
+    /// Several start with what was typed.
+    Ambiguous(Vec<Arc<str>>),
+    Missing,
+}
+
+/// Finds the label or type a command names among `counts`: exactly, then
+/// ignoring case, then as the start of exactly one, so `hide label sym`
+/// finds Symbol and `facet relationship read` finds READ.
+fn match_label(typed: &str, counts: &[(Arc<str>, usize)]) -> LabelMatch {
+    let labels = || counts.iter().map(|(label, _)| label);
+    if let Some(label) = labels().find(|label| &***label == typed) {
+        return LabelMatch::Found(label.clone());
+    }
+    let typed = typed.to_lowercase();
+    if let Some(label) = labels().find(|label| label.to_lowercase() == typed) {
+        return LabelMatch::Found(label.clone());
+    }
+    let mut starting: Vec<Arc<str>> = labels()
+        .filter(|label| label.to_lowercase().starts_with(&typed))
+        .cloned()
+        .collect();
+    match starting.len() {
+        0 => LabelMatch::Missing,
+        1 => LabelMatch::Found(starting.remove(0)),
+        _ => LabelMatch::Ambiguous(starting),
+    }
+}
+
+/// "A, B or C", for a status bar list of choices.
+fn or_list(items: &[Arc<str>]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.to_string(),
+        [rest @ .., last] => format!(
+            "{} or {last}",
+            rest.iter()
+                .map(|item| &**item)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 fn parse_zoom(factor: &str) -> Option<f32> {
     factor.parse::<f32>().ok().filter(|zoom| zoom.is_finite())
 }
 
+/// Resolves the argument of the `open` command: surrounding quotes are
+/// stripped, `~` expands to the home directory, and relative paths resolve
+/// against the working directory Studio was started from.
 fn resolve_open_argument(argument: &str) -> Option<PathBuf> {
     let argument = argument.trim();
     let argument = argument
@@ -3283,6 +3330,45 @@ impl StudioView {
         self.execute_command(&query, window, cx);
     }
 
+    /// The node label, or with `relationship` the relationship type, that a
+    /// command names, forgiving case and an unambiguous start; otherwise
+    /// says in the status bar what is in view instead.
+    fn command_label(
+        &mut self,
+        typed: &str,
+        relationship: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<Arc<str>> {
+        let (counts, kind) = if relationship {
+            (self.relationship_counts.clone(), "relationship type")
+        } else {
+            (self.node_label_counts.clone(), "node label")
+        };
+        let status = match match_label(typed, &counts) {
+            LabelMatch::Found(label) => return Some(label),
+            LabelMatch::Ambiguous(labels) => {
+                format!("{typed:?} could be {}", or_list(&labels))
+            }
+            LabelMatch::Missing if counts.is_empty() => format!("No {kind} is in view"),
+            LabelMatch::Missing => {
+                // The most common first, as the overview lists them.
+                let shown: Vec<&str> = counts.iter().take(4).map(|(label, _)| &**label).collect();
+                format!(
+                    "No {kind} matches {typed:?} · in view: {}{}",
+                    shown.join(", "),
+                    if counts.len() > shown.len() {
+                        ", …"
+                    } else {
+                        ""
+                    }
+                )
+            }
+        };
+        self.status = status.into();
+        cx.notify();
+        None
+    }
+
     pub fn execute_command(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         if !reads_as_command(query) {
             if !query.trim().is_empty() {
@@ -3358,8 +3444,16 @@ impl StudioView {
             Some("release") => self.release_selected(cx),
             Some("hide") => match (parts.next(), parts.next()) {
                 (None, _) => self.hide_selected(cx),
-                (Some("label"), Some(label)) => self.hide_label(label, cx),
-                (Some("relationship"), Some(label)) => self.hide_relationship(label, cx),
+                (Some("label"), Some(label)) => {
+                    if let Some(label) = self.command_label(label, false, cx) {
+                        self.hide_label(&label, cx);
+                    }
+                }
+                (Some("relationship"), Some(label)) => {
+                    if let Some(label) = self.command_label(label, true, cx) {
+                        self.hide_relationship(&label, cx);
+                    }
+                }
                 (Some(id), _) => {
                     let index = id.parse::<u64>().ok().and_then(|id| {
                         self.snapshot().and_then(|snapshot| snapshot.node_index(id))
@@ -3567,11 +3661,9 @@ impl StudioView {
                     cx.notify();
                     return;
                 }
-                let facet = match kind {
-                    Some("node") | Some("label") => FacetLens::NodeLabel(label.clone().into()),
-                    Some("edge") | Some("relationship") => {
-                        FacetLens::Relationship(label.clone().into())
-                    }
+                let relationship = match kind {
+                    Some("node") | Some("label") => false,
+                    Some("edge") | Some("relationship") => true,
                     _ => {
                         self.status =
                             "Expected: facet node <label> | facet relationship <label>".into();
@@ -3579,22 +3671,13 @@ impl StudioView {
                         return;
                     }
                 };
-                let exists = match &facet {
-                    FacetLens::NodeLabel(label) => self
-                        .node_label_counts
-                        .iter()
-                        .any(|(candidate, _)| candidate == label),
-                    FacetLens::Relationship(label) => self
-                        .relationship_counts
-                        .iter()
-                        .any(|(candidate, _)| candidate == label),
-                };
-                if exists {
+                if let Some(label) = self.command_label(&label, relationship, cx) {
+                    let facet = if relationship {
+                        FacetLens::Relationship(label)
+                    } else {
+                        FacetLens::NodeLabel(label)
+                    };
                     self.activate_facet(facet, window, cx);
-                } else {
-                    self.status =
-                        format!("No visible {} named {label:?}", facet.kind_label()).into();
-                    cx.notify();
                 }
             }
             Some("text") => {

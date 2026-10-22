@@ -241,7 +241,10 @@ or failed search states. A command-selected label outside the usual top-ten
 summary replaces the last row while active, so the current control never falls
 out of view. `facet node <label>` and
 `facet relationship <label>` provide the same path through the command box and
-deterministic screenshot runner.
+deterministic screenshot runner. These commands and `hide label|relationship`
+forgive case and take the start of a name when only one label or type in view
+begins with it, so `hide label sym` hides Symbol; otherwise the status bar says
+which names were meant or lists the ones in view.
 
 Exact paths are a separate evidence mode rather than another generic filter.
 For direct manipulation, selecting a node exposes `Set as path origin` in the

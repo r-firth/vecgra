@@ -367,6 +367,28 @@ fn taxonomy_facets_create_a_reversible_graph_lens(cx: &mut TestAppContext) {
             assert!(view.active_facet.is_none());
             assert!(view.lens.is_none());
 
+            view.execute_command("facet node doc", window, cx);
+            assert_eq!(
+                view.active_facet,
+                Some(FacetLens::NodeLabel("Document".into()))
+            );
+            view.execute_command("facet relationship supports", window, cx);
+            assert_eq!(
+                view.active_facet,
+                Some(FacetLens::Relationship("SUPPORTS".into()))
+            );
+            view.execute_command("facet node Planet", window, cx);
+            assert!(
+                view.status
+                    .starts_with("No node label matches \"Planet\" · in view: "),
+                "{}",
+                view.status
+            );
+            assert_eq!(
+                view.active_facet,
+                Some(FacetLens::Relationship("SUPPORTS".into()))
+            );
+
             view.execute_command("facet node Document", window, cx);
             view.execute_command("memory leak", window, cx);
             view.settle_presentation_for_capture();
@@ -1514,6 +1536,34 @@ fn command_words_followed_by_other_words_are_searched() {
     ] {
         assert!(!reads_as_command(search), "{search} is a search");
     }
+}
+
+#[test]
+fn commands_find_labels_by_case_and_start() {
+    let counts: Vec<(Arc<str>, usize)> =
+        ["File", "Symbol", "Session", "READ", "CONTAINS", "CONTINUES"]
+            .into_iter()
+            .map(|label| (Arc::from(label), 1))
+            .collect();
+    let found = |label: &str| LabelMatch::Found(label.into());
+    assert_eq!(match_label("Symbol", &counts), found("Symbol"));
+    assert_eq!(match_label("symbol", &counts), found("Symbol"));
+    assert_eq!(match_label("sym", &counts), found("Symbol"));
+    assert_eq!(match_label("read", &counts), found("READ"));
+    assert_eq!(
+        match_label("s", &counts),
+        LabelMatch::Ambiguous(vec!["Symbol".into(), "Session".into()])
+    );
+    assert_eq!(
+        match_label("cont", &counts),
+        LabelMatch::Ambiguous(vec!["CONTAINS".into(), "CONTINUES".into()])
+    );
+    assert_eq!(match_label("Directory", &counts), LabelMatch::Missing);
+    assert_eq!(
+        or_list(&["CONTAINS".into(), "CONTINUES".into()]),
+        "CONTAINS or CONTINUES"
+    );
+    assert_eq!(or_list(&["A".into(), "B".into(), "C".into()]), "A, B or C");
 }
 
 #[test]
@@ -3015,7 +3065,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     // A relationship type can be hidden too, leaving every node in place.
     view.update_in(cx, |view, window, cx| {
         let nodes = view.snapshot().unwrap().nodes.ids.len();
-        view.execute_command("hide relationship IMPORTS", window, cx);
+        view.execute_command("hide relationship imports", window, cx);
         let snapshot = view.snapshot().unwrap();
         assert_eq!(snapshot.nodes.ids.len(), nodes);
         assert!(
