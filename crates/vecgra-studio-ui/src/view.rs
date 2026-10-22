@@ -33,11 +33,13 @@ use vecgra_studio_core::{
 };
 
 mod bezel_controls;
+mod facet_menu;
 mod help;
 mod hidden;
 mod node_menu;
 mod panels;
 
+use facet_menu::FacetMenu;
 use hidden::HiddenScene;
 use node_menu::NodeMenu;
 use panels::path_direction_label;
@@ -649,6 +651,7 @@ pub struct StudioView {
     history_file: Option<PathBuf>,
     history_browse: Option<HistoryBrowse>,
     node_menu: Option<NodeMenu>,
+    facet_menu: Option<FacetMenu>,
     help_visible: bool,
     /// The node under the pointer, by ID so a reload cannot point it at
     /// another node.
@@ -784,6 +787,7 @@ impl StudioView {
             history_file,
             history_browse: None,
             node_menu: None,
+            facet_menu: None,
             help_visible: false,
             hovered_node: None,
             hover_camera: None,
@@ -1832,7 +1836,7 @@ impl StudioView {
         self.active_facet = Some(facet.clone());
         self.retarget_lens(node_scores, edge_scores, 0.9);
         self.status = format!(
-            "{} lens · {} · {match_count} matches · Esc clears",
+            "{} lens · {} · {match_count} matches · ⌫ hides · Esc clears",
             facet.kind_label(),
             facet.label()
         )
@@ -2594,7 +2598,7 @@ impl StudioView {
     }
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.node_menu.take().is_some() {
+        if self.node_menu.take().is_some() || self.facet_menu.take().is_some() {
             cx.notify();
         } else if self.help_visible {
             self.set_help_visible(false, window, cx);
@@ -3246,8 +3250,9 @@ impl StudioView {
         if self.snapshot().is_none() {
             return;
         }
-        // The menu stays where it opened; the node it names would not.
+        // A menu stays where it opened; the node it names would not.
         self.node_menu = None;
+        self.facet_menu = None;
         self.camera_motion.cancel_at(self.camera);
         let Some(bounds) = self.canvas_bounds else {
             return;
@@ -3867,6 +3872,7 @@ impl Render for StudioView {
             )
             .child(self.render_status_bar(cx))
             .children(self.render_node_menu(cx))
+            .children(self.render_facet_menu(cx))
             .when(self.help_visible, |this| {
                 this.child(self.render_help(window, cx))
             })

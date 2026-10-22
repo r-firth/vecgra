@@ -116,7 +116,9 @@ attempt to draw every record as a giant hairball.
    <type>` takes every relationship of a type off the canvas and lists it
    under the overview's relationships the same way. **Show only <label>
    nodes** in the menu, or `only label|relationship <name>`, hides every
-   other label or type in view as one step. With an overview label
+   other label or type in view as one step. Right-clicking a label or type
+   in the overview offers the same three: its lens, hiding it, and showing
+   only it. With an overview label
    or type lens on and nothing selected, Backspace hides that label or
    type. Hidden elements stay hidden across reloads and live refresh, and
    the status bar counts them. `Cmd-Z` (**Edit > Undo Hide**) takes back

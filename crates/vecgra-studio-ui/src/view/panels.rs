@@ -245,62 +245,78 @@ impl StudioView {
                                 == Some(&FacetLens::Relationship(label.clone()));
                             let facet = FacetLens::Relationship(label.clone());
                             let selector = format!("relationship-facet:{label}");
-                            div().w_full().debug_selector(move || selector).child(
-                                Button::new(format!("relationship-facet:{label}"))
-                                    .ghost()
-                                    .small()
-                                    .compact()
-                                    .w_full()
-                                    .label(label.to_string())
-                                    .accessibility_id(format!("relationship-facet:{label}"))
-                                    .toggled(active)
-                                    .selected(active)
-                                    .cursor_pointer()
-                                    .when(active, |this| {
-                                        this.border_l_2().border_color(cx.theme().ring)
-                                    })
-                                    .on_click(cx.listener(move |this, event, window, cx| {
-                                        this.focus_graph_after(event, window, cx);
-                                        this.activate_facet(facet.clone(), window, cx);
-                                    }))
-                                    .child(
-                                        h_flex()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .gap_1()
-                                            .items_center()
-                                            .child(
-                                                div()
-                                                    .size(px(7.0))
-                                                    .rounded_full()
-                                                    .bg(relationship_color(label)),
-                                            )
-                                            .child(div().flex_1())
-                                            .when(active, |this| {
-                                                this.child(
+                            let menu_facet = facet.clone();
+                            div()
+                                .w_full()
+                                .debug_selector(move || selector)
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        this.open_facet_menu(
+                                            menu_facet.clone(),
+                                            event.position,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .child(
+                                    Button::new(format!("relationship-facet:{label}"))
+                                        .ghost()
+                                        .small()
+                                        .compact()
+                                        .w_full()
+                                        .label(label.to_string())
+                                        .accessibility_id(format!("relationship-facet:{label}"))
+                                        .toggled(active)
+                                        .selected(active)
+                                        .cursor_pointer()
+                                        .when(active, |this| {
+                                            this.border_l_2().border_color(cx.theme().ring)
+                                        })
+                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                            this.focus_graph_after(event, window, cx);
+                                            this.activate_facet(facet.clone(), window, cx);
+                                        }))
+                                        .child(
+                                            h_flex()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .gap_1()
+                                                .items_center()
+                                                .child(
                                                     div()
-                                                        .font_family(
-                                                            cx.theme().mono_font_family.clone(),
-                                                        )
-                                                        .text_xs()
-                                                        .font_weight(gpui::FontWeight::BOLD)
-                                                        .text_color(cx.theme().ring)
-                                                        .child("LENS"),
+                                                        .size(px(7.0))
+                                                        .rounded_full()
+                                                        .bg(relationship_color(label)),
                                                 )
-                                            })
-                                            .when(!active, |this| {
-                                                this.child(
-                                                    div()
-                                                        .font_family(
-                                                            cx.theme().mono_font_family.clone(),
-                                                        )
-                                                        .text_xs()
-                                                        .text_color(cx.theme().muted_foreground)
-                                                        .child(format_count(*count)),
-                                                )
-                                            }),
-                                    ),
-                            )
+                                                .child(div().flex_1())
+                                                .when(active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .font_weight(gpui::FontWeight::BOLD)
+                                                            .text_color(cx.theme().ring)
+                                                            .child("LENS"),
+                                                    )
+                                                })
+                                                .when(!active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(format_count(*count)),
+                                                    )
+                                                }),
+                                        ),
+                                )
                         }))
                         .children(self.hidden_relationship_rows(cx)),
                 )
@@ -319,53 +335,72 @@ impl StudioView {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::NodeLabel(label.clone()));
                             let facet = FacetLens::NodeLabel(label.clone());
-                            Button::new(format!("node-label-facet:{label}"))
-                                .ghost()
-                                .small()
-                                .compact()
+                            let selector = format!("node-label-facet:{label}");
+                            let menu_facet = facet.clone();
+                            div()
                                 .w_full()
-                                .label(label.to_string())
-                                .accessibility_id(format!("node-label-facet:{label}"))
-                                .toggled(active)
-                                .selected(active)
-                                .cursor_pointer()
-                                .when(active, |this| {
-                                    this.border_l_2().border_color(cx.theme().ring)
-                                })
-                                .on_click(cx.listener(move |this, event, window, cx| {
-                                    this.focus_graph_after(event, window, cx);
-                                    this.activate_facet(facet.clone(), window, cx);
-                                }))
+                                .debug_selector(move || selector)
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        this.open_facet_menu(
+                                            menu_facet.clone(),
+                                            event.position,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
                                 .child(
-                                    h_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .items_center()
-                                        .child(div().flex_1())
+                                    Button::new(format!("node-label-facet:{label}"))
+                                        .ghost()
+                                        .small()
+                                        .compact()
+                                        .w_full()
+                                        .label(label.to_string())
+                                        .accessibility_id(format!("node-label-facet:{label}"))
+                                        .toggled(active)
+                                        .selected(active)
+                                        .cursor_pointer()
                                         .when(active, |this| {
-                                            this.child(
-                                                div()
-                                                    .mr_2()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(cx.theme().ring)
-                                                    .child("LENS"),
-                                            )
+                                            this.border_l_2().border_color(cx.theme().ring)
                                         })
-                                        .when(!active, |this| {
-                                            this.child(
-                                                div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
+                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                            this.focus_graph_after(event, window, cx);
+                                            this.activate_facet(facet.clone(), window, cx);
+                                        }))
+                                        .child(
+                                            h_flex()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .items_center()
+                                                .child(div().flex_1())
+                                                .when(active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .mr_2()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .font_weight(gpui::FontWeight::BOLD)
+                                                            .text_color(cx.theme().ring)
+                                                            .child("LENS"),
                                                     )
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(format_count(*count)),
-                                            )
-                                        }),
+                                                })
+                                                .when(!active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(format_count(*count)),
+                                                    )
+                                                }),
+                                        ),
                                 )
                         }))
                         .children(self.hidden_label_rows(cx)),

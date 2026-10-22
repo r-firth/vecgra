@@ -3226,3 +3226,95 @@ fn clicking_empty_canvas_clears_the_selection_for_back_to_restore(cx: &mut TestA
         assert_eq!(view.status.as_ref(), "Before");
     });
 }
+
+#[gpui::test]
+fn right_clicking_an_overview_row_offers_its_lens_and_hiding(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::init_bezel(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    let right_click = |cx: &mut gpui::VisualTestContext, selector: &'static str| {
+        draw(cx);
+        let position = cx.debug_bounds(selector).unwrap().center();
+        cx.simulate_event(gpui::MouseDownEvent {
+            button: MouseButton::Right,
+            position,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: MouseButton::Right,
+            position,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+        });
+        draw(cx);
+    };
+    let items = |view: &StudioView| -> Vec<String> {
+        view.facet_menu_items()
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect()
+    };
+
+    right_click(cx, "node-label-facet:Document");
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(
+            items(view),
+            [
+                "Lens on Document",
+                "Hide all 24 Document nodes",
+                "Show only Document nodes"
+            ]
+        );
+    });
+    let show_only = cx.debug_bounds("facet-menu:ShowOnly").unwrap();
+    cx.simulate_click(show_only.center(), Modifiers::none());
+    view.update(cx, |view, cx| {
+        assert!(view.facet_menu.is_none());
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(snapshot.nodes.ids.len(), 24);
+        assert!(
+            snapshot
+                .nodes
+                .labels
+                .iter()
+                .all(|label| &**label == "Document")
+        );
+        view.undo_hide(cx);
+        assert!(view.hidden.is_none());
+    });
+
+    right_click(cx, "relationship-facet:SUPPORTS");
+    let hide = cx.debug_bounds("facet-menu:Hide").unwrap();
+    cx.simulate_click(hide.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert!(
+            snapshot
+                .edges
+                .labels
+                .iter()
+                .all(|label| &**label != "SUPPORTS")
+        );
+        assert!(view.status.starts_with("Hid "), "{}", view.status);
+    });
+
+    // Escape closes the menu without choosing anything.
+    right_click(cx, "node-label-facet:Document");
+    view.update_in(cx, |view, window, cx| {
+        assert!(view.facet_menu.is_some());
+        view.escape(window, cx);
+        assert!(view.facet_menu.is_none());
+        assert!(view.active_facet.is_none());
+    });
+}

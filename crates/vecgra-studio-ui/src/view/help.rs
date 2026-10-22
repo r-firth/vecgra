@@ -22,7 +22,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("⌘[  ⌘]", "Back and forward"),
             ("⌘C", "Copy the selection as text"),
             ("⇧ click", "Trace a path from the selection"),
-            ("Right click", "A node's actions"),
+            ("Right click", "A node's or label's actions"),
             ("Tab  Enter", "Walk the inspector by keyboard"),
             ("⇧⌘R", "Release a pinned node"),
             ("⌫  ⌘Z", "Hide, and undo hiding"),
