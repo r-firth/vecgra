@@ -1261,6 +1261,7 @@ impl StudioView {
                         this.fingerprint = fingerprint;
                         if let (Some(hidden), Some(full)) = (this.hidden.as_mut(), full) {
                             hidden.full = Arc::new(full);
+                            hidden.recount();
                         }
                         this.install_reloaded_scene(reloaded, &pinned_ids, selected);
                     }
@@ -1927,6 +1928,7 @@ impl StudioView {
                         .collect();
                     (snapshot, overview_positions, pinned_ids)
                 });
+        let hidden = self.hidden.as_ref().map(|scene| scene.hidden.clone());
 
         let Some(database_path) = self.database_path.clone() else {
             self.path_state = PathState::Failed {
@@ -1962,6 +1964,16 @@ impl StudioView {
                     let enriched = match enrichment_input {
                         Some((snapshot, overview_positions, pinned_ids)) => snapshot
                             .including_evidence_path(&report, &overview_positions)?
+                            // Nodes the user hid stay hidden even when the
+                            // path runs through them; the rail still names them.
+                            .map(|enriched| match &hidden {
+                                Some(hidden) => enriched.without_nodes(hidden),
+                                None => enriched,
+                            })
+                            .filter(|enriched| {
+                                enriched.nodes.ids.len() != snapshot.nodes.ids.len()
+                                    || enriched.edges.ids.len() != snapshot.edges.ids.len()
+                            })
                             .map(|snapshot| (snapshot, pinned_ids)),
                         None => None,
                     };
@@ -2676,23 +2688,33 @@ impl StudioView {
             return;
         };
         let Some(selection) = hit.scene_selection(snapshot) else {
-            self.status = format!(
-                "{} {} matches, but is outside this bounded graph view",
-                hit.kind_label().to_lowercase(),
-                hit.id()
-            )
+            let hidden = self
+                .hidden
+                .as_ref()
+                .is_some_and(|scene| hit.scene_selection(&scene.full).is_some());
+            self.status = if hidden {
+                format!("{} is hidden · ⇧⌘H shows hidden nodes", hit.title)
+            } else {
+                format!(
+                    "{} matches, but is outside this bounded graph view",
+                    hit.title
+                )
+            }
             .into();
             cx.notify();
             return;
+        };
+        let name = match selection {
+            SceneSelection::Node(index) => {
+                format!("{} · {}", status_node_name(snapshot, index), hit.label)
+            }
+            SceneSelection::Edge(index) => status_edge_name(snapshot, index),
         };
         self.set_selection(Some(selection));
         self.selected_search_result = index;
         self.focus_search_result(selection, window, cx);
         self.status = format!(
-            "Focused {} {} · {} · {:.0}% match · {}-element context",
-            hit.kind_label().to_lowercase(),
-            hit.id(),
-            hit.label,
+            "Focused {name} · {:.0}% match · {}-element context",
             hit.score * 100.0,
             self.snapshot()
                 .and_then(|snapshot| snapshot.focus_neighborhood(selection, 96))

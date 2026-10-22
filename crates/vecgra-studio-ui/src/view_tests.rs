@@ -2882,6 +2882,53 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(kept_position(view), before);
     });
 
+    // Search still finds it, and choosing it says why it is not shown.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("3.rs", window, cx);
+    });
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        let SearchState::Ready(report) = &view.search_state else {
+            panic!("the search finishes");
+        };
+        let hit = report
+            .hits
+            .iter()
+            .position(|hit| hit.title.as_ref() == "src/3.rs")
+            .expect("the hidden file matches");
+        view.activate_search_result(hit, window, cx);
+        assert_eq!(
+            view.status.as_ref(),
+            "src/3.rs is hidden · ⇧⌘H shows hidden nodes"
+        );
+        // A result in view is named as the status bar names a selection.
+        view.execute_command("2.rs", window, cx);
+    });
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        view.activate_search_result(0, window, cx);
+        assert!(
+            view.status.starts_with("Focused 2.rs · File · "),
+            "{}",
+            view.status
+        );
+        // A path through it is traced in full, but it stays hidden.
+        view.execute_command(
+            &format!("path {} {}", live.files[2], live.files[4]),
+            window,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        assert_eq!(report.path.as_ref().unwrap().steps.len(), 2);
+        assert_eq!(view.snapshot().unwrap().node_index(middle), None);
+        assert_eq!(view.hidden_count(), 1);
+    });
+
     // So does `hide <id>`, and the status bar counts them.
     view.update_in(cx, |view, window, cx| {
         view.execute_command(&format!("hide {other}"), window, cx);

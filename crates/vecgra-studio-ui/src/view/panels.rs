@@ -766,7 +766,12 @@ impl StudioView {
                                         .line_height(px(16.0))
                                         .text_color(cx.theme().warning)
                                         .child(format!(
-                                            "Exact database result; sampled canvas shows {visible_nodes}/{total_nodes} nodes and {visible_edges}/{total_edges} relationships."
+                                            "Exact database result; {} shows {visible_nodes}/{total_nodes} nodes and {visible_edges}/{total_edges} relationships.",
+                                            if self.hidden_count() > 0 {
+                                                "with nodes hidden, the canvas"
+                                            } else {
+                                                "sampled canvas"
+                                            }
                                         )),
                                 )
                             }),

@@ -17,20 +17,28 @@ pub(super) struct HiddenScene {
     /// Where each hidden node was laid out, so it comes back to the same
     /// place.
     positions: HashMap<u64, Vec2>,
+    /// How many of the full scene's nodes are hidden.
+    count: usize,
+}
+
+impl HiddenScene {
+    /// Counts the hidden nodes again, after what is hidden or the full scene
+    /// changes.
+    pub(super) fn recount(&mut self) {
+        let nodes = &self.full.nodes;
+        self.count = nodes
+            .ids
+            .iter()
+            .zip(&nodes.labels)
+            .filter(|(id, label)| self.hidden.hides(**id, label))
+            .count();
+    }
 }
 
 impl StudioView {
     /// How many of the scene's nodes are hidden.
     pub(super) fn hidden_count(&self) -> usize {
-        match (&self.hidden, self.snapshot()) {
-            (Some(hidden), Some(snapshot)) => hidden
-                .full
-                .nodes
-                .ids
-                .len()
-                .saturating_sub(snapshot.nodes.ids.len()),
-            _ => 0,
-        }
+        self.hidden.as_ref().map_or(0, |scene| scene.count)
     }
 
     pub(super) fn hide_selected(&mut self, cx: &mut Context<Self>) {
@@ -105,8 +113,10 @@ impl StudioView {
             full: current.clone(),
             hidden: HiddenNodes::default(),
             positions: HashMap::new(),
+            count: 0,
         });
         add(&mut scene.hidden);
+        scene.recount();
         for (index, &id) in current.nodes.ids.iter().enumerate() {
             if scene.hidden.hides(id, &current.nodes.labels[index])
                 && let Some(&position) = overview.get(index)
@@ -159,6 +169,7 @@ impl StudioView {
             };
             (Arc::unwrap_or_clone(scene.full), scene.positions)
         } else {
+            scene.recount();
             (
                 scene.full.without_nodes(&scene.hidden),
                 scene.positions.clone(),
