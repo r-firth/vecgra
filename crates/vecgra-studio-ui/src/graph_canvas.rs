@@ -12,6 +12,7 @@ use lyon_geom::{
 };
 use vecgra_studio_core::{
     Camera, DetailLevel, GraphWorkspace, Rect, SceneSelection, SceneSnapshot, Vec2, detail_level,
+    split_path_title,
 };
 
 use crate::theme::{
@@ -24,6 +25,8 @@ const COMMUNITY_EDGE_BUDGET: usize = 18_000;
 const REPRESENTATIVE_CAPTION_BUDGET: usize = 10;
 const LOCAL_CAPTION_BUDGET: usize = 24;
 const LOCAL_ARROW_BUDGET: usize = 48;
+const NODE_CAPTION_BUDGET: usize = 14;
+const NODE_CAPTION_CHARS: usize = 30;
 
 struct PaintNode {
     point: Point<Pixels>,
@@ -40,6 +43,13 @@ struct PaintNode {
 struct PaintPath {
     path: Path<Pixels>,
     color: Hsla,
+}
+
+/// A node's name drawn beside it.
+struct PaintNodeCaption {
+    text: SharedString,
+    origin: Point<Pixels>,
+    strong: bool,
 }
 
 /// A specialised tessellator for the canvas's disconnected straight strokes.
@@ -212,6 +222,7 @@ struct PaintData {
     arrows: Vec<PaintArrow>,
     captions: Vec<PaintCaption>,
     nodes: Vec<PaintNode>,
+    node_captions: Vec<PaintNodeCaption>,
 }
 
 struct ScenePresentation<'a> {
@@ -616,6 +627,25 @@ fn prepare_scene(
             .collect(),
     };
 
+    let node_captions = if level == DetailLevel::Overview {
+        Vec::new()
+    } else {
+        node_captions(
+            snapshot,
+            &projected,
+            &captions,
+            &NodePaintContext {
+                selected: selected_node,
+                dragging: presentation.dragging,
+                emphasis,
+                path_endpoints: presentation.path_endpoints,
+                bounds,
+                viewport,
+            },
+            level,
+        )
+    };
+
     PaintData {
         edge_paths,
         emphasis_edge_paths,
@@ -624,7 +654,137 @@ fn prepare_scene(
         arrows,
         captions,
         nodes,
+        node_captions,
     }
+}
+
+/// Chooses which nodes to name on the canvas: the selection and path
+/// endpoints always, then the selection's neighbors by degree, the strongest
+/// search matches, and, when zoomed in to elements with nothing else to
+/// name, the best-connected visible nodes. A name that would overlap one
+/// already placed, or a relationship caption, is skipped, and at most
+/// [`NODE_CAPTION_BUDGET`] are drawn.
+fn node_captions(
+    snapshot: &SceneSnapshot,
+    projected: &[Vec2],
+    relationship_captions: &[PaintCaption],
+    context: &NodePaintContext<'_>,
+    level: DetailLevel,
+) -> Vec<PaintNodeCaption> {
+    let degrees = &snapshot.nodes.degrees;
+    let mut candidates: Vec<(usize, bool)> = Vec::new();
+    let mut push = |index: usize, strong: bool| {
+        if !candidates.iter().any(|&(existing, _)| existing == index) {
+            candidates.push((index, strong));
+        }
+    };
+    if let Some(selected) = context.selected {
+        push(selected, true);
+    }
+    if let Some(endpoints) = context.path_endpoints {
+        push(endpoints.start, true);
+        if let Some(end) = endpoints.end {
+            push(end, true);
+        }
+    }
+    if let Some(selected) = context.selected {
+        let mut neighbors: Vec<usize> = snapshot
+            .edges
+            .sources
+            .iter()
+            .zip(&snapshot.edges.targets)
+            .filter_map(|(&source, &target)| {
+                let (source, target) = (source as usize, target as usize);
+                match (source == selected, target == selected) {
+                    (true, false) => Some(target),
+                    (false, true) => Some(source),
+                    _ => None,
+                }
+            })
+            .collect();
+        neighbors
+            .sort_unstable_by_key(|&neighbor| (std::cmp::Reverse(degrees[neighbor]), neighbor));
+        neighbors.dedup();
+        for neighbor in neighbors {
+            push(neighbor, false);
+        }
+    }
+    if let Some(lens) = context.emphasis {
+        let mut matches: Vec<(usize, f32)> = (0..projected.len())
+            .map(|index| (index, lens.node_score(index)))
+            .filter(|&(_, score)| score > 0.48)
+            .collect();
+        matches.sort_unstable_by(|left, right| right.1.total_cmp(&left.1));
+        for (index, _) in matches {
+            push(index, false);
+        }
+    }
+    if level == DetailLevel::Elements && context.selected.is_none() && context.emphasis.is_none() {
+        let mut visible: Vec<usize> = (0..projected.len())
+            .filter(|&index| point_is_visible(projected[index], context.viewport, 0.0))
+            .collect();
+        visible.sort_unstable_by_key(|&index| (std::cmp::Reverse(degrees[index]), index));
+        for index in visible.into_iter().take(NODE_CAPTION_BUDGET * 4) {
+            push(index, false);
+        }
+    }
+
+    // Widths here are estimates of the shaped text; they only have to keep
+    // names apart.
+    let mut placed: Vec<Bounds<Pixels>> = relationship_captions
+        .iter()
+        .map(|caption| {
+            let width = px(caption.text.chars().count() as f32 * 6.0 + 12.0);
+            Bounds {
+                origin: point(caption.center.x - width / 2.0, caption.center.y - px(9.0)),
+                size: size(width, px(18.0)),
+            }
+        })
+        .collect();
+    let mut captions = Vec::new();
+    for (index, strong) in candidates {
+        if captions.len() >= NODE_CAPTION_BUDGET {
+            break;
+        }
+        let position = projected[index];
+        if !point_is_visible(position, context.viewport, 0.0) {
+            continue;
+        }
+        let text = node_caption_text(&snapshot.node_title(index));
+        let width = text.chars().count() as f32 * 6.2 + 10.0;
+        // Names sit right of their node unless that would run off the canvas.
+        let offset_x = if position.x + 11.0 + width > context.viewport.x - 4.0 {
+            -11.0 - width
+        } else {
+            11.0
+        };
+        let origin = absolute_point(context.bounds, position + Vec2::new(offset_x, -8.0));
+        let area = Bounds {
+            origin,
+            size: size(px(width), px(16.0)),
+        };
+        if !strong && placed.iter().any(|other| other.intersects(&area)) {
+            continue;
+        }
+        placed.push(area);
+        captions.push(PaintNodeCaption {
+            text,
+            origin,
+            strong,
+        });
+    }
+    captions
+}
+
+/// A canvas-length name: a path's file name, or the title cut to fit.
+fn node_caption_text(title: &str) -> SharedString {
+    let name = split_path_title(title).map_or(title, |(name, _)| name);
+    if name.chars().count() <= NODE_CAPTION_CHARS {
+        return SharedString::new(name);
+    }
+    let mut short: String = name.chars().take(NODE_CAPTION_CHARS - 1).collect();
+    short.push('…');
+    short.into()
 }
 
 fn aggregate_nodes(
@@ -824,6 +984,44 @@ fn paint_scene(bounds: Bounds<Pixels>, scene: PaintData, window: &mut Window, cx
             }
         }
     });
+
+    for caption in scene.node_captions {
+        paint_node_caption(caption, window, cx);
+    }
+}
+
+fn paint_node_caption(caption: PaintNodeCaption, window: &mut Window, cx: &mut App) {
+    let font_size = px(10.5);
+    let line_height = px(14.0);
+    let text_run = TextRun {
+        len: caption.text.len(),
+        font: window
+            .text_style()
+            .highlight(if caption.strong {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::NORMAL
+            })
+            .font(),
+        color: palette()
+            .mist
+            .opacity(if caption.strong { 1.0 } else { 0.86 }),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window
+        .text_system()
+        .shape_line(caption.text, font_size, &[text_run], None);
+    window.paint_quad(fill(
+        Bounds {
+            origin: caption.origin,
+            size: size(line.width() + px(8.0), line_height + px(2.0)),
+        },
+        palette().graphite.opacity(0.72),
+    ));
+    let origin = point(caption.origin.x + px(4.0), caption.origin.y + px(1.0));
+    let _ = line.paint(origin, line_height, TextAlign::Left, None, window, cx);
 }
 
 fn lerp_score(from: f32, to: f32, mix: f32) -> f32 {
@@ -1036,5 +1234,107 @@ mod line_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod caption_tests {
+    use super::*;
+
+    fn context(selected: Option<usize>, viewport: Vec2) -> NodePaintContext<'static> {
+        NodePaintContext {
+            selected,
+            dragging: None,
+            emphasis: None,
+            path_endpoints: None,
+            bounds: Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(viewport.x), px(viewport.y)),
+            },
+            viewport,
+        }
+    }
+
+    #[test]
+    fn the_selection_and_its_neighbors_are_named_without_overlapping() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let viewport = Vec2::new(1_200.0, 900.0);
+        let camera = Camera::fit(snapshot.bounds);
+        let projected: Vec<Vec2> = snapshot
+            .nodes
+            .positions
+            .iter()
+            .map(|&position| camera.project(position, snapshot.bounds, viewport))
+            .collect();
+        let selected = (0..projected.len())
+            .max_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+
+        let captions = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            &context(Some(selected), viewport),
+            DetailLevel::Communities,
+        );
+        assert!(!captions.is_empty() && captions.len() <= NODE_CAPTION_BUDGET);
+        assert!(captions[0].strong, "the selection is named first");
+        assert_eq!(
+            captions[0].text,
+            node_caption_text(&snapshot.node_title(selected))
+        );
+        assert!(captions[1..].iter().all(|caption| !caption.strong));
+        let areas: Vec<_> = captions
+            .iter()
+            .map(|caption| Bounds {
+                origin: caption.origin,
+                size: size(
+                    px(caption.text.chars().count() as f32 * 6.2 + 10.0),
+                    px(16.0),
+                ),
+            })
+            .collect();
+        for (index, area) in areas.iter().enumerate().skip(1) {
+            assert!(
+                areas[..index].iter().all(|other| !other.intersects(area)),
+                "{} overlaps an earlier name",
+                captions[index].text
+            );
+        }
+
+        // A node at the right edge is named on its left.
+        let mut edge = projected.clone();
+        edge[selected] = Vec2::new(viewport.x - 6.0, viewport.y / 2.0);
+        let flipped = node_captions(
+            &snapshot,
+            &edge,
+            &[],
+            &context(Some(selected), viewport),
+            DetailLevel::Communities,
+        );
+        let right = flipped[0].origin.x + px(flipped[0].text.chars().count() as f32 * 6.2 + 10.0);
+        assert!(flipped[0].origin.x < px(viewport.x - 6.0) && right <= px(viewport.x));
+
+        let unselected = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            &context(None, viewport),
+            DetailLevel::Communities,
+        );
+        assert!(
+            unselected.is_empty(),
+            "nothing is named at community zoom without a reason"
+        );
+    }
+
+    #[test]
+    fn long_titles_and_paths_are_cut_to_a_canvas_name() {
+        assert_eq!(node_caption_text("crates/vecgra/src/lib.rs"), "lib.rs");
+        let long = "a".repeat(NODE_CAPTION_CHARS + 5);
+        let caption = node_caption_text(&long);
+        assert_eq!(caption.chars().count(), NODE_CAPTION_CHARS);
+        assert!(caption.ends_with('…'));
     }
 }
