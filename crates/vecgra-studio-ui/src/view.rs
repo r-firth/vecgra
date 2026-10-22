@@ -2739,6 +2739,42 @@ impl StudioView {
         }
     }
 
+    /// Points out a relationship on the canvas while a list row that names
+    /// it is hovered: its ends are ringed and its card sits at the middle of
+    /// its line. Relationships whose middle is off the canvas get no card.
+    fn preview_edge(&mut self, edge: u64, hovered: bool, cx: &mut Context<Self>) {
+        if !hovered {
+            if self.hovered_edge.is_some_and(|hovered| hovered.id == edge) {
+                self.set_hovered_node(None, cx);
+            }
+            return;
+        }
+        let anchor = self
+            .snapshot()
+            .zip(self.workspace.as_ref())
+            .zip(self.canvas_bounds)
+            .and_then(|((snapshot, workspace), bounds)| {
+                let index = snapshot.edge_index(edge)?;
+                let workspace = workspace.borrow();
+                let source = workspace.position(snapshot.edges.sources[index] as usize)?;
+                let target = workspace.position(snapshot.edges.targets[index] as usize)?;
+                let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+                let anchor =
+                    self.camera
+                        .project((source + target) * 0.5, self.world_bounds, viewport);
+                (anchor.x >= 0.0
+                    && anchor.y >= 0.0
+                    && anchor.x <= viewport.x
+                    && anchor.y <= viewport.y)
+                    .then_some(anchor)
+            });
+        let Some(anchor) = anchor else {
+            return;
+        };
+        self.set_hovered_node(None, cx);
+        self.hovered_edge = Some(HoveredEdge { id: edge, anchor });
+    }
+
     /// Sets the hovered node, which also ends any relationship hover.
     fn set_hovered_node(&mut self, node: Option<u64>, cx: &mut Context<Self>) {
         self.hover_camera = None;

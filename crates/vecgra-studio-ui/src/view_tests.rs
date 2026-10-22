@@ -1063,6 +1063,61 @@ fn shift_click_traces_a_path_from_the_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn path_steps_name_their_nodes_and_point_out_their_relationship(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("step-preview");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let command = format!("path {} {}", live.files[0], live.files[3]);
+    view.update_in(cx, |view, window, cx| {
+        view.settle_presentation_for_capture();
+        view.execute_command(&command, window, cx);
+    });
+    cx.run_until_parked();
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let step_edge = view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        let path = report.path.as_ref().unwrap();
+        assert_eq!(
+            panels::evidence_step_names(path, 0).as_deref(),
+            Some("0.rs → 1.rs")
+        );
+        assert_eq!(
+            panels::evidence_step_names(path, 2).as_deref(),
+            Some("2.rs → 3.rs")
+        );
+        assert_eq!(panels::evidence_step_names(path, 3), None);
+        path.steps[1].edge_id
+    });
+
+    let row = cx.debug_bounds("evidence-path-step-1").unwrap();
+    cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.hovered_edge.map(|hovered| hovered.id), Some(step_edge));
+        assert_eq!(view.hovered_node, None);
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("graph-hover-edge-card").is_some());
+    assert!(cx.debug_bounds("graph-hover-ring").is_some());
+
+    // Leaving the row for somewhere other than the canvas ends the preview.
+    cx.simulate_mouse_move(point(px(4.0), px(896.0)), None, Modifiers::none());
+    view.read_with(&*cx, |view, _| assert!(view.hovered_edge.is_none()));
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);

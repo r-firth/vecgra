@@ -773,8 +773,10 @@ impl StudioView {
                                     orientation
                                 );
                                 let ring = cx.theme().ring;
+                                let edge_id = step.edge_id;
                                 div()
                                     .id(("evidence-path-step", step.edge_id))
+                                    .debug_selector(move || format!("evidence-path-step-{index}"))
                                     .focusable()
                                     .tab_stop(true)
                                     .role(Role::Button)
@@ -799,6 +801,9 @@ impl StudioView {
                                     .focus(move |style| style.border_1().border_color(ring))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.activate_evidence_step(index, window, cx);
+                                    }))
+                                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                        this.preview_edge(edge_id, *hovered, cx);
                                     }))
                                     .on_key_down(cx.listener(
                                         move |this, event: &gpui::KeyDownEvent, window, cx| {
@@ -856,6 +861,17 @@ impl StudioView {
                                                                 .child(step.label.to_string()),
                                                         )
                                                     })
+                                                    .when_some(
+                                                        evidence_step_names(path, index),
+                                                        |this, names| {
+                                                            this.child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .truncate()
+                                                                    .child(names),
+                                                            )
+                                                        },
+                                                    )
                                                     .child(
                                                         div()
                                                             .font_family(cx.theme().mono_font_family.clone())
@@ -2439,6 +2455,22 @@ const fn path_direction_compact_label(direction: PathDirection) -> &'static str 
         PathDirection::Incoming => "TO ORIGIN",
         PathDirection::Both => "EITHER WAY",
     }
+}
+
+/// A path step's two nodes by name, in path order, with file paths shortened
+/// to their file name.
+pub(super) fn evidence_step_names(
+    path: &vecgra_studio_core::EvidencePath,
+    index: usize,
+) -> Option<String> {
+    let short = |title: &str| {
+        split_path_title(title)
+            .map_or(title, |(name, _)| name)
+            .to_owned()
+    };
+    let from = path.nodes.get(index)?;
+    let to = path.nodes.get(index + 1)?;
+    Some(format!("{} → {}", short(&from.title), short(&to.title)))
 }
 
 fn path_hop_button(max_hops: usize, selected_max_hops: usize, cx: &Context<StudioView>) -> Button {

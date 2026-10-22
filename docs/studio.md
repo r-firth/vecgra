@@ -225,9 +225,12 @@ rail: endpoints, each relationship step, traversal orientation, plan, hop
 bound, elapsed time, and visited/read work map directly to the bright directed
 chain on the canvas. A compact planner ledger splits expanded nodes into
 Celadon `FROM` and Copper `TO` counts connected by a rule, so adaptive work is
-inspectable without relying on color or an ambiguous percentage. Step rows are
-stable, focusable controls; pointer, Enter, or Space selects and frames the
-matching relationship for inspection.
+inspectable without relying on color or an ambiguous percentage. Each step row
+names its two nodes in path order above their IDs, so intermediate nodes read
+as more than numbers. Step rows are stable, focusable controls; pointer,
+Enter, or Space selects and frames the matching relationship for inspection,
+and hovering a row points the relationship out on the canvas with its card and
+rings on both ends.
 
 The path state owns both a generation and its held task. A new path, search,
 facet, context, Escape, or Overview retires stale work and prevents a late
