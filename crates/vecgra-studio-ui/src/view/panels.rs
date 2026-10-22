@@ -694,7 +694,33 @@ impl StudioView {
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
                                             .child(summary),
-                                    ),
+                                    )
+                                    .when_some(evidence_path_text(report), |this, text| {
+                                        this.child(
+                                            div()
+                                                .debug_selector(|| "evidence-path-copy".into())
+                                                .child(
+                                                    Button::new("evidence-path-copy")
+                                                        .ghost()
+                                                        .small()
+                                                        .compact()
+                                                        .label("Copy")
+                                                        .tooltip("Copy the path as text")
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                cx.write_to_clipboard(
+                                                                    gpui::ClipboardItem::new_string(
+                                                                        text.clone(),
+                                                                    ),
+                                                                );
+                                                                this.status =
+                                                                    "Copied the path as text".into();
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                ),
+                                        )
+                                    }),
                             )
                             .child(path_endpoint_card("FROM", &report.start, palette().celadon, cx))
                             .child(path_endpoint_card("TO", &report.end, palette().copper, cx))
@@ -2472,6 +2498,42 @@ const fn path_direction_compact_label(direction: PathDirection) -> &'static str 
         PathDirection::Incoming => "TO ORIGIN",
         PathDirection::Both => "EITHER WAY",
     }
+}
+
+/// A found path as plain text to paste into notes or a prompt: one numbered
+/// line per node, and between them the relationship, with `→` when it is
+/// stored in path order and `←` when the path follows it backwards.
+pub(super) fn evidence_path_text(report: &EvidencePathReport) -> Option<String> {
+    let path = report.path.as_ref()?;
+    let hops = path.steps.len();
+    let mut text = format!(
+        "Path from {} to {}: {}\n",
+        report.start.title,
+        report.end.title,
+        match hops {
+            0 => "same node".to_string(),
+            1 => "1 hop".to_string(),
+            hops => format!("{hops} hops"),
+        }
+    );
+    for (index, node) in path.nodes.iter().enumerate() {
+        text.push_str(&format!(
+            "{}. {} ({}, node:{})\n",
+            index + 1,
+            node.title,
+            node.label,
+            node.id
+        ));
+        if let Some(step) = path.steps.get(index) {
+            text.push_str(&format!(
+                "   {} {} (relationship:{})\n",
+                if step.forward { "→" } else { "←" },
+                step.label,
+                step.edge_id
+            ));
+        }
+    }
+    Some(text)
 }
 
 /// A path step's two nodes by name, in path order, with file paths shortened

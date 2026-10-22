@@ -1232,6 +1232,56 @@ fn enter_activates_the_focused_path_step(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_found_path_copies_as_text(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("path-copy");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    // Traced against the stored direction, so both steps run backwards.
+    let command = format!("path {} {}", live.files[2], live.files[0]);
+    view.update_in(cx, |view, window, cx| {
+        view.settle_presentation_for_capture();
+        view.execute_command(&command, window, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let edges: Vec<u64> = view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        let path = report.path.as_ref().unwrap();
+        path.steps.iter().map(|step| step.edge_id).collect()
+    });
+
+    let copy = cx.debug_bounds("evidence-path-copy").unwrap();
+    cx.simulate_click(copy.center(), Modifiers::none());
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    let [file0, file1, file2] = [live.files[0], live.files[1], live.files[2]];
+    assert_eq!(
+        clipboard.and_then(|item| item.text()).as_deref(),
+        Some(
+            format!(
+                "Path from src/2.rs to src/0.rs: 2 hops\n\
+                 1. src/2.rs (File, node:{file2})\n\
+                 \x20  ← IMPORTS (relationship:{})\n\
+                 2. src/1.rs (File, node:{file1})\n\
+                 \x20  ← IMPORTS (relationship:{})\n\
+                 3. src/0.rs (File, node:{file0})\n",
+                edges[0], edges[1]
+            )
+            .as_str()
+        )
+    );
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);
