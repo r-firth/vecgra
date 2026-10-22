@@ -244,7 +244,7 @@ selects the focus node again after walking away from it within the context.
 
 The relationship and node-label taxonomies are controls as well as the
 canvas's legend: each row carries the color its relationships or nodes are
-drawn in. Node labels and relationship types each take nine distinct colors
+drawn in. Node labels and relationship types each take ten distinct colors
 in the order they first appear by ID and keep them, so a label added by a
 reload, or hidden and shown again, does not recolor the others. Activating a relationship row raises every visible relationship of
 that type and both endpoints into the relevance field. Activating a node-label

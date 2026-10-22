@@ -1368,6 +1368,42 @@ fn label_color(label: &str) -> Hsla {
 #[cfg(test)]
 mod label_color_tests {
     use super::*;
+    use crate::theme::NODE_COLOR_COUNT;
+
+    #[test]
+    fn every_palette_colour_is_distinct() {
+        for (count, color_for) in [
+            (NODE_COLOR_COUNT, node_color_for_index as fn(usize) -> Hsla),
+            (RELATIONSHIP_COLOR_COUNT, relationship_color_for_index),
+        ] {
+            let colors: Vec<Hsla> = (0..count).map(color_for).collect();
+            for (index, color) in colors.iter().enumerate() {
+                assert!(!colors[..index].contains(color), "colour {index} repeats");
+            }
+            // The palette wraps only after every colour is used.
+            assert_eq!(color_for(count), colors[0]);
+        }
+
+        // Ten relationship types, as in the agent-memory demo, each get
+        // their own colour.
+        let mut snapshot = SceneSnapshot::demo();
+        let types: Vec<Arc<str>> = (0..10)
+            .map(|index| Arc::from(format!("T{index}")))
+            .collect();
+        snapshot.edges.labels = types.clone();
+        let mut colors = LabelColors::default();
+        colors.extend(&snapshot);
+        let drawn: Vec<Hsla> = types
+            .iter()
+            .map(|label| colors.relationship(label))
+            .collect();
+        for (index, color) in drawn.iter().enumerate() {
+            assert!(
+                !drawn[..index].contains(color),
+                "type {index} repeats a colour"
+            );
+        }
+    }
 
     #[test]
     fn labels_keep_distinct_colours_in_the_order_they_appear() {

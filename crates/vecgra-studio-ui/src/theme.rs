@@ -22,10 +22,10 @@ pub fn palette() -> StudioPalette {
     }
 }
 
-pub const RELATIONSHIP_COLOR_COUNT: usize = 9;
+pub const RELATIONSHIP_COLOR_COUNT: usize = 10;
 
 /// How many colours node labels take before one repeats.
-pub const NODE_COLOR_COUNT: usize = 9;
+pub const NODE_COLOR_COUNT: usize = 10;
 
 /// The colour of the `index`th node label to appear, the most distinct
 /// first.
@@ -40,7 +40,8 @@ pub fn node_color_for_index(index: usize) -> Hsla {
         5 => rgb(0xd47c9c).into(),
         6 => rgb(0x60b8c9).into(),
         7 => rgb(0xa6d36a).into(),
-        _ => rgb(0xc98be6).into(),
+        8 => rgb(0xc98be6).into(),
+        _ => rgb(0xe8625c).into(),
     }
 }
 
@@ -62,7 +63,8 @@ pub fn relationship_color_for_index(index: usize) -> Hsla {
         5 => rgb(0xd47c9c).into(),
         6 => rgb(0x60b8c9).into(),
         7 => rgb(0xa6d36a).into(),
-        _ => rgb(0xc98be6).into(),
+        8 => rgb(0xc98be6).into(),
+        _ => rgb(0xe8625c).into(),
     }
 }
 
