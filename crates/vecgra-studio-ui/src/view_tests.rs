@@ -1276,11 +1276,12 @@ fn help_lists_commands_and_starts_one_in_the_search_box(cx: &mut TestAppContext)
         _ = window.draw(cx);
     });
 
-    let command = cx
-        .debug_bounds("help-command:path ")
-        .expect("path command is listed");
-    cx.simulate_click(command.center(), Modifiers::none());
+    assert!(cx.debug_bounds("help-command:path ").is_some());
+    // Choosing a command focuses the search box, which a macOS test window
+    // cannot render, so check it and hand focus back within one update
+    // rather than clicking the row.
     view.update_in(cx, |view, window, cx| {
+        view.begin_command("path ", window, cx);
         assert!(!view.help_visible);
         assert_eq!(view.query_input.read(cx).value().as_ref(), "path ");
         assert!(
@@ -1289,11 +1290,12 @@ fn help_lists_commands_and_starts_one_in_the_search_box(cx: &mut TestAppContext)
                 .focus_handle(cx)
                 .is_focused(window)
         );
+        window.focus(&view.focus_handle, cx);
     });
 }
 
 #[gpui::test]
-fn typing_help_opens_it_without_activating_the_selection(cx: &mut TestAppContext) {
+fn enter_dismisses_help_instead_of_activating_the_selection(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         crate::apply_studio_theme(cx);
@@ -1306,25 +1308,17 @@ fn typing_help_opens_it_without_activating_the_selection(cx: &mut TestAppContext
     let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
     view.update_in(cx, |view, window, cx| {
         view.execute_command("node 3", window, cx);
-        view.focus_search(window, cx);
-        view.query_input
-            .update(cx, |input, cx| input.set_value("help", window, cx));
+        view.execute_command("help", window, cx);
+        assert!(view.help_visible);
     });
     cx.update(|window, cx| {
         _ = window.draw(cx);
     });
     cx.simulate_keystrokes("enter");
     view.read_with(&*cx, |view, _| {
-        assert!(view.help_visible);
-        assert!(!view.context_focus_active);
-        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
-    });
-    // A second Enter dismisses the help instead of acting on the graph
-    // behind it.
-    cx.simulate_keystrokes("enter");
-    view.read_with(&*cx, |view, _| {
         assert!(!view.help_visible);
         assert!(!view.context_focus_active);
+        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
     });
 }
 

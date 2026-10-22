@@ -100,7 +100,12 @@ impl StudioView {
     }
 
     /// Closes the help and starts a command in the search box.
-    fn begin_command(&mut self, prefix: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn begin_command(
+        &mut self,
+        prefix: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.help_visible = false;
         self.query_input.update(cx, |input, cx| {
             input.set_value(prefix, window, cx);
