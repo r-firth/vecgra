@@ -3144,3 +3144,45 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.status.as_ref(), "Nothing to undo");
     });
 }
+
+#[gpui::test]
+fn clicking_empty_canvas_clears_the_selection_for_back_to_restore(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let empty = view.update(cx, |view, _| {
+        view.settle_presentation_for_capture();
+        view.set_selection(Some(SceneSelection::Node(0)));
+        let bounds = view.canvas_bounds.unwrap();
+        let empty = bounds.origin + point(px(6.0), px(6.0));
+        assert_eq!(view.node_at(empty), None);
+        view.status = "Before".into();
+        empty
+    });
+
+    cx.simulate_click(empty, Modifiers::none());
+    view.update_in(cx, |view, window, cx| {
+        assert_eq!(view.selection, None);
+        assert_eq!(
+            view.status.as_ref(),
+            "Selection cleared · ⌘[ selects it again"
+        );
+        view.navigate_selection_history(true, window, cx);
+        assert_eq!(view.selection, Some(SceneSelection::Node(0)));
+        view.set_selection(None);
+        view.status = "Before".into();
+    });
+
+    // With nothing selected, an empty click leaves the status alone.
+    cx.simulate_click(empty, Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, None);
+        assert_eq!(view.status.as_ref(), "Before");
+    });
+}

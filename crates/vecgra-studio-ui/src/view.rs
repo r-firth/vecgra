@@ -3194,7 +3194,7 @@ impl StudioView {
         }
     }
 
-    fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -3224,14 +3224,11 @@ impl StudioView {
                         self.status =
                             format!("Selected {}", status_edge_name(snapshot, edge_index)).into();
                     }
-                } else {
+                } else if self.selection.is_some() {
+                    // A click on empty canvas clears the selection, which Back
+                    // can return to; with nothing selected it changes nothing.
                     self.set_selection(None);
-                    self.status = format!(
-                        "No graph element at ({:.0}, {:.0})",
-                        f32::from(event.position.x),
-                        f32::from(event.position.y)
-                    )
-                    .into();
+                    self.status = "Selection cleared · ⌘[ selects it again".into();
                 }
             }
             DragState::Canvas { .. } => {}
