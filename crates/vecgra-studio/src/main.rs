@@ -9,9 +9,10 @@ use gpui::{Entity, Window};
 use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
-    ExportView, FitView, FocusSearch, NextSearchResult, OpenDatabase, PreviousSearchResult,
-    ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp, SelectionBack, SelectionForward,
-    StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
+    CopySelection, ExportView, FitView, FocusSearch, NextSearchResult, OpenDatabase,
+    PreviousSearchResult, ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp,
+    SelectionBack, SelectionForward, StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn, ZoomOut,
+    apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -81,6 +82,8 @@ fn main() {
             KeyBinding::new("up", SearchBoxUp, Some("VecgraStudio > Input")),
             KeyBinding::new("down", SearchBoxDown, Some("VecgraStudio > Input")),
             KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
+            // The command box keeps its own Copy, bound deeper in the Input context.
+            KeyBinding::new("cmd-c", CopySelection, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
         cx.set_menus(app_menus());

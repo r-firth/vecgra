@@ -2523,3 +2523,72 @@ fn up_and_down_in_the_command_box_recall_commands_and_step_results(cx: &mut Test
     cx.run_until_parked();
     view.read_with(&*cx, |view, _| assert!(view.history_browse.is_none()));
 }
+
+#[gpui::test]
+fn the_selection_copies_as_text(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("copy-selection");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([KeyBinding::new(
+            "cmd-c",
+            CopySelection,
+            Some("VecgraStudio"),
+        )]);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let [file0, file1, file2] = [live.files[0], live.files[1], live.files[2]];
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command(&format!("node {file1}"), window, cx)
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let copy = cx.debug_bounds("inspector-copy").unwrap();
+    cx.simulate_click(copy.center(), Modifiers::none());
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    assert_eq!(
+        clipboard.and_then(|item| item.text()).as_deref(),
+        Some(
+            format!(
+                "src/1.rs (File, node:{file1})\n\
+                 path: src/1.rs\n\
+                 → IMPORTS (1): src/2.rs (File, node:{file2})\n\
+                 ← IMPORTS (1): src/0.rs (File, node:{file0})\n"
+            )
+            .as_str()
+        )
+    );
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.status.as_ref(), "Copied 1.rs as text")
+    });
+
+    // A relationship copies its ends, and Cmd-C works from the graph.
+    let edge = view.update_in(cx, |view, window, cx| {
+        let snapshot = view.snapshot().unwrap().clone();
+        let source = snapshot.node_index(file0).unwrap() as u32;
+        let edge = (0..snapshot.edges.ids.len())
+            .find(|&edge| snapshot.edges.sources[edge] == source)
+            .map(|edge| snapshot.edges.ids[edge])
+            .unwrap();
+        view.execute_command(&format!("edge {edge}"), window, cx);
+        view.focus_handle.focus(window, cx);
+        edge
+    });
+    cx.simulate_keystrokes("cmd-c");
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    assert_eq!(
+        clipboard.and_then(|item| item.text()).as_deref(),
+        Some(
+            format!(
+                "IMPORTS: src/0.rs (File, node:{file0}) → src/1.rs (File, node:{file1})\n\
+                 relationship:{edge}\n"
+            )
+            .as_str()
+        )
+    );
+}

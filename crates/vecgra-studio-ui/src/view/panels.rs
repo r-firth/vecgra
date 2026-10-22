@@ -1223,6 +1223,7 @@ impl StudioView {
                 h_flex()
                     .gap_0p5()
                     .pt_2()
+                    .child(self.copy_selection_button(cx))
                     .child(self.history_button(true, cx))
                     .child(self.history_button(false, cx)),
             );
@@ -2285,6 +2286,34 @@ impl StudioView {
         )
     }
 
+    fn copy_selection_button(&self, cx: &Context<Self>) -> impl IntoElement {
+        let enabled = self.selection.is_some();
+        div()
+            .id("inspector-copy")
+            .debug_selector(|| "inspector-copy".into())
+            .role(Role::Button)
+            .aria_label("Copy selection")
+            .aria_keyshortcuts("Meta+C")
+            .h(px(22.0))
+            .px_1p5()
+            .flex()
+            .items_center()
+            .rounded(px(4.0))
+            .text_xs()
+            .text_color(if enabled {
+                cx.theme().foreground
+            } else {
+                cx.theme().muted_foreground.opacity(0.45)
+            })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .on_click(cx.listener(|this, _, _, cx| this.copy_selection(cx)))
+            })
+            .tooltip(|window, cx| Tooltip::with_keystroke("Copy as text", "⌘C", window, cx))
+            .child("Copy")
+    }
+
     fn history_button(&self, backward: bool, cx: &Context<Self>) -> impl IntoElement {
         let (id, glyph, label, keystroke, shortcut) = if backward {
             ("inspector-back", "←", "Back", "⌘[", "Meta+BracketLeft")
@@ -2541,6 +2570,75 @@ pub(super) fn evidence_path_text(report: &EvidencePathReport) -> Option<String> 
         }
     }
     Some(text)
+}
+
+/// How many neighbors of each relationship group a copied node lists.
+const COPIED_NEIGHBORS_PER_GROUP: usize = 20;
+
+/// The selection as plain text for notes or a prompt: its title, label and
+/// ID, its properties, and for a node its relationships in view, grouped as
+/// the inspector groups them.
+pub(super) fn selection_text(snapshot: &SceneSnapshot, selection: SceneSelection) -> String {
+    let node = |index: usize| {
+        format!(
+            "{} ({}, node:{})",
+            snapshot.node_title(index),
+            snapshot.nodes.labels[index],
+            snapshot.nodes.ids[index]
+        )
+    };
+    let properties = |text: &mut String, properties: &[vecgra_studio_core::SceneProperty]| {
+        for property in properties {
+            if !matches!(property.value, PropertyValue::Bytes(_)) {
+                text.push_str(&format!(
+                    "{}: {}\n",
+                    property.key,
+                    format_value(&property.value)
+                ));
+            }
+        }
+    };
+    match selection {
+        SceneSelection::Node(index) => {
+            let mut text = format!("{}\n", node(index));
+            properties(&mut text, &snapshot.nodes.properties[index]);
+            for group in snapshot
+                .node_connections(index, COPIED_NEIGHBORS_PER_GROUP)
+                .groups
+            {
+                let neighbors: Vec<String> = group
+                    .connections
+                    .iter()
+                    .map(|connection| node(connection.neighbor))
+                    .collect();
+                let hidden = group.total - group.connections.len();
+                text.push_str(&format!(
+                    "{} {} ({}): {}{}\n",
+                    if group.outgoing { "→" } else { "←" },
+                    group.label,
+                    group.total,
+                    neighbors.join(", "),
+                    if hidden > 0 {
+                        format!(", and {hidden} more")
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            text
+        }
+        SceneSelection::Edge(index) => {
+            let mut text = format!(
+                "{}: {} → {}\nrelationship:{}\n",
+                snapshot.edges.labels[index],
+                node(snapshot.edges.sources[index] as usize),
+                node(snapshot.edges.targets[index] as usize),
+                snapshot.edges.ids[index]
+            );
+            properties(&mut text, &snapshot.edges.properties[index]);
+            text
+        }
+    }
 }
 
 /// A path step's two nodes by name, in path order, with file paths shortened

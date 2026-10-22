@@ -73,7 +73,8 @@ actions!(
         ToggleHelp,
         ExportView,
         SearchBoxUp,
-        SearchBoxDown
+        SearchBoxDown,
+        CopySelection
     ]
 );
 
@@ -2522,6 +2523,28 @@ impl StudioView {
         }
     }
 
+    /// Puts the selection on the clipboard as text; see
+    /// [`panels::selection_text`].
+    fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        let (Some(snapshot), Some(selection)) = (self.snapshot(), self.selection) else {
+            self.status = "Select a node or relationship to copy it".into();
+            cx.notify();
+            return;
+        };
+        let text = panels::selection_text(snapshot, selection);
+        self.status = match selection {
+            SceneSelection::Node(index) => {
+                format!("Copied {} as text", status_node_name(snapshot, index))
+            }
+            SceneSelection::Edge(index) => {
+                format!("Copied {} as text", status_edge_name(snapshot, index))
+            }
+        }
+        .into();
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        cx.notify();
+    }
+
     fn remember_command(&mut self, query: &str) {
         self.history_browse = None;
         if query.is_empty()
@@ -3587,6 +3610,9 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &PreviousSearchResult, _, cx| {
                 this.move_search_selection(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CopySelection, _, cx| {
+                this.copy_selection(cx);
             }))
             .on_action(cx.listener(|this, _: &SearchBoxUp, window, cx| {
                 this.step_search_box(true, window, cx);
