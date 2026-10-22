@@ -1362,3 +1362,69 @@ fn command_history_keeps_the_newest_entries_across_sessions() {
     assert_eq!(CommandHistory::load(&file), history);
     std::fs::remove_dir_all(&directory).unwrap();
 }
+
+#[test]
+fn date_properties_read_as_ages() {
+    let then = 1_792_620_180_000; // 2026-10-21T22:03:00Z
+    assert_eq!(parse_iso_datetime_ms("2026-10-21T22:03:00Z"), Some(then));
+    assert_eq!(
+        parse_iso_datetime_ms("2026-10-21T23:03:00.25+01:00"),
+        Some(then + 250)
+    );
+    assert_eq!(
+        parse_iso_datetime_ms("2024-02-29T12:00:00Z"),
+        Some(1_709_208_000_000)
+    );
+    for text in [
+        "2026-02-30T00:00:00Z",
+        "2026-10-21",
+        "2026-10-21T22:03:00",
+        "2026-10-21T22:03:00+0100",
+        "a release on 2026-10-21T22:03:00Z",
+        "not a date",
+    ] {
+        assert_eq!(parse_iso_datetime_ms(text), None, "{text}");
+    }
+
+    let minute = 60_000;
+    let day = 24 * 60 * minute;
+    assert_eq!(relative_age(then - 30_000, then), "just now");
+    assert_eq!(relative_age(then - 5 * minute, then), "5 minutes ago");
+    assert_eq!(relative_age(then - 60 * minute, then), "1 hour ago");
+    assert_eq!(relative_age(then - 3 * day, then), "3 days ago");
+    assert_eq!(relative_age(then - 15 * day, then), "2 weeks ago");
+    assert_eq!(relative_age(then - 400 * day, then), "1 year ago");
+    assert_eq!(relative_age(then + 2 * day, then), "in 2 days");
+
+    let now = then + day + 5 * minute;
+    assert_eq!(
+        property_time_hint(
+            "created_at",
+            &PropertyValue::String("2026-10-21T22:03:00Z".into()),
+            now
+        )
+        .as_deref(),
+        Some("1 day ago")
+    );
+    assert_eq!(
+        property_time_hint("created_at_ms", &PropertyValue::Int(then), now).as_deref(),
+        Some("2026-10-21 22:03 UTC · 1 day ago")
+    );
+    // Numbers are dates only when named as milliseconds and in range.
+    assert_eq!(
+        property_time_hint("count", &PropertyValue::Int(then), now),
+        None
+    );
+    assert_eq!(
+        property_time_hint("size_ms", &PropertyValue::Int(1_500), now),
+        None
+    );
+    assert_eq!(
+        property_time_hint(
+            "title",
+            &PropertyValue::String("Fix flaky test".into()),
+            now
+        ),
+        None
+    );
+}

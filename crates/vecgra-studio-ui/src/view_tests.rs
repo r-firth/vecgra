@@ -2733,3 +2733,48 @@ fn right_clicking_a_node_opens_its_menu(cx: &mut TestAppContext) {
         assert!(view.selection.is_some());
     });
 }
+
+#[gpui::test]
+fn dated_properties_show_their_age(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("property-ages");
+    let mut transaction = live.database.transaction();
+    let issue = transaction.create_node(
+        "Issue",
+        [
+            ("title", vecgra::Value::String("Flaky layout test".into())),
+            (
+                "created_at",
+                vecgra::Value::String("2026-10-21T22:03:00Z".into()),
+            ),
+            ("created_at_ms", vecgra::Value::Int(1_792_620_180_000)),
+            ("comments", vecgra::Value::Int(1_792_620_180_000)),
+        ],
+        &[],
+    );
+    transaction.commit().unwrap();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command(&format!("node {issue}"), window, cx)
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(
+        cx.debug_bounds("inspector-property-age:created_at")
+            .is_some()
+    );
+    assert!(
+        cx.debug_bounds("inspector-property-age:created_at_ms")
+            .is_some()
+    );
+    assert!(cx.debug_bounds("inspector-property-age:title").is_none());
+    assert!(cx.debug_bounds("inspector-property-age:comments").is_none());
+}

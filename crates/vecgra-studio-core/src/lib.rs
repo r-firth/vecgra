@@ -27,6 +27,7 @@ pub use vecgra::{
 };
 
 mod camera;
+mod dates;
 mod layout;
 mod recent;
 mod reload;
@@ -34,6 +35,7 @@ mod scene;
 mod search;
 
 pub use camera::*;
+pub use dates::*;
 pub use layout::*;
 pub use recent::*;
 pub use reload::*;

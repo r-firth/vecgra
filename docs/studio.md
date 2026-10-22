@@ -88,7 +88,10 @@ attempt to draw every record as a giant hairball.
    camera to it at the current zoom, so the inspector can walk the graph.
    `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by
    element ID, skipping anything a reload removed. Clicking an element ID
-   or a property copies it; floats are copied at full precision. **Copy** in
+   or a property copies it; floats are copied at full precision. Dated
+   properties read as ages under their value: an ISO 8601 date-time shows
+   "3 days ago", and a millisecond timestamp whose key ends in `_ms` shows
+   its UTC date and age. **Copy** in
    the inspector header, or `Cmd-C` outside the command box, copies the
    selection as text for notes or a prompt: its title, label and ID, its
    properties, and for a node its relationships in view, grouped by type and

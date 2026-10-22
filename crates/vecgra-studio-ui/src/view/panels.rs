@@ -3117,7 +3117,14 @@ fn property_row(
         value => Some(format_value(value)),
     };
     let selector = format!("inspector-property:{key}");
+    let age_selector = format!("inspector-property-age:{key}");
     let copied_key = key.to_string();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        });
+    let age = vecgra_studio_core::property_time_hint(key, value, now_ms);
     v_flex()
         .id(("inspector-property", position))
         .debug_selector(move || selector)
@@ -3151,6 +3158,15 @@ fn property_row(
                 .line_height(px(17.0))
                 .child(format_value(value)),
         )
+        .when_some(age, |this, age| {
+            this.child(
+                div()
+                    .debug_selector(move || age_selector)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(age),
+            )
+        })
 }
 
 fn format_value(value: &PropertyValue) -> String {
