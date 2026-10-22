@@ -30,6 +30,34 @@ fn active_outlier_facet_stays_in_the_bounded_taxonomy() {
     assert!(!visible.iter().any(|(label, _)| label.as_ref() == "L9"));
 }
 
+#[test]
+fn context_label_mix_shows_the_commonest_labels() {
+    let summary = |labels: &[(&str, usize)]| ContextSummary {
+        node: 0,
+        direct: 0,
+        indirect: 0,
+        relationships: 0,
+        labels: labels
+            .iter()
+            .map(|&(label, count)| (Arc::from(label), count))
+            .collect(),
+    };
+    let empty = summary(&[]);
+    assert_eq!(empty.label_mix(), (&[][..], 0));
+    let two = summary(&[("Session", 6), ("Commit", 3)]);
+    assert_eq!(two.label_mix(), (&two.labels[..], 0));
+    let four = summary(&[("Session", 6), ("Commit", 3), ("File", 2), ("Agent", 1)]);
+    let (shown, others) = four.label_mix();
+    assert_eq!(
+        shown
+            .iter()
+            .map(|(label, _)| label.as_ref())
+            .collect::<Vec<_>>(),
+        ["Session", "Commit", "File"]
+    );
+    assert_eq!(others, 1);
+}
+
 #[gpui::test]
 fn exact_evidence_path_maps_to_a_reversible_canvas_lens(cx: &mut TestAppContext) {
     cx.update(|cx| {
@@ -599,7 +627,14 @@ fn double_click_opens_a_reversible_two_hop_context_without_starting_a_drag(
                 view.status
             );
             assert!(view.status.contains("two-hop"));
-            assert_eq!(view.context_summary.map(|summary| summary.node), Some(7));
+            let summary = view.context_summary.clone().expect("context summary");
+            assert_eq!(summary.node, 7);
+            // The label mix accounts for every node around the focus.
+            assert_eq!(
+                summary.labels.iter().map(|(_, count)| count).sum::<usize>(),
+                summary.direct + summary.indirect
+            );
+            assert!(!summary.label_mix().0.is_empty());
 
             view.settle_presentation_for_capture();
             assert_ne!(

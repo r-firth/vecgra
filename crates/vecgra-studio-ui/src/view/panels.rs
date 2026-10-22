@@ -435,7 +435,7 @@ impl StudioView {
 
     /// The node a 2-hop context is around, and what the context holds.
     fn render_context_heading(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
-        let summary = self.context_summary?;
+        let summary = self.context_summary.as_ref()?;
         let snapshot = self.snapshot()?;
         let index = snapshot.node_index(summary.node)?;
         Some(
@@ -469,6 +469,34 @@ impl StudioView {
                             "relationships",
                         )),
                 )
+                .when(!summary.labels.is_empty(), |this| {
+                    let (shown, others) = summary.label_mix();
+                    // Each label carries its legend colour, and the line
+                    // wraps between labels rather than inside one.
+                    this.child(
+                        h_flex()
+                            .debug_selector(|| "context-label-mix".into())
+                            .flex_wrap()
+                            .gap_x_2()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .children(shown.iter().map(|(label, count)| {
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .size(px(6.0))
+                                            .rounded_full()
+                                            .bg(self.label_colors.color(label)),
+                                    )
+                                    .child(format!("{count} {label}"))
+                            }))
+                            .when(others > 0, |this| {
+                                this.child(counted(others, "more label", "more labels"))
+                            }),
+                    )
+                })
                 .into_any_element(),
         )
     }

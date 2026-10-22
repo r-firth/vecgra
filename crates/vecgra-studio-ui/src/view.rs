@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -158,6 +159,14 @@ impl ContextSummary {
             panels::counted(self.relationships, "relationship", "relationships")
         )
     }
+
+    /// The commonest labels around the focus, and how many other labels
+    /// there are.
+    fn label_mix(&self) -> (&[(Arc<str>, usize)], usize) {
+        const SHOWN: usize = 3;
+        let shown = self.labels.len().min(SHOWN);
+        (&self.labels[..shown], self.labels.len() - shown)
+    }
 }
 
 /// Stepping through earlier commands from the command box.
@@ -169,12 +178,14 @@ struct HistoryBrowse {
 }
 
 /// What a 2-hop context holds, for the heading of its tab.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ContextSummary {
     node: u64,
     direct: usize,
     indirect: usize,
     relationships: usize,
+    /// The labels of the nodes around the focus, most common first.
+    labels: Arc<[(Arc<str>, usize)]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2561,19 +2572,28 @@ impl StudioView {
         if let Some(target) = focus_bounds.and_then(|focus| self.framing(focus, 112.0, 1.4..=9.0)) {
             self.camera_motion.retarget(target);
         }
+        let mut labels: BTreeMap<Arc<str>, usize> = BTreeMap::new();
+        for &node in focus.layers.iter().skip(1).flatten() {
+            *labels
+                .entry(snapshot.nodes.labels[node].clone())
+                .or_default() += 1;
+        }
+        let mut labels: Vec<_> = labels.into_iter().collect();
+        labels.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
         let summary = ContextSummary {
             node: snapshot.nodes.ids[index],
             direct: focus.layers.get(1).map_or(0, Vec::len),
             indirect: focus.layers.get(2).map_or(0, Vec::len),
             relationships: focus.edges.len(),
+            labels: labels.into(),
         };
-        self.context_summary = Some(summary);
         self.status = format!(
             "Context · {} · {} · Esc restores overview",
             status_node_name(&snapshot, index),
             summary.counts()
         )
         .into();
+        self.context_summary = Some(summary);
         self.begin_presentation_motion(window, cx);
     }
 
