@@ -76,7 +76,11 @@ attempt to draw every record as a giant hairball.
    titles an element, the file name leads and the directory follows, muted,
    so truncated lists of files stay distinguishable. Its relationships in
    the current view are grouped by type and direction, six to a group until
-   **Show N more** lists the rest; choosing a neighbor,
+   **Show N more** lists the rest. Tab reaches these rows, endpoints,
+   property values and recent databases, and Enter or Space activates the
+   focused one, as Enter or Space does a focused path step or button; Enter
+   only lays out the selection's context while the graph itself has focus.
+   Choosing a neighbor,
    or either endpoint of a selected relationship, selects it and springs the
    camera to it at the current zoom, so the inspector can walk the graph.
    `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by

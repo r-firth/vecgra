@@ -2155,6 +2155,70 @@ fn hovering_an_inspector_connection_points_out_the_node(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+fn inspector_rows_can_be_reached_and_activated_from_the_keyboard(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::init_bezel(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([KeyBinding::new(
+            "enter",
+            ActivateSelection,
+            Some("VecgraStudio"),
+        )]);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, cx| {
+        view.settle_presentation_for_capture();
+        view.set_selection(Some(SceneSelection::Node(5)));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    draw(cx);
+    // Node 5 lists NEXT out to 6, then NEXT in from 4.
+    let row = cx.debug_bounds("inspector-connection:6").unwrap();
+    let header = cx.debug_bounds("inspector-connections").unwrap();
+    // Pressing without releasing on the row focuses it without clicking it.
+    cx.simulate_mouse_down(row.center(), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(
+        header.origin + point(px(4.0), px(4.0)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(5)))
+    });
+    draw(cx);
+
+    cx.simulate_keystrokes("tab");
+    draw(cx);
+    // A focused control acts on Enter's release, which `simulate_keystrokes`
+    // does not send.
+    cx.simulate_keystrokes("enter");
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(4)))
+    });
+
+    // A pointer click hands focus back to the graph, so Enter afterwards
+    // opens the new selection's context rather than clicking a row again.
+    draw(cx);
+    let row = cx.debug_bounds("inspector-connection:5").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    cx.update(|window, cx| {
+        assert_eq!(view.read(cx).selection, Some(SceneSelection::Node(5)));
+        assert!(view.read(cx).focus_handle.is_focused(window));
+    });
+}
+
+#[gpui::test]
 fn opened_databases_are_offered_again_while_nothing_is_selected(cx: &mut TestAppContext) {
     let first = LiveDatabase::new("recent-first");
     let second = LiveDatabase::new("recent-second");

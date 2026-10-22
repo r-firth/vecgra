@@ -1935,13 +1935,13 @@ impl StudioView {
                             .items_center()
                             .ml_3()
                             .px_1()
-                            .py_0p5()
+                            .py(px(1.0))
                             .rounded(px(4.0))
                             .cursor_pointer()
                             .hover(|style| style.bg(cx.theme().sidebar_accent))
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .on_activate(cx, move |this, window, cx| {
                                 this.select_related_node(neighbor, Some(edge), window, cx);
-                            }))
+                            })
                             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                                 this.preview_node(neighbor_id, *hovered, cx);
                             }))
@@ -2254,13 +2254,13 @@ impl StudioView {
                         .aria_label(label)
                         .mx(px(-4.0))
                         .px_1()
-                        .py_0p5()
+                        .py(px(1.0))
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().sidebar_accent))
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_activate(cx, move |this, window, cx| {
                             this.open_database(path.clone(), window, cx);
-                        }))
+                        })
                         .child(title_line(&title, cx).flex_1().text_sm())
                 }))
                 .into_any_element(),
@@ -2745,6 +2745,42 @@ fn hover_ring(anchor: Vec2) -> gpui::AnyElement {
         .into_any_element()
 }
 
+/// Clickable rows that keyboard users can reach with Tab and activate with
+/// Enter or Space, outlined while focused from the keyboard. The outline is a
+/// border that is always there, so rows take a pixel less padding to keep
+/// their height. A pointer click hands focus back to the graph, so Enter
+/// afterwards still acts on the selection rather than on the clicked row.
+trait ActivatableRow: Sized {
+    fn on_activate(
+        self,
+        cx: &Context<StudioView>,
+        activate: impl Fn(&mut StudioView, &mut Window, &mut Context<StudioView>) + 'static,
+    ) -> Self;
+}
+
+impl ActivatableRow for gpui::Stateful<gpui::Div> {
+    fn on_activate(
+        self,
+        cx: &Context<StudioView>,
+        activate: impl Fn(&mut StudioView, &mut Window, &mut Context<StudioView>) + 'static,
+    ) -> Self {
+        let ring = cx.theme().ring;
+        self.focusable()
+            .tab_stop(true)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(move |style| style.border_color(ring))
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    if !matches!(event, gpui::ClickEvent::Keyboard(_)) {
+                        window.focus(&this.focus_handle, cx);
+                    }
+                    activate(this, window, cx);
+                }),
+            )
+    }
+}
+
 fn endpoint_row(
     direction: &'static str,
     index: usize,
@@ -2761,13 +2797,13 @@ fn endpoint_row(
         ))
         .gap_2()
         .items_center()
-        .p_1()
+        .p(px(3.0))
         .rounded(px(4.0))
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().sidebar_accent))
-        .on_click(cx.listener(move |this, _, window, cx| {
+        .on_activate(cx, move |this, window, cx| {
             this.select_related_node(index, None, window, cx);
-        }))
+        })
         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.preview_node(id, *hovered, cx);
         }))
@@ -2843,7 +2879,7 @@ fn connections_toggle(
                 .bg(cx.theme().sidebar_accent)
                 .text_color(cx.theme().foreground)
         })
-        .on_click(cx.listener(move |this, _, _, cx| {
+        .on_activate(cx, move |this, _, cx| {
             if let Some(position) = this
                 .expanded_connections
                 .iter()
@@ -2854,7 +2890,7 @@ fn connections_toggle(
                 this.expanded_connections.push(key.clone());
             }
             cx.notify();
-        }))
+        })
         .child(text)
 }
 
@@ -2894,7 +2930,7 @@ fn property_row(
         .debug_selector(move || selector)
         .gap_1()
         .px_2()
-        .py_1()
+        .py(px(3.0))
         .mx(px(-8.0))
         .rounded(px(6.0))
         .when_some(copy, |this, copy| {
@@ -2903,11 +2939,11 @@ fn property_row(
                 .cursor_pointer()
                 .hover(|style| style.bg(cx.theme().secondary_hover))
                 .tooltip(|window, cx| Tooltip::text("Copy value", window, cx))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_activate(cx, move |this, _, cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
                     this.status = format!("Copied {copied_key}").into();
                     cx.notify();
-                }))
+                })
         })
         .child(
             div()
