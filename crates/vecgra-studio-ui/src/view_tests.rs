@@ -3095,12 +3095,13 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.status.as_ref(), "Showing IMPORTS relationships again");
     });
 
-    // Clicking an overview row while typing hands the keys to the graph, so
-    // Backspace hides the type its lens is on rather than editing the box.
+    // Clicking an overview row hands the keys to the graph, so after typing a
+    // command, Backspace hides the type its lens is on rather than editing
+    // the box. (The box itself is not focused here: on macOS a focused input
+    // asks a test window for a native view it does not have.)
     view.update(cx, |view, _| view.set_selection(None));
     cx.update(|window, cx| {
-        let input = view.read(cx).query_input.read(cx).focus_handle(cx);
-        window.focus(&input, cx);
+        window.blur();
         _ = window.draw(cx);
     });
     let row = cx.debug_bounds("relationship-facet:IMPORTS").unwrap();
