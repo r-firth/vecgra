@@ -483,8 +483,15 @@ fn hydrate_search_hit(
         ElementRef::Edge(id) => {
             let edge = read.edge(id)?;
             let label = read.symbol(edge.label).unwrap_or("Unknown");
-            let title = preferred_property(read, &edge.properties)
-                .unwrap_or_else(|| label.replace('_', " "));
+            // A relationship without a name of its own is told apart by
+            // what it connects; its type is already shown beside it.
+            let title = preferred_property(read, &edge.properties).unwrap_or_else(|| {
+                format!(
+                    "{} → {}",
+                    short_node_title(read, edge.source),
+                    short_node_title(read, edge.target)
+                )
+            });
             let detail = secondary_property(read, &edge.properties, &title)
                 .unwrap_or_else(|| format!("node:{} → node:{}", edge.source, edge.target));
             (label.to_string(), title, detail)
@@ -500,6 +507,19 @@ fn hydrate_search_hit(
         semantic_score: signals.semantic(),
         vector_index: signals.vector_index(),
     })
+}
+
+/// A node's title as search names it, with a file path cut to its file name.
+fn short_node_title(read: &ReadGuard<'_>, id: NodeId) -> String {
+    let Some(node) = read.node(id) else {
+        return format!("node {id}");
+    };
+    let title = preferred_property(read, &node.properties)
+        .unwrap_or_else(|| format!("{} {id}", read.symbol(node.label).unwrap_or("Unknown")));
+    match split_path_title(&title) {
+        Some((name, _)) => name.to_string(),
+        None => title,
+    }
 }
 
 fn hydrate_evidence_node(read: &ReadGuard<'_>, id: NodeId) -> Option<EvidenceNode> {

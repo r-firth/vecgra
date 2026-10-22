@@ -1127,6 +1127,66 @@ fn search_and_paths_name_message_only_nodes_by_their_first_line() {
 }
 
 #[test]
+fn relationship_results_without_a_name_are_titled_by_their_ends() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let session = transaction.create_node(
+        "Session",
+        [("title", Value::String("Fix flaky layout test".into()))],
+        &[],
+    );
+    let source = transaction.create_node(
+        "File",
+        [("path", Value::String("src/layout.rs".into()))],
+        &[],
+    );
+    let edited = transaction.create_edge(
+        session,
+        source,
+        "EDITED",
+        [("lines", Value::Int(4242))],
+        &[],
+    );
+    let named = transaction.create_edge(
+        session,
+        source,
+        "CITES",
+        [("title", Value::String("Layout regression 4242".into()))],
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "4242",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let title = |id| {
+        report
+            .hits
+            .iter()
+            .find(|hit| hit.element == ElementRef::Edge(id))
+            .map(|hit| (hit.title.to_string(), hit.detail.to_string()))
+    };
+    assert_eq!(
+        title(edited),
+        Some((
+            "Fix flaky layout test → layout.rs".to_string(),
+            format!("node:{session} → node:{source}")
+        ))
+    );
+    assert_eq!(
+        title(named).map(|(title, _)| title).as_deref(),
+        Some("Layout regression 4242")
+    );
+}
+
+#[test]
 fn path_titles_split_into_name_and_directory() {
     assert_eq!(
         split_path_title("crates/vecgra/src/error.rs"),
