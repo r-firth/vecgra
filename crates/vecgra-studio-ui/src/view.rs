@@ -440,6 +440,10 @@ impl StudioView {
         });
         let subscription = cx.subscribe_in(&query_input, window, Self::on_query_event);
         let focus_handle = cx.focus_handle().tab_stop(true);
+        // Studio's shortcuts are bound to its key context, which is only on
+        // the dispatch path once something inside the view has focus; without
+        // this, Cmd-O and Cmd-K did nothing until the canvas was clicked.
+        window.focus(&focus_handle, cx);
         let bezel_search_focus = std::array::from_fn(|_| cx.focus_handle());
         let bezel_zoom_focus = std::array::from_fn(|_| cx.focus_handle());
         let bezel_layout_focus = std::array::from_fn(|_| cx.focus_handle());

@@ -1422,3 +1422,19 @@ fn opened_databases_are_offered_again_while_nothing_is_selected(cx: &mut TestApp
     });
     let _ = std::fs::remove_dir_all(recent_file.parent().unwrap());
 }
+
+#[gpui::test]
+fn shortcuts_work_before_anything_is_clicked(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+        cx.bind_keys([KeyBinding::new("cmd-/", ToggleHelp, Some("VecgraStudio"))]);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    cx.simulate_keystrokes("cmd-/");
+    view.read_with(&*cx, |view, _| assert!(view.help_visible));
+}
