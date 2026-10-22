@@ -24,6 +24,7 @@ pub(super) enum NodeMenuItem {
     Release,
     Hide,
     HideLabel,
+    ShowOnlyLabel,
     CopyText,
     CopyId,
 }
@@ -133,6 +134,13 @@ impl StudioView {
                 "",
             )));
         }
+        if same_label < snapshot.nodes.labels.len() {
+            items.push(Some((
+                NodeMenuItem::ShowOnlyLabel,
+                format!("Show only {label} nodes"),
+                "",
+            )));
+        }
         items.push(None);
         items.push(Some((
             NodeMenuItem::CopyText,
@@ -179,12 +187,16 @@ impl StudioView {
             NodeMenuItem::SetPathOrigin => self.choose_path_start(index, window, cx),
             NodeMenuItem::Release => self.release_selected(cx),
             NodeMenuItem::Hide => self.hide_node(index, cx),
-            NodeMenuItem::HideLabel => {
+            NodeMenuItem::HideLabel | NodeMenuItem::ShowOnlyLabel => {
                 if let Some(label) = self
                     .snapshot()
                     .map(|snapshot| snapshot.nodes.labels[index].clone())
                 {
-                    self.hide_label(&label, cx);
+                    if item == NodeMenuItem::HideLabel {
+                        self.hide_label(&label, cx);
+                    } else {
+                        self.show_only(&label, false, cx);
+                    }
                 }
             }
             NodeMenuItem::CopyText => self.copy_selection(cx),

@@ -91,6 +91,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "hide ",
         "Hide a node, label or type",
     ),
+    (
+        "only label <l> | relationship <t>",
+        "only label ",
+        "Hide every other label or type",
+    ),
     ("unhide", "unhide", "Show everything hidden again"),
     (
         "back  ·  forward  ·  clear",

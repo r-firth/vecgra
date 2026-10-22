@@ -1518,6 +1518,8 @@ fn command_words_followed_by_other_words_are_searched() {
         "hide 54",
         "hide label Symbol",
         "hide relationship READ",
+        "only label File",
+        "only relationship READ",
         "unhide",
         "text graph",
         "semantic",
@@ -1543,6 +1545,8 @@ fn command_words_followed_by_other_words_are_searched() {
         "export controls",
         "hide hub nodes",
         "unhide toolbar",
+        "only label",
+        "only fans",
     ] {
         assert!(!reads_as_command(search), "{search} is a search");
     }
@@ -3156,6 +3160,28 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-z");
     view.read_with(&*cx, |view, _| {
         assert_eq!(view.status.as_ref(), "Nothing to undo");
+    });
+
+    // Showing only one label hides the others as one step.
+    view.update_in(cx, |view, window, cx| {
+        assert_eq!(view.node_label_counts.len(), 2);
+        view.execute_command("only label file", window, cx);
+        let snapshot = view.snapshot().unwrap();
+        assert!(snapshot.nodes.labels.iter().all(|label| &**label == "File"));
+        assert_eq!(view.node_label_counts.len(), 1);
+        assert!(
+            view.status
+                .starts_with("Showing only File nodes · hid 1 other label · ⌘Z"),
+            "{}",
+            view.status
+        );
+        view.execute_command("only label file", window, cx);
+        assert_eq!(view.status.as_ref(), "Only File nodes are in view");
+    });
+    cx.simulate_keystrokes("cmd-z");
+    view.read_with(&*cx, |view, _| {
+        assert!(view.hidden.is_none());
+        assert_eq!(view.status.as_ref(), "Showing 1 label again");
     });
 }
 

@@ -377,6 +377,7 @@ fn reads_as_command(query: &str) -> bool {
             ["label" | "relationship", label] => !label.is_empty(),
             _ => false,
         },
+        "only" => matches!(rest.as_slice(), ["label" | "relationship", _]),
         "zoom" => matches!(rest.as_slice(), [factor] if parse_zoom(factor).is_some()),
         "live" | "watch" => matches!(rest.as_slice(), [] | ["on" | "off"]),
         "layout" => matches!(rest.as_slice(), ["auto" | "force" | "structure" | "orbit"]),
@@ -3465,6 +3466,15 @@ impl StudioView {
                     }
                 }
             },
+            Some("only") => {
+                let relationship = parts.next() == Some("relationship");
+                if let Some(label) = parts
+                    .next()
+                    .and_then(|label| self.command_label(label, relationship, cx))
+                {
+                    self.show_only(&label, relationship, cx);
+                }
+            }
             Some("unhide") => self.show_hidden_nodes(cx),
             Some("layout") => match parts.next() {
                 Some("auto") => self.arrange(LayoutKind::Auto, window, cx),

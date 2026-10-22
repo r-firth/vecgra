@@ -103,8 +103,8 @@ attempt to draw every record as a giant hairball.
    selects it and opens a menu of what can be done with it: open its
    connected context, trace a path to it from the node selected before (or
    from the chosen path origin), set it as the path origin, release it when
-   pinned, hide it or every node with its label, and copy it as text or
-   by ID. Escape, a click elsewhere, or a scroll closes the menu.
+   pinned, hide it or every node with its label, show only its label, and
+   copy it as text or by ID. Escape, a click elsewhere, or a scroll closes the menu.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
    Backspace or Delete with the graph focused, **Hide from view** in a
    node's menu, or `hide [id]` takes a node and its relationships off the
@@ -114,7 +114,9 @@ attempt to draw every record as a giant hairball.
    with it that arrive later, and lists the label under the overview's
    labels, where choosing it shows that label again. `hide relationship
    <type>` takes every relationship of a type off the canvas and lists it
-   under the overview's relationships the same way. With an overview label
+   under the overview's relationships the same way. **Show only <label>
+   nodes** in the menu, or `only label|relationship <name>`, hides every
+   other label or type in view as one step. With an overview label
    or type lens on and nothing selected, Backspace hides that label or
    type. Hidden elements stay hidden across reloads and live refresh, and
    the status bar counts them. `Cmd-Z` (**Edit > Undo Hide**) takes back

@@ -69,11 +69,30 @@ enum HiddenGroup {
     Relationship(Arc<str>),
 }
 
-/// One thing hidden: a node by ID, or a label or type.
+/// One thing hidden: a node by ID, a label or type, or every label or type
+/// but one.
 #[derive(Clone, PartialEq)]
 enum HideStep {
     Node(u64),
     Group(HiddenGroup),
+    Groups(Vec<HiddenGroup>),
+}
+
+impl HiddenGroup {
+    fn hide_in(&self, hidden: &mut HiddenElements) {
+        match self {
+            Self::Label(label) => hidden.labels.insert(label.clone()),
+            Self::Relationship(label) => hidden.relationships.insert(label.clone()),
+        };
+    }
+
+    /// Shows the group again; says whether it was hidden.
+    fn show_in(&self, hidden: &mut HiddenElements) -> bool {
+        match self {
+            Self::Label(label) => hidden.labels.remove(label),
+            Self::Relationship(label) => hidden.relationships.remove(label),
+        }
+    }
 }
 
 impl StudioView {
@@ -206,11 +225,11 @@ impl StudioView {
             HideStep::Node(id) => {
                 scene.hidden.ids.insert(*id);
             }
-            HideStep::Group(HiddenGroup::Label(label)) => {
-                scene.hidden.labels.insert(label.clone());
-            }
-            HideStep::Group(HiddenGroup::Relationship(label)) => {
-                scene.hidden.relationships.insert(label.clone());
+            HideStep::Group(group) => group.hide_in(&mut scene.hidden),
+            HideStep::Groups(groups) => {
+                for group in groups {
+                    group.hide_in(&mut scene.hidden);
+                }
             }
         }
         scene.steps.push(step);
@@ -247,6 +266,49 @@ impl StudioView {
         cx.notify();
     }
 
+    /// Hides every node label in view but `label`, or with `relationship`
+    /// every relationship type but `label`, as one step.
+    pub(super) fn show_only(&mut self, label: &str, relationship: bool, cx: &mut Context<Self>) {
+        let Some(current) = self.snapshot().cloned() else {
+            return;
+        };
+        let counts = if relationship {
+            self.relationship_counts.clone()
+        } else {
+            self.node_label_counts.clone()
+        };
+        let (kind, kinds, elements) = if relationship {
+            ("relationship type", "relationship types", "relationships")
+        } else {
+            ("label", "labels", "nodes")
+        };
+        let others: Vec<HiddenGroup> = counts
+            .iter()
+            .filter(|(other, _)| &**other != label)
+            .map(|(other, _)| {
+                if relationship {
+                    HiddenGroup::Relationship(other.clone())
+                } else {
+                    HiddenGroup::Label(other.clone())
+                }
+            })
+            .collect();
+        if others.is_empty() {
+            self.status = format!("Only {label} {elements} are in view").into();
+            cx.notify();
+            return;
+        }
+        let count = others.len();
+        self.hide_where(&current, HideStep::Groups(others));
+        self.report_hidden(
+            format!(
+                "Showing only {label} {elements} · hid {}",
+                panels::counted(count, &format!("other {kind}"), &format!("other {kinds}"))
+            ),
+            cx,
+        );
+    }
+
     /// Takes back the last hiding still in effect.
     pub(super) fn undo_hide(&mut self, cx: &mut Context<Self>) {
         while let Some(step) = self.hidden.as_mut().and_then(|scene| scene.steps.pop()) {
@@ -281,13 +343,27 @@ impl StudioView {
                     |index| status_node_name(&scene.full, index),
                 ),
             ),
-            HideStep::Group(HiddenGroup::Label(label)) => {
-                (scene.hidden.labels.remove(label), format!("{label} nodes"))
-            }
-            HideStep::Group(HiddenGroup::Relationship(label)) => (
-                scene.hidden.relationships.remove(label),
-                format!("{label} relationships"),
+            HideStep::Group(group) => (
+                group.show_in(&mut scene.hidden),
+                match group {
+                    HiddenGroup::Label(label) => format!("{label} nodes"),
+                    HiddenGroup::Relationship(label) => format!("{label} relationships"),
+                },
             ),
+            HideStep::Groups(groups) => {
+                // Every group is shown, even after one already was.
+                let shown = groups
+                    .iter()
+                    .filter(|group| group.show_in(&mut scene.hidden))
+                    .count();
+                let kind = match groups.first() {
+                    Some(HiddenGroup::Relationship(_)) => {
+                        ("relationship type", "relationship types")
+                    }
+                    _ => ("label", "labels"),
+                };
+                (shown > 0, panels::counted(shown, kind.0, kind.1))
+            }
         };
         if !removed {
             return false;
