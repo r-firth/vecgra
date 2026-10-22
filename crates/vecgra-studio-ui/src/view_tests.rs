@@ -1115,6 +1115,22 @@ fn path_steps_name_their_nodes_and_point_out_their_relationship(cx: &mut TestApp
     // Leaving the row for somewhere other than the canvas ends the preview.
     cx.simulate_mouse_move(point(px(4.0), px(896.0)), None, Modifiers::none());
     view.read_with(&*cx, |view, _| assert!(view.hovered_edge.is_none()));
+
+    // The path's ends point themselves out too, and choosing one selects it.
+    let end = cx.debug_bounds("path-endpoint:to").unwrap();
+    cx.simulate_mouse_move(end.center(), None, Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.hovered_node, Some(live.files[3]))
+    });
+    cx.simulate_click(end.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(
+            view.selection,
+            snapshot.node_index(live.files[3]).map(SceneSelection::Node)
+        );
+        assert!(matches!(view.path_state, PathState::Ready(_)));
+    });
 }
 
 #[gpui::test]

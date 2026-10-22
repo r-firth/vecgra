@@ -1129,13 +1129,16 @@ impl StudioView {
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.activate_search_result(index, window, cx);
                                     }))
-                                    .when(hit.kind_label() != "EDGE", |this| {
-                                        let node = hit.id();
-                                        this.on_hover(cx.listener(
-                                            move |this, hovered: &bool, _, cx| {
-                                                this.preview_node(node, *hovered, cx);
-                                            },
-                                        ))
+                                    .on_hover({
+                                        let id = hit.id();
+                                        let edge = hit.kind_label() == "EDGE";
+                                        cx.listener(move |this, hovered: &bool, _, cx| {
+                                            if edge {
+                                                this.preview_edge(id, *hovered, cx);
+                                            } else {
+                                                this.preview_node(id, *hovered, cx);
+                                            }
+                                        })
                                     })
                                     .child(
                                         h_flex()
@@ -2407,6 +2410,8 @@ fn path_endpoint_card(
     path_endpoint_card_data(role, node.id, &node.label, &node.title, color, cx)
 }
 
+/// A path end: hovering points the node out on the canvas, and choosing it
+/// selects it, when it is in the current scene.
 fn path_endpoint_card_data(
     role: &'static str,
     id: u64,
@@ -2415,7 +2420,26 @@ fn path_endpoint_card_data(
     color: gpui::Hsla,
     cx: &Context<StudioView>,
 ) -> impl IntoElement {
+    let selector = format!("path-endpoint:{}", role.to_lowercase());
     h_flex()
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector)
+        .role(Role::Button)
+        .aria_label(format!("Select {} node {title}", role.to_lowercase()))
+        .mx(px(-4.0))
+        .px(px(3.0))
+        .py(px(1.0))
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().sidebar_accent))
+        .on_activate(cx, move |this, window, cx| {
+            if let Some(index) = this.snapshot().and_then(|snapshot| snapshot.node_index(id)) {
+                this.select_related_node(index, None, window, cx);
+            }
+        })
+        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.preview_node(id, *hovered, cx);
+        }))
         .gap_2()
         .items_center()
         .child(div().w(px(3.0)).h(px(30.0)).rounded_full().bg(color))

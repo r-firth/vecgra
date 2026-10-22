@@ -59,8 +59,10 @@ attempt to draw every record as a giant hairball.
    a node shows its title, label, relationship count, and up to three other
    properties beside it, and lights its relationships more faintly than the
    selection's, without changing the selection; hovering a node in the
-   inspector's connections, a relationship's endpoints, or the search
-   results does the same and rings the node on the canvas. Below the
+   inspector's connections, a relationship's endpoints, a path's ends, or
+   the search results does the same and rings the node on the canvas, and
+   hovering a relationship search result or path step points out its line.
+   Below the
    overview, hovering a relationship's line brightens it, shows its type,
    both ends, and up to three of its properties, and rings the ends, and the
    canvas names the selection (both ends, for a relationship), path
