@@ -1746,6 +1746,9 @@ fn inspector_copies_property_values(cx: &mut TestAppContext) {
         _ = window.draw(cx);
     });
     let property = cx.debug_bounds("inspector-property:title").unwrap();
+    // What a node is comes before what it connects to.
+    let connections = cx.debug_bounds("inspector-connections").unwrap();
+    assert!(property.origin.y < connections.origin.y);
     cx.simulate_click(property.center(), Modifiers::none());
     cx.run_until_parked();
     let clipboard = cx.update(|_, cx| cx.read_from_clipboard());

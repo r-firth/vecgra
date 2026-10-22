@@ -1396,6 +1396,37 @@ impl StudioView {
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
                         v_flex()
+                            .gap_1()
+                            .child(inspector_label("PROPERTIES"))
+                            .when(properties.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("No node properties"),
+                                )
+                            })
+                            .children(
+                                properties
+                                    .iter()
+                                    .take(INSPECTOR_PROPERTY_LIMIT)
+                                    .enumerate()
+                                    .map(|(position, property)| {
+                                        property_row(position, &property.key, &property.value, cx)
+                                    }),
+                            )
+                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
+                                this.child(more_row(
+                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
+                                    "property",
+                                    "properties",
+                                    cx,
+                                ))
+                            }),
+                    )
+                    .child(div().h(px(1.0)).bg(cx.theme().border))
+                    .child(
+                        v_flex()
                             .gap_2()
                             .child(inspector_label("PATH"))
                             .when_some(path_origin, |this, start| {
@@ -1464,37 +1495,6 @@ impl StudioView {
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(self.render_node_connections(snapshot, index, cx))
-                    .child(div().h(px(1.0)).bg(cx.theme().border))
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(inspector_label("PROPERTIES"))
-                            .when(properties.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("No node properties"),
-                                )
-                            })
-                            .children(
-                                properties
-                                    .iter()
-                                    .take(INSPECTOR_PROPERTY_LIMIT)
-                                    .enumerate()
-                                    .map(|(position, property)| {
-                                        property_row(position, &property.key, &property.value, cx)
-                                    }),
-                            )
-                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
-                                this.child(more_row(
-                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
-                                    "property",
-                                    "properties",
-                                    cx,
-                                ))
-                            }),
-                    )
                     .into_any_element()
             }
             (Some(snapshot), Some(SceneSelection::Edge(index))) => {
