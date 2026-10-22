@@ -8190,6 +8190,7 @@ dependencies = [
 name = "vecgra-studio-core"
 version = "0.1.3"
 dependencies = [
+ "dirs",
  "petgraph",
  "petgraph-drawing",
  "petgraph-layout-omega",

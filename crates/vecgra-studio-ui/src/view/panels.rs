@@ -1447,6 +1447,9 @@ impl StudioView {
                             .child(inspector_shortcut(&theme, "esc", "Return to overview"))
                             .child(inspector_shortcut(&theme, "⌘O", "Open a database")),
                     )
+                    .when_some(self.render_recent_databases(cx), |this, recent| {
+                        this.child(recent)
+                    })
                     .into_any_element()
             }
         };
@@ -1979,6 +1982,42 @@ impl StudioView {
                             format_count(snapshot.nodes.degrees[index] as usize)
                         )),
                 )
+                .into_any_element(),
+        )
+    }
+
+    /// Recently opened databases, offered while nothing is selected.
+    fn render_recent_databases(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        const SHOWN: usize = 5;
+        let recent: Vec<PathBuf> = self.other_recent_databases().take(SHOWN).cloned().collect();
+        if recent.is_empty() {
+            return None;
+        }
+        Some(
+            v_flex()
+                .debug_selector(|| "inspector-recent".into())
+                .pt_4()
+                .gap_0p5()
+                .child(div().pb_1().child(inspector_label("RECENT")))
+                .children(recent.into_iter().enumerate().map(|(position, path)| {
+                    let title = display_path(&path);
+                    let label = format!("Open {title}");
+                    h_flex()
+                        .id(("inspector-recent", position))
+                        .debug_selector(move || format!("inspector-recent:{position}"))
+                        .role(Role::Button)
+                        .aria_label(label)
+                        .mx(px(-4.0))
+                        .px_1()
+                        .py_0p5()
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().sidebar_accent))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_database(path.clone(), window, cx);
+                        }))
+                        .child(title_line(&title, cx).flex_1().text_sm())
+                }))
                 .into_any_element(),
         )
     }

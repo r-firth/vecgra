@@ -1362,3 +1362,63 @@ fn hovering_a_node_names_it_beside_the_pointer(cx: &mut TestAppContext) {
     });
     assert!(cx.debug_bounds("graph-hover-card").is_none());
 }
+
+#[gpui::test]
+fn opened_databases_are_offered_again_while_nothing_is_selected(cx: &mut TestAppContext) {
+    let first = LiveDatabase::new("recent-first");
+    let second = LiveDatabase::new("recent-second");
+    let recent_file = std::env::temp_dir().join(format!(
+        "vecgra-studio-ui-recent-{}/studio-recent",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&recent_file);
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, window, cx| {
+        view.recent_file = Some(recent_file.clone());
+        view.open_database(first.path.clone(), window, cx);
+    });
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        assert!(view.is_ready());
+        assert_eq!(view.other_recent_databases().count(), 0);
+        view.open_database(second.path.clone(), window, cx);
+    });
+    cx.run_until_parked();
+    let first_path = std::fs::canonicalize(&first.path).unwrap();
+    let second_path = std::fs::canonicalize(&second.path).unwrap();
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(
+            view.recent.paths(),
+            [second_path.clone(), first_path.clone()]
+        );
+        assert_eq!(
+            view.other_recent_databases().collect::<Vec<_>>(),
+            [&first_path]
+        );
+    });
+    assert_eq!(
+        RecentDatabases::load(&recent_file).paths(),
+        [second_path.clone(), first_path.clone()],
+        "the list is saved for the next session"
+    );
+
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let entry = cx
+        .debug_bounds("inspector-recent:0")
+        .expect("the other database is offered");
+    cx.simulate_click(entry.center(), Modifiers::none());
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        assert!(view.is_ready());
+        assert_eq!(view.database_path.as_deref(), Some(first_path.as_path()));
+        assert_eq!(view.recent.paths()[0], first_path);
+    });
+    let _ = std::fs::remove_dir_all(recent_file.parent().unwrap());
+}

@@ -26,10 +26,10 @@ use gpui_component::{
 use vecgra_studio_core::{
     Camera, CameraMotion, DatabaseFingerprint, DetailLevel, EvidenceNode, EvidencePathReport,
     EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions,
-    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue, Rect,
-    ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode, SearchReport,
-    SnapshotOptions, Vec2, detail_level, evidence_path_database, hit_test_edges,
-    hit_test_positions, search_database, split_path_title,
+    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue,
+    RecentDatabases, Rect, ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode,
+    SearchReport, SnapshotOptions, Vec2, detail_level, display_path, evidence_path_database,
+    hit_test_edges, hit_test_positions, search_database, split_path_title,
 };
 
 mod bezel_controls;
@@ -396,6 +396,11 @@ pub struct StudioView {
     /// The node under the pointer, by ID so a reload cannot point it at
     /// another node.
     hovered_node: Option<u64>,
+    recent: RecentDatabases,
+    /// Where the recent list is saved; `None` keeps it in memory, as tests do.
+    recent_file: Option<PathBuf>,
+    /// The open database as the recent list names it.
+    recent_current: Option<PathBuf>,
     generation: u64,
     load_task: Option<Task<()>>,
     fingerprint: Option<DatabaseFingerprint>,
@@ -440,6 +445,11 @@ impl StudioView {
         let bezel_layout_focus = std::array::from_fn(|_| cx.focus_handle());
         let bezel_release_focus = cx.focus_handle();
         let bezel_overview_focus = cx.focus_handle();
+        let recent_file = if cfg!(test) {
+            None
+        } else {
+            RecentDatabases::default_file()
+        };
         let (state, workspace, world_bounds) = if let Some(path) = &path {
             (
                 LoadState::Loading {
@@ -497,6 +507,12 @@ impl StudioView {
             selection_forward: Vec::new(),
             help_visible: false,
             hovered_node: None,
+            recent: recent_file
+                .as_deref()
+                .map(RecentDatabases::load)
+                .unwrap_or_default(),
+            recent_file,
+            recent_current: None,
             generation: 0,
             load_task: None,
             fingerprint: None,
@@ -663,6 +679,12 @@ impl StudioView {
                 this.reload_waiting = false;
                 match snapshot {
                     Ok(snapshot) => {
+                        if let Some(path) = this.database_path.clone() {
+                            let path = std::fs::canonicalize(&path).unwrap_or(path);
+                            this.recent.remember(path.clone());
+                            this.recent_current = Some(path);
+                            this.save_recent(cx);
+                        }
                         this.fingerprint = fingerprint;
                         window.set_window_title(&format!(
                             "{} — Vecgra Studio",
@@ -693,6 +715,11 @@ impl StudioView {
                         this.state = LoadState::Ready(snapshot);
                     }
                     Err(error) => {
+                        if let Some(path) = this.database_path.as_deref() {
+                            let path = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
+                            this.recent.forget(&path);
+                            this.save_recent(cx);
+                        }
                         this.status = "Could not open database".into();
                         this.state = LoadState::Failed(error.to_string().into());
                     }
@@ -731,6 +758,7 @@ impl StudioView {
             self.live_refresh = live_refresh_default();
         }
         self.database_path = Some(path.clone());
+        self.recent_current = None;
         self.workspace = None;
         self.graph_navigator_cache.borrow_mut().clear();
         self.node_label_counts = Arc::from([]);
@@ -746,6 +774,27 @@ impl StudioView {
             self.start_live_refresh(window, cx);
         }
         cx.notify();
+    }
+
+    /// Writes the recent list off the application thread. A failed write only
+    /// costs the list in the next session, so it is not reported.
+    fn save_recent(&self, cx: &mut Context<Self>) {
+        let Some(file) = self.recent_file.clone() else {
+            return;
+        };
+        let recent = self.recent.clone();
+        cx.background_spawn(async move {
+            let _ = recent.save(&file);
+        })
+        .detach();
+    }
+
+    /// Recently opened databases other than the one on screen, newest first.
+    fn other_recent_databases(&self) -> impl Iterator<Item = &PathBuf> {
+        self.recent
+            .paths()
+            .iter()
+            .filter(|path| Some(*path) != self.recent_current.as_ref())
     }
 
     fn prompt_open_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {

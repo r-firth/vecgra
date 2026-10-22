@@ -51,6 +51,9 @@ attempt to draw every record as a giant hairball.
    command line, press `Cmd-O`, type `open <path>` in the command box, or
    drop the file on the window. Opening another file retires every search,
    path, lens, and selection from the previous one before the load starts.
+   The last eight databases opened successfully are remembered in the
+   platform configuration directory (`vecgra/studio-recent`), and the
+   inspector offers the most recent ones while nothing is selected.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout. Hovering
    a node shows its title, label, and relationship count beside it without

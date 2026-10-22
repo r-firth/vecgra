@@ -28,12 +28,14 @@ pub use vecgra::{
 
 mod camera;
 mod layout;
+mod recent;
 mod reload;
 mod scene;
 mod search;
 
 pub use camera::*;
 pub use layout::*;
+pub use recent::*;
 pub use reload::*;
 pub use scene::*;
 pub use search::*;

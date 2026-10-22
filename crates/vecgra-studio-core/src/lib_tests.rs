@@ -1091,3 +1091,47 @@ fn path_titles_split_into_name_and_directory() {
     assert_eq!(split_path_title("Fix A/B test flake"), None);
     assert_eq!(split_path_title("https://example.com/a/b"), None);
 }
+
+#[test]
+fn recent_databases_keep_the_newest_existing_files_once() {
+    let directory = std::env::temp_dir().join(format!("vecgra-recent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let file = directory.join("nested").join("studio-recent");
+    assert_eq!(RecentDatabases::load(&file), RecentDatabases::default());
+
+    std::fs::create_dir_all(&directory).unwrap();
+    let databases: Vec<_> = (0..RecentDatabases::LIMIT + 2)
+        .map(|index| {
+            let path = directory.join(format!("graph-{index}.vg"));
+            std::fs::write(&path, b"").unwrap();
+            path
+        })
+        .collect();
+    let mut recent = RecentDatabases::default();
+    for path in &databases {
+        recent.remember(path.clone());
+    }
+    recent.remember(databases[RecentDatabases::LIMIT].clone());
+    recent.remember(directory.join("bad\nname.vg"));
+    assert_eq!(recent.paths().len(), RecentDatabases::LIMIT);
+    assert_eq!(recent.paths()[0], databases[RecentDatabases::LIMIT]);
+    assert_eq!(recent.paths()[1], databases[RecentDatabases::LIMIT + 1]);
+    assert!(!recent.paths().contains(&databases[0]));
+
+    recent.save(&file).unwrap();
+    std::fs::remove_file(&databases[RecentDatabases::LIMIT + 1]).unwrap();
+    let loaded = RecentDatabases::load(&file);
+    assert_eq!(loaded.paths().len(), RecentDatabases::LIMIT - 1);
+    assert_eq!(loaded.paths()[0], databases[RecentDatabases::LIMIT]);
+    assert!(
+        !loaded
+            .paths()
+            .contains(&databases[RecentDatabases::LIMIT + 1]),
+        "a database deleted since it was saved is dropped"
+    );
+
+    let mut forgotten = loaded.clone();
+    forgotten.forget(&databases[RecentDatabases::LIMIT]);
+    assert_eq!(forgotten.paths().len(), RecentDatabases::LIMIT - 2);
+    let _ = std::fs::remove_dir_all(&directory);
+}
