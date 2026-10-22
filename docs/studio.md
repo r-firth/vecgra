@@ -186,7 +186,9 @@ toggle switches live refresh, and `VECGRA_STUDIO_LIVE=0` starts with it off.
 The title-bar input is a maintained Unicode/IME-aware component. `Cmd-K`
 focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
 moves the ranked selection, from the graph or from the box while it holds the
-listed search; a second Enter or click selects and frames the result. With any
+listed search; a second Enter or click selects and frames the result. A bare
+number also lists the node and the relationship with that ID above the
+results, and when no text matches, the second Enter goes to the node. With any
 other text in the box, Up and Down step back through the last 100 searches
 and commands submitted and forward again to the text being written, so `path`
 commands can be rerun or adjusted without retyping. The history is kept

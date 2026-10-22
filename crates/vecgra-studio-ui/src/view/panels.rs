@@ -142,15 +142,24 @@ impl StudioView {
     /// already shown.
     fn render_query_input(&self, cx: &Context<Self>) -> Input {
         let query = self.query_input.read(cx).value();
-        let showing_results = matches!(
-            &self.search_state,
+        let shown = match &self.search_state {
             SearchState::Ready(report)
-                if report.query.as_ref() == query.trim() && report.mode == self.search_mode
-        );
-        let hint = if showing_results {
-            Some("go to result")
-        } else {
-            enter_hint(&query)
+                if report.query.as_ref() == query.trim() && report.mode == self.search_mode =>
+            {
+                Some(report.hits.is_empty())
+            }
+            _ => None,
+        };
+        let hint = match shown {
+            Some(false) => Some("go to result"),
+            // With nothing found, Enter goes to what a bare ID names, if
+            // anything.
+            Some(true) => match self.id_matches(&query).first() {
+                Some(SceneSelection::Node(_)) => Some("node"),
+                Some(SceneSelection::Edge(_)) => Some("edge"),
+                None => None,
+            },
+            None => enter_hint(&query),
         };
         let input = Input::new(&self.query_input).small();
         let Some(hint) = hint else {
@@ -419,6 +428,90 @@ impl StudioView {
                         .children(self.hidden_label_rows(cx)),
                 )
             })
+    }
+
+    /// Rows above the search results for the node and relationship a bare
+    /// number names by ID.
+    fn render_id_matches(&self, query: &str, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        let Some(snapshot) = self.snapshot() else {
+            return Vec::new();
+        };
+        self.id_matches(query)
+            .into_iter()
+            .map(|selection| {
+                let (kind, label, title, color) = match selection {
+                    SceneSelection::Node(index) => (
+                        "node",
+                        snapshot.nodes.labels[index].clone(),
+                        snapshot.node_title(index).to_string(),
+                        palette().celadon,
+                    ),
+                    SceneSelection::Edge(index) => {
+                        let label = snapshot.edges.labels[index].clone();
+                        let color = relationship_color(&label);
+                        (
+                            "edge",
+                            label,
+                            format!(
+                                "{} → {}",
+                                status_node_name(snapshot, snapshot.edges.sources[index] as usize),
+                                status_node_name(snapshot, snapshot.edges.targets[index] as usize)
+                            ),
+                            color,
+                        )
+                    }
+                };
+                v_flex()
+                    .id(SharedString::from(format!("search-id-match:{kind}")))
+                    .debug_selector(move || format!("search-id-match:{kind}"))
+                    .role(Role::ListItem)
+                    .aria_label(format!("{kind} {} by ID, {title}, {label}", query.trim()))
+                    .mx_0p5()
+                    .mb_1()
+                    .p_2()
+                    .gap_1()
+                    .rounded(px(5.0))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().sidebar_accent))
+                    .on_click(cx.listener(move |this, event, window, cx| {
+                        this.focus_graph_after(event, window, cx);
+                        this.go_to_id_match(selection, window, cx);
+                    }))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(color)
+                                    .child(kind.to_uppercase()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("ID {}", query.trim())),
+                            ),
+                    )
+                    .child(
+                        title_line(&title, cx)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD),
+                    )
+                    .into_any_element()
+            })
+            .collect()
     }
 
     fn left_panel_width(&self) -> f32 {
@@ -1191,15 +1284,19 @@ impl StudioView {
                             .overflow_y_scroll()
                             .px_2()
                             .pb_3()
-                            .when(report.hits.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .p_3()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("No matching graph elements"),
-                                )
-                            })
+                            .children(self.render_id_matches(&report.query, cx))
+                            .when(
+                                report.hits.is_empty() && self.id_matches(&report.query).is_empty(),
+                                |this| {
+                                    this.child(
+                                        div()
+                                            .p_3()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("No matching graph elements"),
+                                    )
+                                },
+                            )
                             .children(report.hits.iter().enumerate().map(|(index, hit)| {
                                 let selected = index == self.selected_search_result;
                                 let result_id = match hit.kind_label() {

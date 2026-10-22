@@ -3323,15 +3323,57 @@ impl StudioView {
         }
         let query = input.read(cx).value().trim().to_string();
         self.remember_command(&query, cx);
-        if matches!(
-            &self.search_state,
-            SearchState::Ready(report)
-                if report.query.as_ref() == query && report.mode == self.search_mode
-        ) {
-            self.activate_search_result(self.selected_search_result, window, cx);
+        self.submit_query(&query, window, cx);
+    }
+
+    /// What Enter in the command box does: run a command, search, or go to
+    /// the selected result of the search already shown, or with none, to
+    /// the element a bare ID names.
+    fn submit_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let SearchState::Ready(report) = &self.search_state
+            && report.query.as_ref() == query
+            && report.mode == self.search_mode
+        {
+            match self.id_matches(query).first() {
+                Some(&selection) if report.hits.is_empty() => {
+                    self.go_to_id_match(selection, window, cx);
+                }
+                _ => self.activate_search_result(self.selected_search_result, window, cx),
+            }
             return;
         }
-        self.execute_command(&query, window, cx);
+        self.execute_command(query, window, cx);
+    }
+
+    /// The node and the relationship a search for a bare number names by
+    /// ID, so that "145" offers node 145, not only text that mentions 145.
+    pub(super) fn id_matches(&self, query: &str) -> Vec<SceneSelection> {
+        let (Some(snapshot), Ok(id)) = (self.snapshot(), query.trim().parse::<u64>()) else {
+            return Vec::new();
+        };
+        snapshot
+            .node_index(id)
+            .map(SceneSelection::Node)
+            .into_iter()
+            .chain(snapshot.edge_index(id).map(SceneSelection::Edge))
+            .collect()
+    }
+
+    /// Selects an ID match as `node <id>` or `edge <id>` would.
+    pub(super) fn go_to_id_match(
+        &mut self,
+        selection: SceneSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(snapshot) = self.snapshot() else {
+            return;
+        };
+        let command = match selection {
+            SceneSelection::Node(index) => format!("node {}", snapshot.nodes.ids[index]),
+            SceneSelection::Edge(index) => format!("edge {}", snapshot.edges.ids[index]),
+        };
+        self.execute_command(&command, window, cx);
     }
 
     /// The node label, or with `relationship` the relationship type, that a

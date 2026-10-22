@@ -3364,3 +3364,68 @@ fn right_clicking_an_overview_row_offers_its_lens_and_hiding(cx: &mut TestAppCon
         assert!(view.active_facet.is_none());
     });
 }
+
+#[gpui::test]
+fn searching_a_bare_id_offers_what_it_names(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("id-search");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+
+    // "3" finds the file whose path mentions it, and above it offers node 3
+    // and relationship 3 by ID.
+    view.update_in(cx, |view, window, cx| view.submit_query("3", window, cx));
+    cx.run_until_parked();
+    draw(cx);
+    view.read_with(&*cx, |view, _| {
+        let SearchState::Ready(report) = &view.search_state else {
+            panic!("the search finishes");
+        };
+        assert_eq!(report.hits.len(), 1);
+    });
+    assert!(cx.debug_bounds("search-id-match:node").is_some());
+    let edge_row = cx.debug_bounds("search-id-match:edge").unwrap();
+    cx.simulate_click(edge_row.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let index = view.snapshot().unwrap().edge_index(3).unwrap();
+        assert_eq!(view.selection, Some(SceneSelection::Edge(index)));
+    });
+
+    // With no text match, the ID is all there is, and Enter goes to it.
+    let session = live.add_session();
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("reload", window, cx)
+    });
+    cx.run_until_parked();
+    let query = session.to_string();
+    view.update_in(cx, |view, window, cx| view.submit_query(&query, window, cx));
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        let SearchState::Ready(report) = &view.search_state else {
+            panic!("the search finishes");
+        };
+        assert!(report.hits.is_empty());
+        let index = view.snapshot().unwrap().node_index(session).unwrap();
+        assert_eq!(view.id_matches(&query), [SceneSelection::Node(index)]);
+        view.submit_query(&query, window, cx);
+        assert_eq!(view.selection, Some(SceneSelection::Node(index)));
+        assert_eq!(view.status.as_ref(), "Selected Live session");
+    });
+
+    // A number that names nothing finds nothing.
+    view.update_in(cx, |view, window, cx| view.submit_query("4096", window, cx));
+    cx.run_until_parked();
+    draw(cx);
+    view.read_with(&*cx, |view, _| assert!(view.id_matches("4096").is_empty()));
+    assert!(cx.debug_bounds("search-id-match:node").is_none());
+}
