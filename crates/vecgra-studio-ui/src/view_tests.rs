@@ -3307,6 +3307,11 @@ fn right_clicking_an_overview_row_offers_its_lens_and_hiding(cx: &mut TestAppCon
             .collect()
     };
 
+    // Each label row carries the colour its nodes are drawn in.
+    let row = cx.debug_bounds("node-label-facet:Document").unwrap();
+    let colour = cx.debug_bounds("node-label-colour:Document").unwrap();
+    assert!(row.contains(&colour.center()));
+
     right_click(cx, "node-label-facet:Document");
     view.read_with(&*cx, |view, _| {
         assert_eq!(

@@ -374,7 +374,20 @@ impl StudioView {
                                             h_flex()
                                                 .flex_1()
                                                 .min_w_0()
+                                                .gap_1()
                                                 .items_center()
+                                                // The colour the canvas draws
+                                                // these nodes in, so the list
+                                                // is also the legend.
+                                                .child({
+                                                    let selector =
+                                                        format!("node-label-colour:{label}");
+                                                    div()
+                                                        .debug_selector(move || selector)
+                                                        .size(px(7.0))
+                                                        .rounded_full()
+                                                        .bg(label_color(label))
+                                                })
                                                 .child(div().flex_1())
                                                 .when(active, |this| {
                                                     this.child(

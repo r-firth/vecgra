@@ -236,8 +236,9 @@ preserved. Escape or the
 Overview row springs positions, camera, and emphasis back to that saved
 presentation. Reduced Motion snaps to the same semantic endpoints.
 
-The relationship and node-label taxonomies are controls rather than a passive
-legend. Activating a relationship row raises every visible relationship of
+The relationship and node-label taxonomies are controls as well as the
+canvas's legend: each row carries the color its relationships or nodes are
+drawn in. Activating a relationship row raises every visible relationship of
 that type and both endpoints into the relevance field. Activating a node-label
 row raises matching nodes while retaining quieter incident evidence. The active
 row carries a focusable toggle semantic, a left-edge structural marker, and a
