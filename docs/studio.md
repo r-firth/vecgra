@@ -56,11 +56,12 @@ attempt to draw every record as a giant hairball.
    inspector offers the most recent ones while nothing is selected.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout. Hovering
-   a node shows its title, label, and relationship count beside it without
-   changing the selection; hovering a node in the inspector's connections,
+   a node shows its title, label, relationship count, and up to three other
+   properties beside it without changing the selection; hovering a node in the inspector's connections,
    a relationship's endpoints, or the search results shows the same card
    and rings the node on the canvas. Below the overview, hovering a
-   relationship's line shows its type and both ends and rings them, and the
+   relationship's line shows its type, both ends, and up to three of its
+   properties, and rings the ends, and the
    canvas names the selection (both ends, for a relationship), its
    best-connected neighbors, path endpoints, and the strongest search
    matches; zoomed in to individual elements with nothing selected, it

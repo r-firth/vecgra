@@ -1770,6 +1770,55 @@ fn hovering_a_relationship_names_its_type_and_ends(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn hover_cards_show_properties_other_than_the_title(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("hover-properties");
+    let mut transaction = live.database.transaction();
+    let session = transaction.create_node(
+        "Session",
+        [
+            ("title", vecgra::Value::String("Tidy the inspector".into())),
+            ("agent", vecgra::Value::String("claude".into())),
+        ],
+        &[],
+    );
+    transaction.commit().unwrap();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    view.update(cx, |view, cx| {
+        assert!(view.is_ready(), "{}", view.status);
+        view.settle_presentation_for_capture();
+        view.hovered_node = Some(session);
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("graph-hover-card").is_some());
+    assert!(
+        cx.debug_bounds("graph-hover-properties").is_some(),
+        "the session's agent is shown"
+    );
+
+    // A file's only property is the path that already titles it.
+    view.update(cx, |view, cx| {
+        view.hovered_node = Some(live.files[0]);
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("graph-hover-card").is_some());
+    assert!(cx.debug_bounds("graph-hover-properties").is_none());
+}
+
+#[gpui::test]
 fn hovering_an_inspector_connection_points_out_the_node(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

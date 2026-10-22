@@ -2089,6 +2089,7 @@ impl StudioView {
                                 .text_sm(),
                         ),
                 )
+                .children(hover_properties(&snapshot.edges.properties[edge], "", cx))
                 .into_any_element(),
         );
         Some(elements)
@@ -2152,6 +2153,11 @@ impl StudioView {
                         format_count(snapshot.nodes.degrees[index] as usize)
                     )),
             )
+            .children(hover_properties(
+                &snapshot.nodes.properties[index],
+                &scene_node_title(snapshot, index),
+                cx,
+            ))
             .into_any_element();
         Some([ring, card])
     }
@@ -2612,6 +2618,57 @@ fn inspector_label(label: &'static str) -> impl IntoElement {
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(rgb(0x70838e))
         .child(label)
+}
+
+/// Up to three of an element's properties for a hover card, one line each,
+/// leaving out the one already shown as its title.
+fn hover_properties(
+    properties: &[vecgra_studio_core::SceneProperty],
+    title: &str,
+    cx: &Context<StudioView>,
+) -> Option<gpui::AnyElement> {
+    const SHOWN: usize = 3;
+    let title_prefix = title.strip_suffix('…').unwrap_or(title);
+    let rows: Vec<_> = properties
+        .iter()
+        .filter_map(|property| {
+            if matches!(property.value, PropertyValue::Bytes(_)) {
+                return None;
+            }
+            let value = format_value(&property.value);
+            let line = value.lines().map(str::trim).find(|line| !line.is_empty())?;
+            let is_title = !title.is_empty() && (line == title || line.starts_with(title_prefix));
+            (!is_title).then(|| (property.key.clone(), line.to_string()))
+        })
+        .take(SHOWN)
+        .map(|(key, value)| {
+            h_flex()
+                .gap_1p5()
+                .min_w_0()
+                .text_xs()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(key.to_string()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(value),
+                )
+        })
+        .collect();
+    (!rows.is_empty()).then(|| {
+        v_flex()
+            .debug_selector(|| "graph-hover-properties".into())
+            .pt_1()
+            .gap_0p5()
+            .children(rows)
+            .into_any_element()
+    })
 }
 
 /// A ring around a node on the canvas, at its canvas-local position.
