@@ -2441,3 +2441,85 @@ fn the_status_bar_names_what_was_selected(cx: &mut TestAppContext) {
         assert_eq!(view.status.as_ref(), "Tracing exact path · 0.rs → 3.rs…");
     });
 }
+
+#[gpui::test]
+fn up_and_down_in_the_command_box_recall_commands_and_step_results(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("command-history");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    let input = view.read_with(&*cx, |view, _| view.query_input.clone());
+    let type_text = |cx: &mut gpui::VisualTestContext, text: &str| {
+        let text = text.to_string();
+        input.update_in(cx, |input, window, cx| input.set_value(text, window, cx));
+    };
+    let submit = |cx: &mut gpui::VisualTestContext, text: &str| {
+        type_text(cx, text);
+        input.update(cx, |_, cx| {
+            cx.emit(InputEvent::PressEnter {
+                secondary: false,
+                shift: false,
+            })
+        });
+        cx.run_until_parked();
+    };
+    let step = |cx: &mut gpui::VisualTestContext, earlier: bool| {
+        view.update_in(cx, |view, window, cx| {
+            view.step_search_box(earlier, window, cx)
+        });
+        input.read_with(&*cx, |input, _| input.value().to_string())
+    };
+
+    submit(cx, &format!("node {}", live.files[1]));
+    submit(cx, "zoom 2");
+    submit(cx, "zoom 2");
+    submit(cx, "rs");
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(
+            view.command_history,
+            [&format!("node {}", live.files[1]), "zoom 2", "rs"]
+        );
+        assert!(matches!(&view.search_state, SearchState::Ready(report) if report.hits.len() > 2));
+        assert_eq!(view.selected_search_result, 0);
+    });
+
+    // With its results listed, the search moves through them.
+    assert_eq!(step(cx, false), "rs");
+    assert_eq!(step(cx, false), "rs");
+    assert_eq!(
+        view.read_with(&*cx, |view, _| view.selected_search_result),
+        2
+    );
+    assert_eq!(step(cx, true), "rs");
+    assert_eq!(
+        view.read_with(&*cx, |view, _| view.selected_search_result),
+        1
+    );
+
+    // Anything else steps back through what was submitted, and forward
+    // again to the text being written.
+    type_text(cx, "draft");
+    assert_eq!(step(cx, true), "rs");
+    assert_eq!(step(cx, true), "zoom 2");
+    assert_eq!(step(cx, true), format!("node {}", live.files[1]));
+    assert_eq!(step(cx, true), format!("node {}", live.files[1]));
+    assert_eq!(step(cx, false), "zoom 2");
+    assert_eq!(step(cx, false), "rs");
+    assert_eq!(
+        view.read_with(&*cx, |view, _| view.selected_search_result),
+        1
+    );
+    assert_eq!(step(cx, false), "draft");
+    assert_eq!(step(cx, false), "draft");
+
+    // Editing a recalled command makes it the text being written.
+    assert_eq!(step(cx, true), "rs");
+    input.update(cx, |_, cx| cx.emit(InputEvent::Change));
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| assert!(view.history_browse.is_none()));
+}

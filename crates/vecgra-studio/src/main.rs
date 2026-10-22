@@ -10,8 +10,8 @@ use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
     ExportView, FitView, FocusSearch, NextSearchResult, OpenDatabase, PreviousSearchResult,
-    ReleaseSelected, ReloadDatabase, SelectionBack, SelectionForward, StudioView, ToggleHelp,
-    ToggleLiveRefresh, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
+    ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp, SelectionBack, SelectionForward,
+    StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -76,6 +76,10 @@ fn main() {
             KeyBinding::new("cmd-k", FocusSearch, Some("VecgraStudio")),
             KeyBinding::new("down", NextSearchResult, Some("VecgraStudio")),
             KeyBinding::new("up", PreviousSearchResult, Some("VecgraStudio")),
+            // In the command box, Up and Down step through earlier commands or the
+            // listed results instead of doing nothing, as a one-line input would.
+            KeyBinding::new("up", SearchBoxUp, Some("VecgraStudio > Input")),
+            KeyBinding::new("down", SearchBoxDown, Some("VecgraStudio > Input")),
             KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());

@@ -71,7 +71,9 @@ actions!(
         SelectionBack,
         SelectionForward,
         ToggleHelp,
-        ExportView
+        ExportView,
+        SearchBoxUp,
+        SearchBoxDown
     ]
 );
 
@@ -131,6 +133,17 @@ enum PathState {
         end: u64,
         error: SharedString,
     },
+}
+
+/// How many submitted searches and commands the command box remembers.
+const COMMAND_HISTORY_LIMIT: usize = 100;
+
+/// Stepping through earlier commands from the command box.
+struct HistoryBrowse {
+    /// The entry in the box.
+    index: usize,
+    /// What was in the box before the first step back.
+    draft: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -552,6 +565,9 @@ pub struct StudioView {
     expanded_connections: Vec<(Arc<str>, bool)>,
     selection_back: Vec<SelectedElement>,
     selection_forward: Vec<SelectedElement>,
+    /// Searches and commands submitted from the command box, oldest first.
+    command_history: Vec<String>,
+    history_browse: Option<HistoryBrowse>,
     help_visible: bool,
     /// The node under the pointer, by ID so a reload cannot point it at
     /// another node.
@@ -675,6 +691,8 @@ impl StudioView {
             expanded_connections: Vec::new(),
             selection_back: Vec::new(),
             selection_forward: Vec::new(),
+            command_history: Vec::new(),
+            history_browse: None,
             help_visible: false,
             hovered_node: None,
             hover_camera: None,
@@ -2504,6 +2522,63 @@ impl StudioView {
         }
     }
 
+    fn remember_command(&mut self, query: &str) {
+        self.history_browse = None;
+        if query.is_empty()
+            || self
+                .command_history
+                .last()
+                .is_some_and(|last| last == query)
+        {
+            return;
+        }
+        if self.command_history.len() == COMMAND_HISTORY_LIMIT {
+            self.command_history.remove(0);
+        }
+        self.command_history.push(query.to_string());
+    }
+
+    /// Up and Down in the command box. While the box holds the search whose
+    /// results are listed, they move through the results, as they do with
+    /// the graph focused; otherwise they step through earlier searches and
+    /// commands, and stepping past the newest restores what was being typed.
+    fn step_search_box(&mut self, earlier: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.query_input.read(cx).value().trim().to_string();
+        if self.history_browse.is_none()
+            && matches!(
+                &self.search_state,
+                SearchState::Ready(report) if report.query.as_ref() == text && !report.hits.is_empty()
+            )
+        {
+            self.move_search_selection(if earlier { -1 } else { 1 }, cx);
+            return;
+        }
+        let current = self.history_browse.as_ref().map(|browse| browse.index);
+        let target = match (current, earlier) {
+            (None, true) => self.command_history.len().checked_sub(1),
+            (None, false) => return,
+            (Some(index), true) => Some(index.saturating_sub(1)),
+            (Some(index), false) => {
+                Some(index + 1).filter(|&next| next < self.command_history.len())
+            }
+        };
+        let value = match (target, self.history_browse.take()) {
+            (Some(index), browse) => {
+                let draft = browse.map_or_else(
+                    || self.query_input.read(cx).value().to_string(),
+                    |browse| browse.draft,
+                );
+                self.history_browse = Some(HistoryBrowse { index, draft });
+                self.command_history[index].clone()
+            }
+            (None, Some(browse)) => browse.draft,
+            (None, None) => return,
+        };
+        self.query_input
+            .update(cx, |input, cx| input.set_value(value, window, cx));
+        cx.notify();
+    }
+
     fn move_search_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
         let SearchState::Ready(report) = &self.search_state else {
             return;
@@ -3074,6 +3149,9 @@ impl StudioView {
         cx: &mut Context<Self>,
     ) {
         if matches!(event, InputEvent::Change) {
+            // Editing a recalled command makes it the text being written;
+            // recalling only sets the text, which raises no event.
+            self.history_browse = None;
             // The box's Enter hint depends on its text.
             cx.notify();
             return;
@@ -3082,6 +3160,7 @@ impl StudioView {
             return;
         }
         let query = input.read(cx).value().trim().to_string();
+        self.remember_command(&query);
         if matches!(
             &self.search_state,
             SearchState::Ready(report)
@@ -3508,6 +3587,12 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &PreviousSearchResult, _, cx| {
                 this.move_search_selection(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SearchBoxUp, window, cx| {
+                this.step_search_box(true, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SearchBoxDown, window, cx| {
+                this.step_search_box(false, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ReloadDatabase, window, cx| {
                 this.reload(window, cx);

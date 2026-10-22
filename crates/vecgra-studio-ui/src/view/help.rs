@@ -9,6 +9,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
         "Navigate",
         &[
             ("⌘K", "Search or run a command"),
+            ("↑  ↓", "Step through results, or earlier commands"),
             ("⌘0", "Fit the graph"),
             ("⌘=  ⌘-", "Zoom in and out"),
             ("Enter", "Lay out the selection's context"),
