@@ -1503,7 +1503,10 @@ fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
             full.edges.sources[edge] as usize == hub || full.edges.targets[edge] as usize == hub
         })
         .count();
-    let hidden = std::collections::BTreeSet::from([hub_id]);
+    let hidden = HiddenNodes {
+        ids: [hub_id].into(),
+        ..HiddenNodes::default()
+    };
 
     let shown = full.without_nodes(&hidden);
     assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - 1);
@@ -1538,4 +1541,26 @@ fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
             shown.nodes.positions[index]
         );
     }
+}
+
+#[test]
+fn a_hidden_label_hides_every_node_with_it() {
+    let mut full = SceneSnapshot::demo();
+    full.layout(LayoutOptions::default());
+    let label = full.nodes.labels[0].clone();
+    let with_label = full
+        .nodes
+        .labels
+        .iter()
+        .filter(|other| **other == label)
+        .count();
+    let hidden = HiddenNodes {
+        labels: [label.clone()].into(),
+        ..HiddenNodes::default()
+    };
+    assert!(hidden.hides(full.nodes.ids[0], &label));
+    let shown = full.without_nodes(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - with_label);
+    assert!(shown.nodes.labels.iter().all(|other| *other != label));
+    assert!(HiddenNodes::default().is_empty() && !hidden.is_empty());
 }

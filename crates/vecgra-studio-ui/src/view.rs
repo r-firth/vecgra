@@ -38,7 +38,7 @@ mod hidden;
 mod node_menu;
 mod panels;
 
-use hidden::HiddenNodes;
+use hidden::HiddenScene;
 use node_menu::NodeMenu;
 use panels::path_direction_label;
 #[cfg(test)]
@@ -373,7 +373,12 @@ fn reads_as_command(query: &str) -> bool {
     match first {
         "fit" | "clear" | "reload" | "refresh" | "help" | "?" | "shortcuts" | "back"
         | "forward" | "release" | "unhide" => rest.is_empty(),
-        "hide" => matches!(rest.as_slice(), [] | [_]) && rest.iter().all(|id| is_id(id)),
+        "hide" => match rest.as_slice() {
+            [] => true,
+            [id] => is_id(id),
+            ["label", label] => !label.is_empty(),
+            _ => false,
+        },
         "zoom" => matches!(rest.as_slice(), [factor] if parse_zoom(factor).is_some()),
         "live" | "watch" => matches!(rest.as_slice(), [] | ["on" | "off"]),
         "layout" => matches!(rest.as_slice(), ["auto" | "force" | "structure" | "orbit"]),
@@ -605,7 +610,7 @@ pub struct StudioView {
     hover_camera: Option<Camera>,
     fresh_nodes: Option<FreshNodes>,
     /// Nodes taken out of view, and the scene they were taken from.
-    hidden: Option<HiddenNodes>,
+    hidden: Option<HiddenScene>,
     recent: RecentDatabases,
     /// Where the recent list is saved; `None` keeps it in memory, as tests do.
     recent_file: Option<PathBuf>,
@@ -1213,7 +1218,7 @@ impl StudioView {
         }
         let (previous_positions, pinned_ids) = anchor_positions(&workspace.borrow(), &previous);
         let selected = self.selected_element(self.selection);
-        let hidden = self.hidden.as_ref().map(|hidden| hidden.ids.clone());
+        let hidden = self.hidden.as_ref().map(|scene| scene.hidden.clone());
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.reload_in_progress = true;
@@ -3329,15 +3334,21 @@ impl StudioView {
                 }
             },
             Some("release") => self.release_selected(cx),
-            Some("hide") => match parts.next().and_then(|id| id.parse::<u64>().ok()) {
-                None => self.hide_selected(cx),
-                Some(id) => match self.snapshot().and_then(|snapshot| snapshot.node_index(id)) {
-                    Some(index) => self.hide_node(index, cx),
-                    None => {
-                        self.status = format!("Node {id} is not in this view").into();
-                        cx.notify();
+            Some("hide") => match (parts.next(), parts.next()) {
+                (None, _) => self.hide_selected(cx),
+                (Some("label"), Some(label)) => self.hide_label(label, cx),
+                (Some(id), _) => {
+                    let index = id.parse::<u64>().ok().and_then(|id| {
+                        self.snapshot().and_then(|snapshot| snapshot.node_index(id))
+                    });
+                    match index {
+                        Some(index) => self.hide_node(index, cx),
+                        None => {
+                            self.status = format!("Node {id} is not in this view").into();
+                            cx.notify();
+                        }
                     }
-                },
+                }
             },
             Some("unhide") => self.show_hidden_nodes(cx),
             Some("layout") => match parts.next() {

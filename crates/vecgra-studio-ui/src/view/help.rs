@@ -86,9 +86,9 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "Reread or watch the file",
     ),
     (
-        "hide [id]  ·  unhide",
+        "hide [id] | label <label>  ·  unhide",
         "hide ",
-        "Hide a node, or show them all",
+        "Hide a node or a label, or show all",
     ),
     (
         "back  ·  forward  ·  clear",

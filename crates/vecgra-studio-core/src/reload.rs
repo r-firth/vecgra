@@ -57,6 +57,24 @@ impl SceneDelta {
     }
 }
 
+/// Nodes taken out of view, by ID or by label. A hidden label also hides
+/// nodes with that label that arrive later.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HiddenNodes {
+    pub ids: std::collections::BTreeSet<NodeId>,
+    pub labels: std::collections::BTreeSet<Arc<str>>,
+}
+
+impl HiddenNodes {
+    pub fn hides(&self, id: NodeId, label: &str) -> bool {
+        self.ids.contains(&id) || self.labels.contains(label)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty() && self.labels.is_empty()
+    }
+}
+
 /// A freshly read scene anchored on the presentation it replaces.
 #[derive(Clone, Debug)]
 pub struct ReloadedScene {
@@ -105,7 +123,7 @@ impl SceneSnapshot {
         path: impl AsRef<Path>,
         previous: &SceneSnapshot,
         previous_positions: &[Vec2],
-        hidden: &std::collections::BTreeSet<NodeId>,
+        hidden: &HiddenNodes,
         snapshot_options: SnapshotOptions,
         layout_options: LayoutOptions,
     ) -> vecgra::Result<(ReloadedScene, SceneSnapshot)> {
@@ -117,14 +135,14 @@ impl SceneSnapshot {
         Ok((reloaded, full))
     }
 
-    /// This scene without the given nodes and the relationships that touch
-    /// them, for hiding nodes from view. Everything about the elements that
-    /// remain is kept, including their positions and degrees.
-    pub fn without_nodes(&self, hidden: &std::collections::BTreeSet<NodeId>) -> SceneSnapshot {
+    /// This scene without the nodes `hidden` names and the relationships
+    /// that touch them, for hiding nodes from view. Everything about the
+    /// elements that remain is kept, including their positions and degrees.
+    pub fn without_nodes(&self, hidden: &HiddenNodes) -> SceneSnapshot {
         let mut kept = vec![None; self.nodes.ids.len()];
         let mut nodes = SceneNodes::default();
         for (index, &id) in self.nodes.ids.iter().enumerate() {
-            if hidden.contains(&id) {
+            if hidden.hides(id, &self.nodes.labels[index]) {
                 continue;
             }
             kept[index] = Some(nodes.ids.len() as u32);

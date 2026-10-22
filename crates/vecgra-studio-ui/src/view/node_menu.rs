@@ -23,6 +23,7 @@ pub(super) enum NodeMenuItem {
     SetPathOrigin,
     Release,
     Hide,
+    HideLabel,
     CopyText,
     CopyId,
 }
@@ -118,6 +119,20 @@ impl StudioView {
             "Hide from view".to_string(),
             "⌫",
         )));
+        let label = &snapshot.nodes.labels[index];
+        let same_label = snapshot
+            .nodes
+            .labels
+            .iter()
+            .filter(|other| *other == label)
+            .count();
+        if same_label > 1 {
+            items.push(Some((
+                NodeMenuItem::HideLabel,
+                format!("Hide all {same_label} {label} nodes"),
+                "",
+            )));
+        }
         items.push(None);
         items.push(Some((
             NodeMenuItem::CopyText,
@@ -164,6 +179,14 @@ impl StudioView {
             NodeMenuItem::SetPathOrigin => self.choose_path_start(index, window, cx),
             NodeMenuItem::Release => self.release_selected(cx),
             NodeMenuItem::Hide => self.hide_node(index, cx),
+            NodeMenuItem::HideLabel => {
+                if let Some(label) = self
+                    .snapshot()
+                    .map(|snapshot| snapshot.nodes.labels[index].clone())
+                {
+                    self.hide_label(&label, cx);
+                }
+            }
             NodeMenuItem::CopyText => self.copy_selection(cx),
             NodeMenuItem::CopyId => {
                 let id = format!("node:{}", menu.node);

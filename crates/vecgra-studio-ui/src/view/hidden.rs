@@ -1,25 +1,36 @@
-//! Hiding nodes from view: a hub that touches everything, or a node beside
-//! the point, can be taken off the canvas with its relationships, and shown
-//! again later beside its neighbors.
+//! Hiding nodes from view: a hub that touches everything, a node beside the
+//! point, or every node of a label can be taken off the canvas with their
+//! relationships, and shown again later where they were.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
+
+use vecgra_studio_core::HiddenNodes;
 
 use super::*;
 
-/// The nodes hidden from view, and the scene they were hidden from, so that
-/// showing them again does not need the database (or works without one).
-pub(super) struct HiddenNodes {
+/// What is hidden from view, and the scene it was hidden from, so that
+/// showing it again does not need the database (or works without one).
+pub(super) struct HiddenScene {
     /// The scene as last read, with every node.
     pub(super) full: Arc<SceneSnapshot>,
-    pub(super) ids: BTreeSet<u64>,
+    pub(super) hidden: HiddenNodes,
     /// Where each hidden node was laid out, so it comes back to the same
     /// place.
     positions: HashMap<u64, Vec2>,
 }
 
 impl StudioView {
+    /// How many of the scene's nodes are hidden.
     pub(super) fn hidden_count(&self) -> usize {
-        self.hidden.as_ref().map_or(0, |hidden| hidden.ids.len())
+        match (&self.hidden, self.snapshot()) {
+            (Some(hidden), Some(snapshot)) => hidden
+                .full
+                .nodes
+                .ids
+                .len()
+                .saturating_sub(snapshot.nodes.ids.len()),
+            _ => 0,
+        }
     }
 
     pub(super) fn hide_selected(&mut self, cx: &mut Context<Self>) {
@@ -42,21 +53,9 @@ impl StudioView {
             return;
         };
         let name = status_node_name(&current, index);
-        let position = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.borrow().overview_positions().get(index).copied());
-        let hidden = self.hidden.get_or_insert_with(|| HiddenNodes {
-            full: current.clone(),
-            ids: BTreeSet::new(),
-            positions: HashMap::new(),
+        self.hide_where(&current, |hidden| {
+            hidden.ids.insert(id);
         });
-        hidden.ids.insert(id);
-        if let Some(position) = position {
-            hidden.positions.insert(id, position);
-        }
-        let scene = hidden.full.without_nodes(&hidden.ids);
-        self.show_scene(scene, &current, &HashMap::new());
         self.status = format!(
             "Hid {name} · {} hidden · ⇧⌘H shows them",
             self.hidden_count()
@@ -65,15 +64,69 @@ impl StudioView {
         cx.notify();
     }
 
+    /// Takes every node with `label` off the canvas, including any that a
+    /// later reload brings in.
+    pub(super) fn hide_label(&mut self, label: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.snapshot().cloned() else {
+            return;
+        };
+        let count = current
+            .nodes
+            .labels
+            .iter()
+            .filter(|other| &***other == label)
+            .count();
+        if count == 0 {
+            self.status = format!("No {label} nodes are in view").into();
+            cx.notify();
+            return;
+        }
+        let label: Arc<str> = label.into();
+        self.hide_where(&current, |hidden| {
+            hidden.labels.insert(label.clone());
+        });
+        self.status = format!(
+            "Hid {count} {label} node{} · {} hidden · ⇧⌘H shows them",
+            if count == 1 { "" } else { "s" },
+            self.hidden_count()
+        )
+        .into();
+        cx.notify();
+    }
+
+    /// Adds to what is hidden and shows the scene without it.
+    fn hide_where(&mut self, current: &Arc<SceneSnapshot>, add: impl FnOnce(&mut HiddenNodes)) {
+        let overview = self
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.borrow().overview_positions().to_vec())
+            .unwrap_or_default();
+        let scene = self.hidden.get_or_insert_with(|| HiddenScene {
+            full: current.clone(),
+            hidden: HiddenNodes::default(),
+            positions: HashMap::new(),
+        });
+        add(&mut scene.hidden);
+        for (index, &id) in current.nodes.ids.iter().enumerate() {
+            if scene.hidden.hides(id, &current.nodes.labels[index])
+                && let Some(&position) = overview.get(index)
+            {
+                scene.positions.insert(id, position);
+            }
+        }
+        let shown = scene.full.without_nodes(&scene.hidden);
+        self.show_scene(shown, current, &HashMap::new());
+    }
+
     /// Puts every hidden node back where it was, each entering from a
     /// neighbor and ringed like nodes a reload adds.
     pub(super) fn show_hidden_nodes(&mut self, cx: &mut Context<Self>) {
+        let count = self.hidden_count();
         let (Some(current), Some(hidden)) = (self.snapshot().cloned(), self.hidden.take()) else {
             self.status = "No nodes are hidden".into();
             cx.notify();
             return;
         };
-        let count = hidden.ids.len();
         self.show_scene(
             Arc::unwrap_or_clone(hidden.full),
             &current,

@@ -1484,6 +1484,7 @@ fn command_words_followed_by_other_words_are_searched() {
         "export view.svg",
         "hide",
         "hide 54",
+        "hide label Symbol",
         "unhide",
         "text graph",
         "semantic",
@@ -2694,6 +2695,7 @@ fn right_clicking_a_node_opens_its_menu(cx: &mut TestAppContext) {
                 "Trace path from 0.rs",
                 "Set as path origin",
                 "Hide from view",
+                "Hide all 8 File nodes",
                 "Copy as text",
                 "Copy ID"
             ]
@@ -2923,5 +2925,28 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(kept_position(view), before);
         assert_eq!(position_of(view, middle), middle_before);
         assert_eq!(view.status.as_ref(), "Showing 2 hidden nodes");
+    });
+
+    // A hidden label also hides nodes with it that arrive later.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("hide label Session", window, cx);
+        assert_eq!(view.snapshot().unwrap().node_index(session), None);
+        assert_eq!(view.hidden_count(), 1);
+        assert!(
+            view.status.starts_with("Hid 1 Session node · 1 hidden"),
+            "{}",
+            view.status
+        );
+    });
+    let later = live.add_session();
+    view.update_in(cx, |view, window, cx| view.reload(window, cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(snapshot.node_index(later), None);
+        assert_eq!(snapshot.nodes.ids.len(), 8);
+        assert_eq!(view.hidden_count(), 2);
+        view.show_hidden_nodes(cx);
+        assert!(view.snapshot().unwrap().node_index(later).is_some());
     });
 }
