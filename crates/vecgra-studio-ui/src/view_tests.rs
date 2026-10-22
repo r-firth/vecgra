@@ -2949,11 +2949,20 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(kept_position(view), before);
     });
 
-    // Search still finds it, and choosing it says why it is not shown.
+    // Search still finds it, tagged as hidden, and choosing it says why it
+    // is not shown.
     view.update_in(cx, |view, window, cx| {
         view.execute_command("3.rs", window, cx);
     });
     cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let hidden_tag = format!("search-result-hidden:{middle}");
+    assert!(
+        cx.debug_bounds(Box::leak(hidden_tag.into_boxed_str()))
+            .is_some()
+    );
     view.update_in(cx, |view, window, cx| {
         let SearchState::Ready(report) = &view.search_state else {
             panic!("the search finishes");

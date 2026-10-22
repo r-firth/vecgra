@@ -102,6 +102,14 @@ impl StudioView {
         self.hidden.as_ref().map_or(0, |scene| scene.nodes)
     }
 
+    /// Whether a search hit is in the scene but hidden from view.
+    pub(super) fn hit_is_hidden(&self, hit: &vecgra_studio_core::SearchHit) -> bool {
+        let (Some(scene), Some(snapshot)) = (self.hidden.as_ref(), self.snapshot()) else {
+            return false;
+        };
+        hit.scene_selection(snapshot).is_none() && hit.scene_selection(&scene.full).is_some()
+    }
+
     /// The status bar's account of what is hidden, if anything is.
     pub(super) fn hidden_summary(&self) -> Option<String> {
         self.hidden

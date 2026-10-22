@@ -1198,12 +1198,14 @@ impl StudioView {
                                 } else {
                                     palette().celadon
                                 };
+                                let hidden = self.hit_is_hidden(hit);
                                 let accessible_label = format!(
-                                    "{} {}, {}, relevance {:.0} percent",
+                                    "{} {}, {}, relevance {:.0} percent{}",
                                     hit.kind_label().to_lowercase(),
                                     hit.title,
                                     hit.label,
-                                    hit.score * 100.0
+                                    hit.score * 100.0,
+                                    if hidden { ", hidden" } else { "" }
                                 );
                                 v_flex()
                                     .id(result_id)
@@ -1257,6 +1259,26 @@ impl StudioView {
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(hit.label.to_string()),
                                             )
+                                            // A hidden hit is still listed, so
+                                            // the search stays complete, but
+                                            // says it is not on the canvas.
+                                            .when(hidden, |this| {
+                                                this.child(
+                                                    div()
+                                                        .debug_selector({
+                                                            let id = hit.id();
+                                                            move || {
+                                                                format!("search-result-hidden:{id}")
+                                                            }
+                                                        })
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_xs()
+                                                        .text_color(palette().copper)
+                                                        .child("hidden"),
+                                                )
+                                            })
                                             .child(
                                                 div()
                                                     .font_family(

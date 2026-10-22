@@ -2741,11 +2741,7 @@ impl StudioView {
             return;
         };
         let Some(selection) = hit.scene_selection(snapshot) else {
-            let hidden = self
-                .hidden
-                .as_ref()
-                .is_some_and(|scene| hit.scene_selection(&scene.full).is_some());
-            self.status = if hidden {
+            self.status = if self.hit_is_hidden(&hit) {
                 format!("{} is hidden · ⇧⌘H shows what is hidden", hit.title)
             } else {
                 format!(
