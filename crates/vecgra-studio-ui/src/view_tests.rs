@@ -371,6 +371,62 @@ fn taxonomy_facets_create_a_reversible_graph_lens(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn selecting_by_id_brings_hidden_elements_into_view(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    view.update_in(cx, |view, window, cx| {
+        let position = |view: &StudioView, index: usize| {
+            view.workspace
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .position(index)
+                .unwrap()
+        };
+        let node = position(view, 5);
+
+        // Visible already: the camera stays where it is.
+        view.camera.center = node + Vec2::new(1.0, 1.0);
+        view.camera_motion.cancel_at(view.camera);
+        let before = view.camera.center;
+        view.execute_command("node 5", window, cx);
+        view.settle_presentation_for_capture();
+        assert_eq!(view.camera.center, before);
+
+        // Far outside the canvas: the camera springs to it at the same zoom.
+        view.camera.center = node + Vec2::new(100_000.0, 0.0);
+        view.camera_motion.cancel_at(view.camera);
+        let zoom = view.camera.zoom;
+        view.execute_command("node 5", window, cx);
+        view.settle_presentation_for_capture();
+        assert!((view.camera.center - node).length() < 0.5);
+        assert_eq!(view.camera.zoom, zoom);
+
+        // A relationship is framed by its midpoint.
+        let snapshot = view.snapshot().unwrap().clone();
+        let (source, target) = (
+            snapshot.edges.sources[0] as usize,
+            snapshot.edges.targets[0] as usize,
+        );
+        let middle = (position(view, source) + position(view, target)) * 0.5;
+        view.camera.center = middle + Vec2::new(0.0, 100_000.0);
+        view.camera_motion.cancel_at(view.camera);
+        view.execute_command(&format!("edge {}", snapshot.edges.ids[0]), window, cx);
+        view.settle_presentation_for_capture();
+        assert!((view.camera.center - middle).length() < 0.5);
+    });
+}
+
+#[gpui::test]
 fn titles_that_start_with_a_command_word_are_searched(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

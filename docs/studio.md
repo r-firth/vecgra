@@ -145,6 +145,8 @@ The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
 after the command fit it, so a search such as `release notes`,
 `layout refresh`, or `open dialog for files` still searches; text that names
 a command's IDs but gets the rest wrong reports what the command expected.
+`node <id>` and `edge <id>` spring the camera to the element, at the current
+zoom, when any of it is off screen.
 `Cmd-/`, `F1`, `help`, or the `?` at the end of
 the status bar opens a dialog listing every shortcut and command; clicking a
 command closes the dialog and starts that command in the input. While the

@@ -1373,26 +1373,7 @@ impl StudioView {
             }
             self.inspector_scroll_handle.set_offset(Default::default());
             self.selection = Some(selection);
-            let focus = match selection {
-                SceneSelection::Node(index) => vec![index],
-                SceneSelection::Edge(index) => vec![
-                    snapshot.edges.sources[index] as usize,
-                    snapshot.edges.targets[index] as usize,
-                ],
-            };
-            if let Some(workspace) = self.workspace.as_ref() {
-                let workspace = workspace.borrow();
-                let points: Vec<_> = focus
-                    .iter()
-                    .filter_map(|&index| workspace.position(index))
-                    .collect();
-                if !points.is_empty() {
-                    self.camera_motion.retarget(Camera {
-                        center: Rect::from_points(&points).center(),
-                        zoom: self.camera.zoom,
-                    });
-                }
-            }
+            self.spring_to_selection(false);
             self.status = match element {
                 SelectedElement::Node(id) => {
                     format!("{} · node {id}", if backward { "Back" } else { "Forward" })
@@ -1406,6 +1387,53 @@ impl StudioView {
             self.begin_presentation_motion(window, cx);
             return;
         }
+    }
+
+    /// Springs the camera, at the current zoom, to the selected node or the
+    /// middle of the selected relationship. With `only_if_hidden`, the camera
+    /// moves only when part of the selection is outside the visible canvas.
+    /// The caller starts the motion.
+    fn spring_to_selection(&mut self, only_if_hidden: bool) {
+        const MARGIN: f32 = 48.0;
+        let (Some(snapshot), Some(workspace), Some(selection)) =
+            (self.snapshot(), self.workspace.as_ref(), self.selection)
+        else {
+            return;
+        };
+        let focus = match selection {
+            SceneSelection::Node(index) => vec![index],
+            SceneSelection::Edge(index) => vec![
+                snapshot.edges.sources[index] as usize,
+                snapshot.edges.targets[index] as usize,
+            ],
+        };
+        let points: Vec<_> = {
+            let workspace = workspace.borrow();
+            focus
+                .iter()
+                .filter_map(|&index| workspace.position(index))
+                .collect()
+        };
+        if points.is_empty() {
+            return;
+        }
+        if only_if_hidden && let Some(bounds) = self.canvas_bounds {
+            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+            let visible = points.iter().all(|&point| {
+                let local = self.camera.project(point, self.world_bounds, viewport);
+                local.x >= MARGIN
+                    && local.y >= MARGIN
+                    && local.x <= viewport.x - MARGIN
+                    && local.y <= viewport.y - MARGIN
+            });
+            if visible {
+                return;
+            }
+        }
+        self.camera_motion.retarget(Camera {
+            center: Rect::from_points(&points).center(),
+            zoom: self.camera.zoom,
+        });
     }
 
     fn begin_presentation_motion(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -2778,12 +2806,13 @@ impl StudioView {
                 };
                 let selection = snapshot.node_index(id).map(SceneSelection::Node);
                 self.set_selection(selection);
+                self.spring_to_selection(true);
                 self.status = if self.selection.is_some() {
                     format!("Selected node {id}").into()
                 } else {
                     format!("Node {id} is not in this view").into()
                 };
-                cx.notify();
+                self.begin_presentation_motion(window, cx);
             }
             Some("center") => {
                 let Some(id) = parts.next().and_then(|id| id.parse().ok()) else {
@@ -2835,12 +2864,13 @@ impl StudioView {
                 };
                 let selection = snapshot.edge_index(id).map(SceneSelection::Edge);
                 self.set_selection(selection);
+                self.spring_to_selection(true);
                 self.status = if self.selection.is_some() {
                     format!("Selected relationship {id}").into()
                 } else {
                     format!("Relationship {id} is not in this view").into()
                 };
-                cx.notify();
+                self.begin_presentation_motion(window, cx);
             }
             Some("path-start") => {
                 let expected = "Expected: path-start <node-id> [both|out|in] [max-hops]";
