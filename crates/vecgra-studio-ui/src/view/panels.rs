@@ -282,7 +282,8 @@ impl StudioView {
                                             )
                                         }),
                                 )
-                        })),
+                        }))
+                        .children(self.hidden_relationship_rows(cx)),
                 )
             })
             .when(!showing_search && !showing_path, |this| {
@@ -767,7 +768,7 @@ impl StudioView {
                                         .text_color(cx.theme().warning)
                                         .child(format!(
                                             "Exact database result; {} shows {visible_nodes}/{total_nodes} nodes and {visible_edges}/{total_edges} relationships.",
-                                            if self.hidden_count() > 0 {
+                                            if self.hidden.is_some() {
                                                 "with nodes hidden, the canvas"
                                             } else {
                                                 "sampled canvas"
@@ -1860,13 +1861,13 @@ impl StudioView {
                 self.layout_kind.label().to_lowercase()
             ))
             .when(pinned > 0, |this| this.child(format!("{pinned} pinned")))
-            .when(self.hidden_count() > 0, |this| {
+            .when_some(self.hidden_summary(), |this, summary| {
                 this.child(
                     div()
                         .id("show-hidden")
                         .debug_selector(|| "show-hidden".into())
                         .role(Role::Button)
-                        .aria_label("Show hidden nodes")
+                        .aria_label("Show what is hidden")
                         .aria_keyshortcuts("Shift+Meta+H")
                         .px_1()
                         .rounded(px(4.0))
@@ -1874,10 +1875,10 @@ impl StudioView {
                         .text_color(palette().copper)
                         .hover(|this| this.bg(cx.theme().secondary_hover))
                         .tooltip(|window, cx| {
-                            Tooltip::with_keystroke("Show hidden nodes", "⇧⌘H", window, cx)
+                            Tooltip::with_keystroke("Show what is hidden", "⇧⌘H", window, cx)
                         })
                         .on_click(cx.listener(|this, _, _, cx| this.show_hidden_nodes(cx)))
-                        .child(format!("{} hidden", self.hidden_count())),
+                        .child(format!("{summary} hidden")),
                 )
             })
             .when(moving, |this| this.child("settling"))

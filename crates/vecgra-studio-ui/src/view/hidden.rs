@@ -1,49 +1,100 @@
-//! Hiding nodes from view: a hub that touches everything, a node beside the
-//! point, or every node of a label can be taken off the canvas with their
-//! relationships, and shown again later where they were.
+//! Hiding elements from view: a hub that touches everything, a node beside
+//! the point, every node of a label, or every relationship of a type can be
+//! taken off the canvas, and shown again later where it was.
 
 use std::collections::HashMap;
 
-use vecgra_studio_core::HiddenNodes;
+use vecgra_studio_core::HiddenElements;
 
 use super::*;
 
 /// What is hidden from view, and the scene it was hidden from, so that
 /// showing it again does not need the database (or works without one).
 pub(super) struct HiddenScene {
-    /// The scene as last read, with every node.
+    /// The scene as last read, with every element.
     pub(super) full: Arc<SceneSnapshot>,
-    pub(super) hidden: HiddenNodes,
+    pub(super) hidden: HiddenElements,
     /// Where each hidden node was laid out, so it comes back to the same
     /// place.
     positions: HashMap<u64, Vec2>,
     /// How many of the full scene's nodes are hidden.
-    count: usize,
+    nodes: usize,
+    /// How many of the full scene's relationships are hidden by type.
+    relationships: usize,
 }
 
 impl HiddenScene {
-    /// Counts the hidden nodes again, after what is hidden or the full scene
+    /// Counts what is hidden again, after what is hidden or the full scene
     /// changes.
     pub(super) fn recount(&mut self) {
         let nodes = &self.full.nodes;
-        self.count = nodes
+        self.nodes = nodes
             .ids
             .iter()
             .zip(&nodes.labels)
             .filter(|(id, label)| self.hidden.hides(**id, label))
             .count();
+        self.relationships = self
+            .full
+            .edges
+            .labels
+            .iter()
+            .filter(|label| self.hidden.hides_relationship(label))
+            .count();
     }
+
+    /// "45 nodes", "117 relationships" or both, for the status bar.
+    pub(super) fn summary(&self) -> String {
+        let plural = |count: usize, one: &str, many: &str| {
+            format!(
+                "{} {}",
+                panels::format_count(count),
+                if count == 1 { one } else { many }
+            )
+        };
+        let mut parts = Vec::new();
+        if self.nodes > 0 {
+            parts.push(plural(self.nodes, "node", "nodes"));
+        }
+        if self.relationships > 0 {
+            parts.push(plural(self.relationships, "relationship", "relationships"));
+        }
+        parts.join(" · ")
+    }
+}
+
+/// What an overview row for a hidden label or type brings back.
+#[derive(Clone)]
+enum HiddenGroup {
+    Label(Arc<str>),
+    Relationship(Arc<str>),
 }
 
 impl StudioView {
     /// How many of the scene's nodes are hidden.
+    #[cfg(test)]
     pub(super) fn hidden_count(&self) -> usize {
-        self.hidden.as_ref().map_or(0, |scene| scene.count)
+        self.hidden.as_ref().map_or(0, |scene| scene.nodes)
     }
 
+    /// The status bar's account of what is hidden, if anything is.
+    pub(super) fn hidden_summary(&self) -> Option<String> {
+        self.hidden
+            .as_ref()
+            .map(HiddenScene::summary)
+            .filter(|summary| !summary.is_empty())
+    }
+
+    /// Hides the selected node, or with nothing selected, the label or type
+    /// an overview lens is on.
     pub(super) fn hide_selected(&mut self, cx: &mut Context<Self>) {
-        match self.selection.and_then(SceneSelection::node) {
-            Some(index) => self.hide_node(index, cx),
+        if let Some(index) = self.selection.and_then(SceneSelection::node) {
+            self.hide_node(index, cx);
+            return;
+        }
+        match self.active_facet.clone() {
+            Some(FacetLens::NodeLabel(label)) => self.hide_label(&label, cx),
+            Some(FacetLens::Relationship(label)) => self.hide_relationship(&label, cx),
             None => {
                 self.status = "Select a node to hide it".into();
                 cx.notify();
@@ -64,12 +115,7 @@ impl StudioView {
         self.hide_where(&current, |hidden| {
             hidden.ids.insert(id);
         });
-        self.status = format!(
-            "Hid {name} · {} hidden · ⇧⌘H shows them",
-            self.hidden_count()
-        )
-        .into();
-        cx.notify();
+        self.report_hidden(format!("Hid {name}"), cx);
     }
 
     /// Takes every node with `label` off the canvas, including any that a
@@ -93,17 +139,53 @@ impl StudioView {
         self.hide_where(&current, |hidden| {
             hidden.labels.insert(label.clone());
         });
-        self.status = format!(
-            "Hid {count} {label} node{} · {} hidden · ⇧⌘H shows them",
-            if count == 1 { "" } else { "s" },
-            self.hidden_count()
-        )
-        .into();
+        self.report_hidden(
+            format!(
+                "Hid {count} {label} node{}",
+                if count == 1 { "" } else { "s" }
+            ),
+            cx,
+        );
+    }
+
+    /// Takes every relationship of type `label` off the canvas, including any
+    /// that a later reload brings in; every node stays.
+    pub(super) fn hide_relationship(&mut self, label: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.snapshot().cloned() else {
+            return;
+        };
+        let count = current
+            .edges
+            .labels
+            .iter()
+            .filter(|other| &***other == label)
+            .count();
+        if count == 0 {
+            self.status = format!("No {label} relationships are in view").into();
+            cx.notify();
+            return;
+        }
+        let label: Arc<str> = label.into();
+        self.hide_where(&current, |hidden| {
+            hidden.relationships.insert(label.clone());
+        });
+        self.report_hidden(
+            format!(
+                "Hid {count} {label} relationship{}",
+                if count == 1 { "" } else { "s" }
+            ),
+            cx,
+        );
+    }
+
+    fn report_hidden(&mut self, what: String, cx: &mut Context<Self>) {
+        // The status bar's hidden count already says how much is hidden.
+        self.status = format!("{what} · ⇧⌘H shows what is hidden").into();
         cx.notify();
     }
 
     /// Adds to what is hidden and shows the scene without it.
-    fn hide_where(&mut self, current: &Arc<SceneSnapshot>, add: impl FnOnce(&mut HiddenNodes)) {
+    fn hide_where(&mut self, current: &Arc<SceneSnapshot>, add: impl FnOnce(&mut HiddenElements)) {
         let overview = self
             .workspace
             .as_ref()
@@ -111,9 +193,10 @@ impl StudioView {
             .unwrap_or_default();
         let scene = self.hidden.get_or_insert_with(|| HiddenScene {
             full: current.clone(),
-            hidden: HiddenNodes::default(),
+            hidden: HiddenElements::default(),
             positions: HashMap::new(),
-            count: 0,
+            nodes: 0,
+            relationships: 0,
         });
         add(&mut scene.hidden);
         scene.recount();
@@ -124,16 +207,19 @@ impl StudioView {
                 scene.positions.insert(id, position);
             }
         }
-        let shown = scene.full.without_nodes(&scene.hidden);
+        let shown = scene.full.without_hidden(&scene.hidden);
         self.show_scene(shown, current, &HashMap::new());
     }
 
-    /// Puts every hidden node back where it was, each entering from a
+    /// Puts everything hidden back: each node where it was, entering from a
     /// neighbor and ringed like nodes a reload adds.
     pub(super) fn show_hidden_nodes(&mut self, cx: &mut Context<Self>) {
-        let count = self.hidden_count();
-        let (Some(current), Some(hidden)) = (self.snapshot().cloned(), self.hidden.take()) else {
-            self.status = "No nodes are hidden".into();
+        let summary = self.hidden_summary();
+        let (Some(current), Some(hidden), Some(summary)) =
+            (self.snapshot().cloned(), self.hidden.take(), summary)
+        else {
+            self.hidden = None;
+            self.status = "Nothing is hidden".into();
             cx.notify();
             return;
         };
@@ -142,25 +228,29 @@ impl StudioView {
             &current,
             &hidden.positions,
         );
-        self.status = format!(
-            "Showing {count} hidden node{}",
-            if count == 1 { "" } else { "s" }
-        )
-        .into();
+        self.status = format!("Showing {summary} again").into();
         cx.notify();
     }
 
-    /// Brings back the nodes hidden by `label`, where they were; nodes also
-    /// hidden one by one stay hidden.
-    pub(super) fn show_hidden_label(&mut self, label: &str, cx: &mut Context<Self>) {
+    /// Brings back what a hidden label or type hid, nodes where they were;
+    /// anything also hidden another way stays hidden.
+    fn show_hidden_group(&mut self, group: HiddenGroup, cx: &mut Context<Self>) {
         let Some(current) = self.snapshot().cloned() else {
             return;
         };
-        let before = self.hidden_count();
         let Some(scene) = self.hidden.as_mut() else {
             return;
         };
-        if !scene.hidden.labels.remove(label) {
+        let (removed, what) = match &group {
+            HiddenGroup::Label(label) => {
+                (scene.hidden.labels.remove(label), format!("{label} nodes"))
+            }
+            HiddenGroup::Relationship(label) => (
+                scene.hidden.relationships.remove(label),
+                format!("{label} relationships"),
+            ),
+        };
+        if !removed {
             return;
         }
         let (shown, places) = if scene.hidden.is_empty() {
@@ -171,22 +261,17 @@ impl StudioView {
         } else {
             scene.recount();
             (
-                scene.full.without_nodes(&scene.hidden),
+                scene.full.without_hidden(&scene.hidden),
                 scene.positions.clone(),
             )
         };
         self.show_scene(shown, &current, &places);
-        let count = before.saturating_sub(self.hidden_count());
-        self.status = format!(
-            "Showing {count} {label} node{}",
-            if count == 1 { "" } else { "s" }
-        )
-        .into();
+        self.status = format!("Showing {what} again").into();
         cx.notify();
     }
 
-    /// Overview rows for the hidden labels, under the labels in view; each
-    /// shows its label again when chosen.
+    /// Overview rows for the hidden node labels, under the labels in view;
+    /// each shows its label again when chosen.
     pub(super) fn hidden_label_rows(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
         let Some(scene) = &self.hidden else {
             return Vec::new();
@@ -203,40 +288,30 @@ impl StudioView {
                     .iter()
                     .filter(|other| *other == label)
                     .count();
-                let shown = label.clone();
-                let selector = format!("hidden-label:{label}");
-                let button = Button::new(selector.clone())
-                    .ghost()
-                    .small()
-                    .compact()
-                    .w_full()
-                    .label(label.to_string())
-                    .accessibility_id(format!("hidden-label:{label}"))
-                    .tooltip(format!("Show the hidden {label} nodes"))
-                    .cursor_pointer()
-                    .opacity(0.6)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.show_hidden_label(&shown, cx);
-                    }))
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .items_center()
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .text_xs()
-                                    .text_color(palette().copper)
-                                    .child(format!("{} hidden", panels::format_count(count))),
-                            ),
-                    );
-                div()
-                    .w_full()
-                    .debug_selector(move || selector)
-                    .child(button)
-                    .into_any_element()
+                hidden_group_row(HiddenGroup::Label(label.clone()), count, cx)
+            })
+            .collect()
+    }
+
+    /// Overview rows for the hidden relationship types, under the types in
+    /// view; each shows its type again when chosen.
+    pub(super) fn hidden_relationship_rows(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        let Some(scene) = &self.hidden else {
+            return Vec::new();
+        };
+        scene
+            .hidden
+            .relationships
+            .iter()
+            .map(|label| {
+                let count = scene
+                    .full
+                    .edges
+                    .labels
+                    .iter()
+                    .filter(|other| *other == label)
+                    .count();
+                hidden_group_row(HiddenGroup::Relationship(label.clone()), count, cx)
             })
             .collect()
     }
@@ -280,4 +355,50 @@ impl StudioView {
         }
         self.install_reloaded_scene(reloaded, &pinned_ids, selected);
     }
+}
+
+/// A dimmed overview row for a hidden label or type, with its hidden count;
+/// choosing it shows the group again.
+fn hidden_group_row(
+    group: HiddenGroup,
+    count: usize,
+    cx: &Context<StudioView>,
+) -> gpui::AnyElement {
+    let (kind, label, what) = match &group {
+        HiddenGroup::Label(label) => ("label", label.clone(), "nodes"),
+        HiddenGroup::Relationship(label) => ("relationship", label.clone(), "relationships"),
+    };
+    let selector = format!("hidden-{kind}:{label}");
+    let button = Button::new(selector.clone())
+        .ghost()
+        .small()
+        .compact()
+        .w_full()
+        .label(label.to_string())
+        .accessibility_id(selector.clone())
+        .tooltip(format!("Show the hidden {label} {what}"))
+        .cursor_pointer()
+        .opacity(0.6)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.show_hidden_group(group.clone(), cx);
+        }))
+        .child(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_xs()
+                        .text_color(palette().copper)
+                        .child(format!("{} hidden", panels::format_count(count))),
+                ),
+        );
+    div()
+        .w_full()
+        .debug_selector(move || selector)
+        .child(button)
+        .into_any_element()
 }

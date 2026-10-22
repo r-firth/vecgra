@@ -57,21 +57,29 @@ impl SceneDelta {
     }
 }
 
-/// Nodes taken out of view, by ID or by label. A hidden label also hides
-/// nodes with that label that arrive later.
+/// Elements taken out of view: nodes by ID or by label, and relationships
+/// by type. A hidden label or type also hides elements with it that arrive
+/// later.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HiddenNodes {
+pub struct HiddenElements {
     pub ids: std::collections::BTreeSet<NodeId>,
     pub labels: std::collections::BTreeSet<Arc<str>>,
+    pub relationships: std::collections::BTreeSet<Arc<str>>,
 }
 
-impl HiddenNodes {
+impl HiddenElements {
+    /// Whether the node with this ID and label is hidden.
     pub fn hides(&self, id: NodeId, label: &str) -> bool {
         self.ids.contains(&id) || self.labels.contains(label)
     }
 
+    /// Whether relationships of this type are hidden.
+    pub fn hides_relationship(&self, label: &str) -> bool {
+        self.relationships.contains(label)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty() && self.labels.is_empty()
+        self.ids.is_empty() && self.labels.is_empty() && self.relationships.is_empty()
     }
 }
 
@@ -112,9 +120,9 @@ impl SceneSnapshot {
         Ok(snapshot.anchored_on(previous, previous_positions, layout_options))
     }
 
-    /// Like [`SceneSnapshot::reload`], but leaves `hidden` nodes out of the
-    /// anchored scene. The full scene as read is returned beside it, unlaid,
-    /// so the hidden nodes can be shown again without rereading.
+    /// Like [`SceneSnapshot::reload`], but leaves `hidden` elements out of
+    /// the anchored scene. The full scene as read is returned beside it,
+    /// unlaid, so they can be shown again without rereading.
     ///
     /// # Errors
     ///
@@ -123,22 +131,23 @@ impl SceneSnapshot {
         path: impl AsRef<Path>,
         previous: &SceneSnapshot,
         previous_positions: &[Vec2],
-        hidden: &HiddenNodes,
+        hidden: &HiddenElements,
         snapshot_options: SnapshotOptions,
         layout_options: LayoutOptions,
     ) -> vecgra::Result<(ReloadedScene, SceneSnapshot)> {
         let database = Database::open_read_only(path)?;
         let full = Self::from_database(&database, snapshot_options)?;
         let reloaded =
-            full.without_nodes(hidden)
+            full.without_hidden(hidden)
                 .anchored_on(previous, previous_positions, layout_options);
         Ok((reloaded, full))
     }
 
-    /// This scene without the nodes `hidden` names and the relationships
-    /// that touch them, for hiding nodes from view. Everything about the
-    /// elements that remain is kept, including their positions and degrees.
-    pub fn without_nodes(&self, hidden: &HiddenNodes) -> SceneSnapshot {
+    /// This scene without the nodes `hidden` names, the relationships that
+    /// touch them, and relationships of a hidden type, for hiding elements
+    /// from view. Everything about the elements that remain is kept,
+    /// including their positions and degrees.
+    pub fn without_hidden(&self, hidden: &HiddenElements) -> SceneSnapshot {
         let mut kept = vec![None; self.nodes.ids.len()];
         let mut nodes = SceneNodes::default();
         for (index, &id) in self.nodes.ids.iter().enumerate() {
@@ -163,6 +172,9 @@ impl SceneSnapshot {
             ) else {
                 continue;
             };
+            if hidden.hides_relationship(&self.edges.labels[index]) {
+                continue;
+            }
             edges.ids.push(self.edges.ids[index]);
             edges.sources.push(source);
             edges.targets.push(target);

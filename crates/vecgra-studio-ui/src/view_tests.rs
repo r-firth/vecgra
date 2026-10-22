@@ -1485,6 +1485,7 @@ fn command_words_followed_by_other_words_are_searched() {
         "hide",
         "hide 54",
         "hide label Symbol",
+        "hide relationship READ",
         "unhide",
         "text graph",
         "semantic",
@@ -2875,7 +2876,8 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.selection, None);
         assert_eq!(view.hidden_count(), 1);
         assert!(
-            view.status.starts_with("Hid 3.rs · 1 hidden"),
+            view.status
+                .starts_with("Hid 3.rs · ⇧⌘H shows what is hidden"),
             "{}",
             view.status
         );
@@ -2899,7 +2901,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         view.activate_search_result(hit, window, cx);
         assert_eq!(
             view.status.as_ref(),
-            "src/3.rs is hidden · ⇧⌘H shows hidden nodes"
+            "src/3.rs is hidden · ⇧⌘H shows what is hidden"
         );
         // A result in view is named as the status bar names a selection.
         view.execute_command("2.rs", window, cx);
@@ -2971,7 +2973,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert!(fresh.contains(&middle) && fresh.contains(&other));
         assert_eq!(kept_position(view), before);
         assert_eq!(position_of(view, middle), middle_before);
-        assert_eq!(view.status.as_ref(), "Showing 2 hidden nodes");
+        assert_eq!(view.status.as_ref(), "Showing 2 nodes again");
     });
 
     // A hidden label also hides nodes with it that arrive later.
@@ -2980,7 +2982,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.snapshot().unwrap().node_index(session), None);
         assert_eq!(view.hidden_count(), 1);
         assert!(
-            view.status.starts_with("Hid 1 Session node · 1 hidden"),
+            view.status.starts_with("Hid 1 Session node · ⇧⌘H"),
             "{}",
             view.status
         );
@@ -3007,6 +3009,41 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert!(snapshot.node_index(session).is_some());
         assert_eq!(view.hidden_count(), 0);
         assert!(view.hidden.is_none());
-        assert_eq!(view.status.as_ref(), "Showing 2 Session nodes");
+        assert_eq!(view.status.as_ref(), "Showing Session nodes again");
+    });
+
+    // A relationship type can be hidden too, leaving every node in place.
+    view.update_in(cx, |view, window, cx| {
+        let nodes = view.snapshot().unwrap().nodes.ids.len();
+        view.execute_command("hide relationship IMPORTS", window, cx);
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(snapshot.nodes.ids.len(), nodes);
+        assert!(
+            snapshot
+                .edges
+                .labels
+                .iter()
+                .all(|label| &**label != "IMPORTS")
+        );
+        assert_eq!(view.hidden_summary().as_deref(), Some("7 relationships"));
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let row = cx.debug_bounds("hidden-relationship:IMPORTS").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(
+            snapshot
+                .edges
+                .labels
+                .iter()
+                .filter(|label| &***label == "IMPORTS")
+                .count(),
+            7
+        );
+        assert!(view.hidden.is_none());
+        assert_eq!(view.status.as_ref(), "Showing IMPORTS relationships again");
     });
 }

@@ -1503,12 +1503,12 @@ fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
             full.edges.sources[edge] as usize == hub || full.edges.targets[edge] as usize == hub
         })
         .count();
-    let hidden = HiddenNodes {
+    let hidden = HiddenElements {
         ids: [hub_id].into(),
-        ..HiddenNodes::default()
+        ..HiddenElements::default()
     };
 
-    let shown = full.without_nodes(&hidden);
+    let shown = full.without_hidden(&hidden);
     assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - 1);
     assert_eq!(shown.edges.ids.len(), full.edges.ids.len() - touching);
     assert_eq!(shown.node_index(hub_id), None);
@@ -1544,7 +1544,7 @@ fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
 }
 
 #[test]
-fn a_hidden_label_hides_every_node_with_it() {
+fn a_hidden_label_or_type_hides_every_element_with_it() {
     let mut full = SceneSnapshot::demo();
     full.layout(LayoutOptions::default());
     let label = full.nodes.labels[0].clone();
@@ -1554,13 +1554,36 @@ fn a_hidden_label_hides_every_node_with_it() {
         .iter()
         .filter(|other| **other == label)
         .count();
-    let hidden = HiddenNodes {
+    let hidden = HiddenElements {
         labels: [label.clone()].into(),
-        ..HiddenNodes::default()
+        ..HiddenElements::default()
     };
     assert!(hidden.hides(full.nodes.ids[0], &label));
-    let shown = full.without_nodes(&hidden);
+    let shown = full.without_hidden(&hidden);
     assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - with_label);
     assert!(shown.nodes.labels.iter().all(|other| *other != label));
-    assert!(HiddenNodes::default().is_empty() && !hidden.is_empty());
+    assert!(HiddenElements::default().is_empty() && !hidden.is_empty());
+
+    // A hidden relationship type leaves every node in place.
+    let relationship = full.edges.labels[0].clone();
+    let of_type = full
+        .edges
+        .labels
+        .iter()
+        .filter(|other| **other == relationship)
+        .count();
+    let hidden = HiddenElements {
+        relationships: [relationship.clone()].into(),
+        ..HiddenElements::default()
+    };
+    let shown = full.without_hidden(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len());
+    assert_eq!(shown.edges.ids.len(), full.edges.ids.len() - of_type);
+    assert!(
+        shown
+            .edges
+            .labels
+            .iter()
+            .all(|other| *other != relationship)
+    );
 }

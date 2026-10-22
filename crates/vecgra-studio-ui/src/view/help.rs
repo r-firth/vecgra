@@ -25,7 +25,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("Right click", "A node's actions"),
             ("Tab  Enter", "Walk the inspector by keyboard"),
             ("⇧⌘R", "Release a pinned node"),
-            ("⌫  ⇧⌘H", "Hide a node, show hidden"),
+            ("⌫  ⇧⌘H", "Hide, and show what is hidden"),
         ],
     ),
     (
@@ -86,10 +86,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "Reread or watch the file",
     ),
     (
-        "hide [id] | label <label>  ·  unhide",
+        "hide [id] | label <l> | relationship <t>",
         "hide ",
-        "Hide a node or a label, or show all",
+        "Hide a node, label or type",
     ),
+    ("unhide", "unhide", "Show everything hidden again"),
     (
         "back  ·  forward  ·  clear",
         "back",

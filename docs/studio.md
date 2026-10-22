@@ -112,11 +112,14 @@ attempt to draw every record as a giant hairball.
    else stays where it is. **Hide all N <label> nodes** in the menu, or
    `hide label <label>`, does the same for a whole label, including nodes
    with it that arrive later, and lists the label under the overview's
-   labels, where choosing it shows that label again. Hidden nodes stay
-   hidden across reloads and live refresh, and the status bar counts them.
-   Clicking that count,
-   `Shift-Cmd-H`, or `unhide` brings them back where they were, ringed like
-   nodes a reload adds. Opening another database forgets them.
+   labels, where choosing it shows that label again. `hide relationship
+   <type>` takes every relationship of a type off the canvas and lists it
+   under the overview's relationships the same way. With an overview label
+   or type lens on and nothing selected, Backspace hides that label or
+   type. Hidden elements stay hidden across reloads and live refresh, and
+   the status bar counts them. Clicking that count, `Shift-Cmd-H`, or
+   `unhide` brings them back where they were, ringed like nodes a reload
+   adds. Opening another database forgets them.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.
 7. Make query cost, result count, vector score, and structural distance

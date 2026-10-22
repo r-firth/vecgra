@@ -376,7 +376,7 @@ fn reads_as_command(query: &str) -> bool {
         "hide" => match rest.as_slice() {
             [] => true,
             [id] => is_id(id),
-            ["label", label] => !label.is_empty(),
+            ["label" | "relationship", label] => !label.is_empty(),
             _ => false,
         },
         "zoom" => matches!(rest.as_slice(), [factor] if parse_zoom(factor).is_some()),
@@ -1967,7 +1967,7 @@ impl StudioView {
                             // Nodes the user hid stay hidden even when the
                             // path runs through them; the rail still names them.
                             .map(|enriched| match &hidden {
-                                Some(hidden) => enriched.without_nodes(hidden),
+                                Some(hidden) => enriched.without_hidden(hidden),
                                 None => enriched,
                             })
                             .filter(|enriched| {
@@ -2693,7 +2693,7 @@ impl StudioView {
                 .as_ref()
                 .is_some_and(|scene| hit.scene_selection(&scene.full).is_some());
             self.status = if hidden {
-                format!("{} is hidden · ⇧⌘H shows hidden nodes", hit.title)
+                format!("{} is hidden · ⇧⌘H shows what is hidden", hit.title)
             } else {
                 format!(
                     "{} matches, but is outside this bounded graph view",
@@ -3359,6 +3359,7 @@ impl StudioView {
             Some("hide") => match (parts.next(), parts.next()) {
                 (None, _) => self.hide_selected(cx),
                 (Some("label"), Some(label)) => self.hide_label(label, cx),
+                (Some("relationship"), Some(label)) => self.hide_relationship(label, cx),
                 (Some(id), _) => {
                     let index = id.parse::<u64>().ok().and_then(|id| {
                         self.snapshot().and_then(|snapshot| snapshot.node_index(id))
