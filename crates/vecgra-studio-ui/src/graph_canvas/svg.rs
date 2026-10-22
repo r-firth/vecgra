@@ -29,6 +29,7 @@ pub(crate) fn scene_svg(
             path_endpoints: presentation.path_endpoints,
             hovered_node: None,
             hovered_edge: None,
+            label_colors: &presentation.label_colors,
         },
         bounds,
     );
@@ -254,6 +255,7 @@ mod tests {
                 path_endpoints: None,
                 hovered_node: None,
                 hovered_edge: None,
+                label_colors: Default::default(),
             },
             viewport,
         );

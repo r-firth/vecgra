@@ -395,7 +395,7 @@ impl StudioView {
                                                         .debug_selector(move || selector)
                                                         .size(px(7.0))
                                                         .rounded_full()
-                                                        .bg(label_color(label))
+                                                        .bg(self.label_colors.color(label))
                                                 })
                                                 .child(div().flex_1())
                                                 .when(active, |this| {
@@ -1867,6 +1867,7 @@ impl StudioView {
                                 main_viewport,
                                 selection: self.selection,
                                 emphasis: self.lens.as_ref().map(LensTransition::emphasis),
+                                label_colors: self.label_colors.clone(),
                             },
                         )
                         .into_any_element()
@@ -2428,7 +2429,7 @@ impl StudioView {
         };
         let top = (anchor.y - 18.0).clamp(8.0, (viewport.y - 64.0).max(8.0));
         let label = snapshot.nodes.labels[index].clone();
-        let color = label_color(&label);
+        let color = self.label_colors.color(&label);
         let card = v_flex()
             .debug_selector(|| "graph-hover-card".into())
             .absolute()

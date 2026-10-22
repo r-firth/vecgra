@@ -1,11 +1,11 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
     App, Bounds, FontWeight, Hsla, IntoElement, PaintQuad, Path, PathBuilder, Pixels, Point,
-    SharedString, Styled, TextAlign, TextRun, Window, canvas, fill, point, px, quad, rgb, size,
+    SharedString, Styled, TextAlign, TextRun, Window, canvas, fill, point, px, quad, size,
 };
 use lyon_geom::{
     Line, Point as LyonPoint, Vector as LyonVector, point as lyon_point, vector as lyon_vector,
@@ -16,8 +16,8 @@ use vecgra_studio_core::{
 };
 
 use crate::theme::{
-    RELATIONSHIP_COLOR_COUNT, palette, relationship_color, relationship_color_for_index,
-    relationship_color_index,
+    RELATIONSHIP_COLOR_COUNT, node_color_for_index, palette, relationship_color,
+    relationship_color_for_index, relationship_color_index,
 };
 
 mod svg;
@@ -240,12 +240,38 @@ struct ScenePresentation<'a> {
     path_endpoints: Option<GraphPathEndpoints>,
     hovered_node: Option<usize>,
     hovered_edge: Option<usize>,
+    label_colors: &'a LabelColors,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GraphPathEndpoints {
     pub start: usize,
     pub end: Option<usize>,
+}
+
+/// The colour each node label is drawn in. Labels take the palette's
+/// colours in the order they first appear, by node ID, and keep them, so a
+/// label added later, or hidden and shown again, never recolours the rest.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LabelColors(HashMap<Arc<str>, usize>);
+
+impl LabelColors {
+    /// Gives each label in `snapshot` that has no colour yet the next one.
+    pub(crate) fn extend(&mut self, snapshot: &SceneSnapshot) {
+        for label in snapshot.nodes.labels.iter() {
+            if !self.0.contains_key(label) {
+                let next = self.0.len();
+                self.0.insert(label.clone(), next);
+            }
+        }
+    }
+
+    pub(crate) fn color(&self, label: &str) -> Hsla {
+        match self.0.get(label) {
+            Some(&index) => node_color_for_index(index),
+            None => label_color(label),
+        }
+    }
 }
 
 pub(crate) struct GraphCanvasPresentation {
@@ -259,9 +285,11 @@ pub(crate) struct GraphCanvasPresentation {
     /// list row, whose lines are lit more faintly than the selection's.
     pub hovered_node: Option<usize>,
     pub hovered_edge: Option<usize>,
+    pub label_colors: Arc<LabelColors>,
 }
 
 struct NodePaintContext<'a> {
+    label_colors: &'a LabelColors,
     selected: Option<usize>,
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
@@ -317,6 +345,7 @@ pub fn graph_canvas(
                     path_endpoints: presentation.path_endpoints,
                     hovered_node: presentation.hovered_node,
                     hovered_edge: presentation.hovered_edge,
+                    label_colors: &presentation.label_colors,
                 },
                 bounds,
             )
@@ -633,6 +662,7 @@ fn prepare_scene(
             workspace,
             &projected,
             &NodePaintContext {
+                label_colors: presentation.label_colors,
                 selected: selected_node,
                 dragging: presentation.dragging,
                 emphasis,
@@ -665,7 +695,7 @@ fn prepare_scene(
                         } else {
                             (3.1 + degree.ln_1p() * 0.52).min(6.2) * (1.0 + relevance * 0.48)
                         },
-                        color: label_color(label).opacity(lens_opacity),
+                        color: presentation.label_colors.color(label).opacity(lens_opacity),
                         selected: selected_node == Some(index),
                         pinned: workspace.is_pinned(index),
                         dragging: presentation.dragging == Some(index),
@@ -692,6 +722,7 @@ fn prepare_scene(
             &captions,
             selected_edge,
             &NodePaintContext {
+                label_colors: presentation.label_colors,
                 selected: selected_node,
                 dragging: presentation.dragging,
                 emphasis,
@@ -980,7 +1011,9 @@ fn aggregate_nodes(
             PaintNode {
                 point: absolute_point(context.bounds, position),
                 radius: (1.7 + density * 1.15).min(6.8),
-                color: label_color(&snapshot.nodes.labels[bin.label_index])
+                color: context
+                    .label_colors
+                    .color(&snapshot.nodes.labels[bin.label_index])
                     .opacity((0.24 + density * 0.105).min(0.78) * lens_opacity),
                 selected: bin.selected,
                 pinned: bin.pinned,
@@ -1293,17 +1326,48 @@ fn segment_may_be_visible(from: Vec2, to: Vec2, viewport: Vec2) -> bool {
     max_x >= -16.0 && max_y >= -16.0 && min_x <= viewport.x + 16.0 && min_y <= viewport.y + 16.0
 }
 
-pub(crate) fn label_color(label: &str) -> Hsla {
-    let colors = palette();
+/// A colour for a label no `LabelColors` has seen, from its name alone.
+fn label_color(label: &str) -> Hsla {
     let hash = label.bytes().fold(0_u64, |hash, byte| {
         hash.wrapping_mul(109).wrapping_add(byte as u64)
     });
-    match hash % 5 {
-        0 => colors.cobalt,
-        1 => colors.copper,
-        2 => colors.celadon,
-        3 => rgb(0x9b8cf2).into(),
-        _ => rgb(0xd6c56b).into(),
+    node_color_for_index(hash as usize)
+}
+
+#[cfg(test)]
+mod label_color_tests {
+    use super::*;
+
+    #[test]
+    fn labels_keep_distinct_colours_in_the_order_they_appear() {
+        let mut snapshot = SceneSnapshot::demo();
+        let labels = ["Repository", "File", "Session", "File", "Commit", "Branch"];
+        for (index, label) in labels.iter().enumerate() {
+            snapshot.nodes.labels[index] = Arc::from(*label);
+        }
+        snapshot.nodes.labels.truncate(labels.len());
+        let mut colors = LabelColors::default();
+        colors.extend(&snapshot);
+        let first: Vec<Hsla> = ["Repository", "File", "Session", "Commit", "Branch"]
+            .iter()
+            .map(|label| colors.color(label))
+            .collect();
+        assert_eq!(first[0], node_color_for_index(0));
+        assert_eq!(first[4], node_color_for_index(4));
+        for (index, color) in first.iter().enumerate() {
+            assert!(
+                !first[..index].contains(color),
+                "label {index} repeats a colour"
+            );
+        }
+
+        // A label that appears later takes the next colour, and the others
+        // keep theirs, even when a scene without them is read.
+        snapshot.nodes.labels = vec![Arc::from("ErrorSignature"), Arc::from("File")];
+        colors.extend(&snapshot);
+        assert_eq!(colors.color("ErrorSignature"), node_color_for_index(5));
+        assert_eq!(colors.color("Repository"), first[0]);
+        assert_eq!(colors.color("Branch"), first[4]);
     }
 }
 
@@ -1378,6 +1442,7 @@ mod caption_tests {
 
     fn context(selected: Option<usize>, viewport: Vec2) -> NodePaintContext<'static> {
         NodePaintContext {
+            label_colors: Box::leak(Box::default()),
             selected,
             dragging: None,
             emphasis: None,
@@ -1599,6 +1664,7 @@ mod caption_tests {
                     path_endpoints: None,
                     hovered_node,
                     hovered_edge,
+                    label_colors: &LabelColors::default(),
                 },
                 bounds,
             )

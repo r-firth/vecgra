@@ -48,8 +48,8 @@ use panels::path_direction_label;
 use panels::visible_facet_counts;
 
 use crate::graph_canvas::{
-    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, PATH_INTERIOR_SCORE, graph_canvas,
-    label_color, node_caption_text, scene_svg,
+    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, LabelColors, PATH_INTERIOR_SCORE,
+    graph_canvas, node_caption_text, scene_svg,
 };
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
@@ -626,6 +626,8 @@ pub struct StudioView {
     graph_navigator_cache: Rc<RefCell<GraphNavigatorCache>>,
     node_label_counts: Arc<[(Arc<str>, usize)]>,
     relationship_counts: Arc<[(Arc<str>, usize)]>,
+    /// The colour of each node label seen in this database.
+    label_colors: Arc<LabelColors>,
     camera: Camera,
     camera_motion: CameraMotion,
     saved_overview_camera: Option<Camera>,
@@ -754,6 +756,10 @@ impl StudioView {
             ),
             LoadState::Loading { .. } | LoadState::Failed(_) => (Arc::from([]), Arc::from([])),
         };
+        let mut label_colors = LabelColors::default();
+        if let LoadState::Ready(snapshot) = &state {
+            label_colors.extend(snapshot);
+        }
         let mut view = Self {
             state,
             database_path: path.clone(),
@@ -761,6 +767,7 @@ impl StudioView {
             graph_navigator_cache: Rc::new(RefCell::new(GraphNavigatorCache::default())),
             node_label_counts,
             relationship_counts,
+            label_colors: Arc::new(label_colors),
             camera: Camera::default(),
             camera_motion: CameraMotion::new(Camera::default()),
             saved_overview_camera: None,
@@ -993,6 +1000,7 @@ impl StudioView {
                             Some(Rc::new(RefCell::new(GraphWorkspace::new(&snapshot))));
                         this.graph_navigator_cache.borrow_mut().clear();
                         this.node_label_counts = Arc::from(snapshot.label_counts());
+                        Arc::make_mut(&mut this.label_colors).extend(&snapshot);
                         this.relationship_counts = Arc::from(snapshot.relationship_counts());
                         this.selection = None;
                         this.layout_in_progress = false;
@@ -1055,6 +1063,7 @@ impl StudioView {
         self.workspace = None;
         self.graph_navigator_cache.borrow_mut().clear();
         self.node_label_counts = Arc::from([]);
+        self.label_colors = Arc::default();
         self.relationship_counts = Arc::from([]);
         self.fingerprint = None;
         self.reload_in_progress = false;
@@ -1126,6 +1135,7 @@ impl StudioView {
             hovered_edge: self
                 .hovered_edge
                 .and_then(|hovered| snapshot.edge_index(hovered.id)),
+            label_colors: self.label_colors.clone(),
         }
     }
 
@@ -1387,6 +1397,7 @@ impl StudioView {
         self.workspace = Some(Rc::new(RefCell::new(workspace)));
         self.graph_navigator_cache.borrow_mut().clear();
         self.node_label_counts = Arc::from(snapshot.label_counts());
+        Arc::make_mut(&mut self.label_colors).extend(&snapshot);
         self.relationship_counts = Arc::from(snapshot.relationship_counts());
         let selection = selected.and_then(|selected| match selected {
             SelectedElement::Node(id) => snapshot.node_index(id).map(SceneSelection::Node),
@@ -2112,6 +2123,7 @@ impl StudioView {
         }
         self.world_bounds = snapshot.bounds;
         self.node_label_counts = Arc::from(snapshot.label_counts());
+        Arc::make_mut(&mut self.label_colors).extend(&snapshot);
         self.relationship_counts = Arc::from(snapshot.relationship_counts());
         self.workspace = Some(Rc::new(RefCell::new(workspace)));
         self.state = LoadState::Ready(snapshot);
