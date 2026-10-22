@@ -120,7 +120,9 @@ attempt to draw every record as a giant hairball.
    in the overview offers the same three: its lens, hiding it, and showing
    only it. With an overview label
    or type lens on and nothing selected, Backspace hides that label or
-   type. Hidden elements stay hidden across reloads and live refresh, and
+   type. Search still lists hidden elements, tagged "hidden", and choosing a
+   hidden node there shows it again while the rest of its label stays
+   hidden. Hidden elements stay hidden across reloads and live refresh, and
    the status bar counts them. `Cmd-Z` (**Edit > Undo Hide**) takes back
    the last hiding still in effect. Clicking that count, `Shift-Cmd-H`, or
    `unhide` brings everything back where it was, ringed like nodes a reload

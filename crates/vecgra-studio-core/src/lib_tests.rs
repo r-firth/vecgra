@@ -1564,6 +1564,21 @@ fn a_hidden_label_or_type_hides_every_element_with_it() {
     assert!(shown.nodes.labels.iter().all(|other| *other != label));
     assert!(HiddenElements::default().is_empty() && !hidden.is_empty());
 
+    // A node can be shown as an exception to its hidden label.
+    let mut excepted = hidden.clone();
+    excepted.shown.insert(full.nodes.ids[0]);
+    assert!(!excepted.hides(full.nodes.ids[0], &label));
+    let shown = full.without_hidden(&excepted);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - with_label + 1);
+    assert!(shown.node_index(full.nodes.ids[0]).is_some());
+    assert!(
+        HiddenElements {
+            shown: [full.nodes.ids[0]].into(),
+            ..HiddenElements::default()
+        }
+        .is_empty()
+    );
+
     // A hidden relationship type leaves every node in place.
     let relationship = full.edges.labels[0].clone();
     let of_type = full

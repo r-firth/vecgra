@@ -240,6 +240,13 @@ impl StudioView {
                 }
             }
         }
+        // Hiding a label again hides any of its nodes shown as exceptions.
+        let full = scene.full.clone();
+        let hidden = &mut scene.hidden;
+        hidden.shown.retain(|id| {
+            full.node_index(*id)
+                .is_none_or(|index| !hidden.labels.contains(&full.nodes.labels[index]))
+        });
         scene.steps.push(step);
         scene.recount();
         for (index, &id) in current.nodes.ids.iter().enumerate() {
@@ -377,9 +384,46 @@ impl StudioView {
             return false;
         }
         scene.steps.retain(|other| other != step);
+        self.show_less_hidden(&current);
+        self.status = format!("Showing {what} again").into();
+        cx.notify();
+        true
+    }
+
+    /// Shows one hidden node again: by ID if it was hidden on its own, or as
+    /// an exception to its hidden label. Says whether it was hidden.
+    pub(super) fn reveal_node(&mut self, id: u64) -> bool {
+        let Some(current) = self.snapshot().cloned() else {
+            return false;
+        };
+        let Some(scene) = self.hidden.as_mut() else {
+            return false;
+        };
+        let Some(index) = scene.full.node_index(id) else {
+            return false;
+        };
+        let label = scene.full.nodes.labels[index].clone();
+        if !scene.hidden.hides(id, &label) {
+            return false;
+        }
+        scene.hidden.ids.remove(&id);
+        scene.steps.retain(|step| step != &HideStep::Node(id));
+        if scene.hidden.hides(id, &label) {
+            scene.hidden.shown.insert(id);
+        }
+        self.show_less_hidden(&current);
+        true
+    }
+
+    /// Shows the scene after something hidden was shown again, the returning
+    /// nodes where they were.
+    fn show_less_hidden(&mut self, current: &SceneSnapshot) {
+        let Some(scene) = self.hidden.as_mut() else {
+            return;
+        };
         let (shown, places) = if scene.hidden.is_empty() {
             let Some(scene) = self.hidden.take() else {
-                return false;
+                return;
             };
             (Arc::unwrap_or_clone(scene.full), scene.positions)
         } else {
@@ -389,10 +433,7 @@ impl StudioView {
                 scene.positions.clone(),
             )
         };
-        self.show_scene(shown, &current, &places);
-        self.status = format!("Showing {what} again").into();
-        cx.notify();
-        true
+        self.show_scene(shown, current, &places);
     }
 
     /// Overview rows for the hidden node labels, under the labels in view;

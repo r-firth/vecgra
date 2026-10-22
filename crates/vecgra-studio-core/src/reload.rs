@@ -65,12 +65,15 @@ pub struct HiddenElements {
     pub ids: std::collections::BTreeSet<NodeId>,
     pub labels: std::collections::BTreeSet<Arc<str>>,
     pub relationships: std::collections::BTreeSet<Arc<str>>,
+    /// Nodes shown although their label is hidden, such as one a search
+    /// found and the reader chose.
+    pub shown: std::collections::BTreeSet<NodeId>,
 }
 
 impl HiddenElements {
     /// Whether the node with this ID and label is hidden.
     pub fn hides(&self, id: NodeId, label: &str) -> bool {
-        self.ids.contains(&id) || self.labels.contains(label)
+        self.ids.contains(&id) || (self.labels.contains(label) && !self.shown.contains(&id))
     }
 
     /// Whether relationships of this type are hidden.
@@ -78,6 +81,7 @@ impl HiddenElements {
         self.relationships.contains(label)
     }
 
+    /// Whether nothing is hidden; nodes shown as exceptions hide nothing.
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty() && self.labels.is_empty() && self.relationships.is_empty()
     }

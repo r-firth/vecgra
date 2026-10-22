@@ -2949,8 +2949,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(kept_position(view), before);
     });
 
-    // Search still finds it, tagged as hidden, and choosing it says why it
-    // is not shown.
+    // Search still finds it, tagged as hidden.
     view.update_in(cx, |view, window, cx| {
         view.execute_command("3.rs", window, cx);
     });
@@ -2964,19 +2963,6 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
             .is_some()
     );
     view.update_in(cx, |view, window, cx| {
-        let SearchState::Ready(report) = &view.search_state else {
-            panic!("the search finishes");
-        };
-        let hit = report
-            .hits
-            .iter()
-            .position(|hit| hit.title.as_ref() == "src/3.rs")
-            .expect("the hidden file matches");
-        view.activate_search_result(hit, window, cx);
-        assert_eq!(
-            view.status.as_ref(),
-            "src/3.rs is hidden · ⇧⌘H shows what is hidden"
-        );
         // A result in view is named as the status bar names a selection.
         view.execute_command("2.rs", window, cx);
     });
@@ -3191,6 +3177,41 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     view.read_with(&*cx, |view, _| {
         assert!(view.hidden.is_none());
         assert_eq!(view.status.as_ref(), "Showing 1 label again");
+    });
+
+    // Choosing a hidden search result shows that node again, even while the
+    // rest of its label stays hidden.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("hide label session", window, cx);
+        assert_eq!(view.hidden_count(), 2);
+        view.execute_command("Live session", window, cx);
+    });
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        let SearchState::Ready(report) = &view.search_state else {
+            panic!("the search finishes");
+        };
+        let hit = report
+            .hits
+            .iter()
+            .position(|hit| hit.title.as_ref() == "Live session")
+            .expect("a hidden session matches");
+        let id = report.hits[hit].id();
+        view.activate_search_result(hit, window, cx);
+        let snapshot = view.snapshot().unwrap();
+        let index = snapshot.node_index(id).expect("the session is shown");
+        assert_eq!(view.selection, Some(SceneSelection::Node(index)));
+        assert_eq!(view.hidden_count(), 1);
+        assert!(
+            view.status
+                .starts_with("Shown again · Focused Live session · Session"),
+            "{}",
+            view.status
+        );
+        // Hiding the label again hides it too.
+        view.execute_command("unhide", window, cx);
+        view.execute_command("hide label session", window, cx);
+        assert_eq!(view.hidden_count(), 2);
     });
 }
 

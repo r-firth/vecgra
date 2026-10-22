@@ -2734,6 +2734,7 @@ impl StudioView {
         let SearchState::Ready(report) = &self.search_state else {
             return;
         };
+        let report = report.clone();
         let Some(hit) = report.hits.get(index).cloned() else {
             return;
         };
@@ -2741,6 +2742,15 @@ impl StudioView {
             return;
         };
         let Some(selection) = hit.scene_selection(snapshot) else {
+            // Choosing a hidden node shows it again; anything else hidden
+            // stays hidden. Showing it retires the search, whose hits still
+            // stand.
+            if hit.kind_label() == "NODE" && self.reveal_node(hit.id()) {
+                self.search_state = SearchState::Ready(report);
+                self.activate_search_result(index, window, cx);
+                self.status = format!("Shown again · {}", self.status).into();
+                return;
+            }
             self.status = if self.hit_is_hidden(&hit) {
                 format!("{} is hidden · ⇧⌘H shows what is hidden", hit.title)
             } else {
