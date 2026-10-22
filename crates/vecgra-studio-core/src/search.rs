@@ -244,7 +244,7 @@ pub(crate) fn search_database_with(
         Some(Ok(query_vector)) => semantic_candidates(&read, &query_vector, candidate_limit)?,
         Some(Err(error)) if mode == SearchMode::Hybrid => {
             warning = Some(Arc::from(format!(
-                "Semantic retrieval unavailable ({error}); showing text matches"
+                "Text matches only: semantic retrieval unavailable ({error})"
             )));
             Vec::new()
         }
@@ -410,7 +410,7 @@ fn lexical_score(
         };
         let key = read.symbol(property.key).unwrap_or("");
         let weight = match key {
-            "title" | "name" | "headline" | "path" | "tag_name" | "login" => 1.5,
+            key if TITLE_PROPERTY_KEYS.contains(&key) => 1.5,
             "body" | "description" | "message" | "url" => 0.85,
             _ => 0.55,
         };
@@ -483,8 +483,15 @@ fn hydrate_search_hit(
         ElementRef::Edge(id) => {
             let edge = read.edge(id)?;
             let label = read.symbol(edge.label).unwrap_or("Unknown");
-            let title = preferred_property(read, &edge.properties)
-                .unwrap_or_else(|| label.replace('_', " "));
+            // A relationship without a name of its own is told apart by
+            // what it connects; its type is already shown beside it.
+            let title = preferred_property(read, &edge.properties).unwrap_or_else(|| {
+                format!(
+                    "{} → {}",
+                    short_node_title(read, edge.source),
+                    short_node_title(read, edge.target)
+                )
+            });
             let detail = secondary_property(read, &edge.properties, &title)
                 .unwrap_or_else(|| format!("node:{} → node:{}", edge.source, edge.target));
             (label.to_string(), title, detail)
@@ -500,6 +507,19 @@ fn hydrate_search_hit(
         semantic_score: signals.semantic(),
         vector_index: signals.vector_index(),
     })
+}
+
+/// A node's title as search names it, with a file path cut to its file name.
+fn short_node_title(read: &ReadGuard<'_>, id: NodeId) -> String {
+    let Some(node) = read.node(id) else {
+        return format!("node {id}");
+    };
+    let title = preferred_property(read, &node.properties)
+        .unwrap_or_else(|| format!("{} {id}", read.symbol(node.label).unwrap_or("Unknown")));
+    match split_path_title(&title) {
+        Some((name, _)) => name.to_string(),
+        None => title,
+    }
 }
 
 fn hydrate_evidence_node(read: &ReadGuard<'_>, id: NodeId) -> Option<EvidenceNode> {
@@ -583,10 +603,24 @@ impl SearchSignals for SignalScores {
     }
 }
 
+/// The element's name, chosen as the scene's [`element_title`] chooses it, so
+/// that search results and evidence paths call it what the canvas does.
 fn preferred_property(read: &ReadGuard<'_>, properties: &[Property]) -> Option<String> {
-    ["title", "name", "headline", "path", "tag_name", "login"]
+    TITLE_PROPERTY_KEYS
         .into_iter()
         .find_map(|key| read.property(properties, key).and_then(searchable_value))
+        .or_else(|| {
+            FALLBACK_TITLE_PROPERTY_KEYS.into_iter().find_map(|key| {
+                match read.property(properties, key)? {
+                    Value::String(value) => value
+                        .lines()
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .map(str::to_owned),
+                    _ => None,
+                }
+            })
+        })
 }
 
 fn secondary_property(
@@ -598,6 +632,38 @@ fn secondary_property(
         .into_iter()
         .filter_map(|key| read.property(properties, key).and_then(searchable_value))
         .find(|value| value != title && !value.is_empty())
+        .or_else(|| short_text_properties(read, properties, title))
+}
+
+const SHORT_TEXT_PROPERTY_CHARS: usize = 40;
+
+/// Up to two short one-line text properties besides the name, such as an
+/// agent and model or a commit SHA, which tell apart elements that share a
+/// name better than their IDs do.
+fn short_text_properties(
+    read: &ReadGuard<'_>,
+    properties: &[Property],
+    title: &str,
+) -> Option<String> {
+    let values: Vec<&str> = properties
+        .iter()
+        .filter_map(|property| {
+            let key = read.symbol(property.key)?;
+            let Value::String(value) = &property.value else {
+                return None;
+            };
+            let value = value.trim();
+            (!TITLE_PROPERTY_KEYS.contains(&key)
+                && !value.is_empty()
+                && value != title
+                && value.chars().count() <= SHORT_TEXT_PROPERTY_CHARS
+                && !value.contains('\n')
+                && parse_iso_datetime_ms(value).is_none())
+            .then_some(value)
+        })
+        .take(2)
+        .collect();
+    (!values.is_empty()).then(|| values.join(" · "))
 }
 
 fn truncate_text(text: &str, limit: usize) -> String {

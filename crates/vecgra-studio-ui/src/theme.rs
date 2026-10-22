@@ -22,17 +22,34 @@ pub fn palette() -> StudioPalette {
     }
 }
 
-pub const RELATIONSHIP_COLOR_COUNT: usize = 7;
+pub const RELATIONSHIP_COLOR_COUNT: usize = 10;
+
+/// How many colours node labels take before one repeats.
+pub const NODE_COLOR_COUNT: usize = 10;
+
+/// The colour of the `index`th node label to appear, the most distinct
+/// first.
+pub fn node_color_for_index(index: usize) -> Hsla {
+    let colors = palette();
+    match index % NODE_COLOR_COUNT {
+        0 => colors.copper,
+        1 => colors.cobalt,
+        2 => colors.celadon,
+        3 => rgb(0x9b8cf2).into(),
+        4 => rgb(0xd6c56b).into(),
+        5 => rgb(0xd47c9c).into(),
+        6 => rgb(0x60b8c9).into(),
+        7 => rgb(0xa6d36a).into(),
+        8 => rgb(0xc98be6).into(),
+        _ => rgb(0xe8625c).into(),
+    }
+}
 
 pub fn relationship_color_index(label: &str) -> usize {
     let hash = label.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
     });
     hash as usize % RELATIONSHIP_COLOR_COUNT
-}
-
-pub fn relationship_color(label: &str) -> Hsla {
-    relationship_color_for_index(relationship_color_index(label))
 }
 
 pub fn relationship_color_for_index(index: usize) -> Hsla {
@@ -44,7 +61,10 @@ pub fn relationship_color_for_index(index: usize) -> Hsla {
         3 => rgb(0x9b8cf2).into(),
         4 => rgb(0xd6c56b).into(),
         5 => rgb(0xd47c9c).into(),
-        _ => rgb(0x60b8c9).into(),
+        6 => rgb(0x60b8c9).into(),
+        7 => rgb(0xa6d36a).into(),
+        8 => rgb(0xc98be6).into(),
+        _ => rgb(0xe8625c).into(),
     }
 }
 

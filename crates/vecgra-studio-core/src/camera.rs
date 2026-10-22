@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,16 +32,34 @@ impl Camera {
     /// scale reference. This lets search/focus navigation animate the camera
     /// without rebuilding world coordinates.
     pub fn framed(focus: Rect, world: Rect, viewport: Vec2, padding: f32) -> Self {
+        Self::framed_below(focus, world, viewport, padding, padding, 0.08..=24.0)
+    }
+
+    /// Frames a subregion like `framed`, at a zoom within `zoom`, keeping
+    /// `top` pixels clear above it instead of `padding`, so that an overlay
+    /// in the viewport's top corner does not cover what is framed.
+    pub fn framed_below(
+        focus: Rect,
+        world: Rect,
+        viewport: Vec2,
+        padding: f32,
+        top: f32,
+        zoom: RangeInclusive<f32>,
+    ) -> Self {
         let padding = padding.max(0.0);
+        let top = top.max(padding);
         let available_width = (viewport.x - padding * 2.0).max(1.0);
-        let available_height = (viewport.y - padding * 2.0).max(1.0);
+        let available_height = (viewport.y - padding - top).max(1.0);
         let desired_scale = (available_width / focus.width())
             .min(available_height / focus.height())
             .max(0.000_1);
         let base_scale = Self::fit(world).scale(world, viewport);
+        let zoom = (desired_scale / base_scale).clamp(*zoom.start(), *zoom.end());
+        // The focus sits in the middle of the room left below `top`.
+        let shift = (top - padding) * 0.5 / (base_scale * zoom);
         Self {
-            center: focus.center(),
-            zoom: (desired_scale / base_scale).clamp(0.08, 24.0),
+            center: focus.center() - Vec2::new(0.0, shift),
+            zoom,
         }
     }
 

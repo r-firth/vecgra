@@ -291,6 +291,24 @@ fn hybrid_search_ranks_native_node_and_edge_vectors() {
     );
     assert!(report.hits[0].semantic_score.is_some());
     assert!(report.hits.iter().any(|hit| hit.lexical_score.is_some()));
+    assert_eq!(report.warning, None);
+
+    // Without an embedding, hybrid search falls back to text and says so
+    // first, so the point survives a one-line display.
+    let report = search_database_with(
+        &file.0,
+        "ownership memory safety",
+        SearchMode::Hybrid,
+        "test",
+        8,
+        |_, _| Err("model unavailable".into()),
+    )
+    .unwrap();
+    assert!(!report.hits.is_empty());
+    assert_eq!(
+        report.warning.as_deref(),
+        Some("Text matches only: semantic retrieval unavailable (model unavailable)")
+    );
 }
 
 #[test]
@@ -653,6 +671,19 @@ fn framed_camera_and_interruptible_motion_converge() {
     assert_eq!(target.center, focus.center());
     assert!(target.zoom > 1.0);
 
+    // Framing below an overlay keeps the focus clear of it, centred in the
+    // room that is left, and honours the zoom range.
+    let below = Camera::framed_below(focus, world, viewport, 100.0, 160.0, 0.08..=24.0);
+    let top = below.project(focus.min, world, viewport).y;
+    let bottom = below.project(focus.max, world, viewport).y;
+    assert!(top >= 159.9, "the focus starts at {top}");
+    assert!(bottom <= viewport.y - 99.9, "the focus ends at {bottom}");
+    assert!(((top - 160.0) - (viewport.y - 100.0 - bottom)).abs() < 0.1);
+    let capped = Camera::framed_below(focus, world, viewport, 100.0, 160.0, 0.08..=1.5);
+    assert_eq!(capped.zoom, 1.5);
+    let middle = capped.project(focus.center(), world, viewport).y;
+    assert!((middle - (viewport.y * 0.5 + 30.0)).abs() < 0.1);
+
     let mut camera = Camera::fit(world);
     let mut motion = CameraMotion::new(camera);
     motion.retarget(target);
@@ -715,5 +746,872 @@ fn edge_hit_testing_uses_screen_space_and_nearest_segment() {
             6.0,
         ),
         None
+    );
+}
+
+fn create_test_database(file: &TestFile) -> Database {
+    Database::create(
+        &file.0,
+        DatabaseOptions {
+            vector_dimension: 4,
+            similarity: Similarity::Cosine,
+            vector_encoding: VectorEncoding::F32,
+            sync_on_commit: false,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn fingerprint_notices_commits_from_another_handle() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let before = DatabaseFingerprint::read(&file.0).unwrap();
+    assert_eq!(before, DatabaseFingerprint::read(&file.0).unwrap());
+
+    let mut transaction = database.transaction();
+    transaction.create_node("Session", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.commit().unwrap();
+    assert_ne!(before, DatabaseFingerprint::read(&file.0).unwrap());
+}
+
+#[test]
+fn reload_keeps_surviving_positions_and_grows_new_nodes_from_their_anchors() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let chain: Vec<_> = (0..6)
+        .map(|index| {
+            transaction.create_node(
+                "File",
+                [("path", Value::String(format!("src/{index}.rs").into()))],
+                &[],
+            )
+        })
+        .collect();
+    for pair in chain.windows(2) {
+        transaction.create_edge(
+            pair[0],
+            pair[1],
+            "IMPORTS",
+            std::iter::empty::<(&str, Value)>(),
+            &[],
+        );
+    }
+    transaction.commit().unwrap();
+
+    let previous = SceneSnapshot::open(
+        &file.0,
+        SnapshotOptions::default(),
+        LayoutOptions::default(),
+    )
+    .unwrap();
+    // Simulate a user-adjusted presentation that differs from the layout.
+    let presented: Vec<_> = previous
+        .nodes
+        .positions
+        .iter()
+        .map(|&position| position + Vec2::new(500.0, -250.0))
+        .collect();
+
+    let mut transaction = database.transaction();
+    let session = transaction.create_node("Session", std::iter::empty::<(&str, Value)>(), &[]);
+    let edited = transaction.create_edge(
+        session,
+        chain[2],
+        "EDITED",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    let island_a = transaction.create_node("Command", std::iter::empty::<(&str, Value)>(), &[]);
+    let island_b =
+        transaction.create_node("ErrorSignature", std::iter::empty::<(&str, Value)>(), &[]);
+    transaction.create_edge(
+        island_a,
+        island_b,
+        "HIT",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.delete_node(chain[5], true);
+    transaction
+        .update_node(
+            chain[0],
+            "File",
+            [("path", Value::String("src/renamed.rs".into()))],
+            &[],
+        )
+        .unwrap();
+    transaction.commit().unwrap();
+
+    let reloaded = SceneSnapshot::reload(
+        &file.0,
+        &previous,
+        &presented,
+        SnapshotOptions::default(),
+        LayoutOptions::default(),
+    )
+    .unwrap();
+    assert!(!reloaded.relaid);
+    assert_eq!(
+        reloaded.delta,
+        SceneDelta {
+            added_nodes: 3,
+            removed_nodes: 1,
+            updated_nodes: 1,
+            added_edges: 2,
+            removed_edges: 1,
+            updated_edges: 0,
+        }
+    );
+    let snapshot = &reloaded.snapshot;
+    for &id in &chain[..5] {
+        let before = presented[previous.node_index(id).unwrap()];
+        let after = snapshot.nodes.positions[snapshot.node_index(id).unwrap()];
+        assert_eq!(before, after, "surviving node {id} must not move");
+        assert_eq!(reloaded.entrances[snapshot.node_index(id).unwrap()], None);
+    }
+    assert!(snapshot.node_index(chain[5]).is_none());
+    assert!(snapshot.edge_index(edited).is_some());
+
+    let anchor = presented[previous.node_index(chain[2]).unwrap()];
+    let session_index = snapshot.node_index(session).unwrap();
+    assert_eq!(reloaded.entrances[session_index], Some(anchor));
+    let offset = (snapshot.nodes.positions[session_index] - anchor).length();
+    assert!(
+        (LayoutOptions::default().edge_length * 0.9..=LayoutOptions::default().edge_length * 1.1)
+            .contains(&offset),
+        "new neighbor sits one edge length from its anchor, got {offset}"
+    );
+
+    // The unanchored component enters outside the surviving scene, and its
+    // second node grows from the first rather than stacking on it.
+    let surviving = Rect::from_points(
+        &chain[..5]
+            .iter()
+            .map(|&id| snapshot.nodes.positions[snapshot.node_index(id).unwrap()])
+            .collect::<Vec<_>>(),
+    );
+    let a = snapshot.nodes.positions[snapshot.node_index(island_a).unwrap()];
+    let b = snapshot.nodes.positions[snapshot.node_index(island_b).unwrap()];
+    let outside = |point: Vec2| {
+        point.x < surviving.min.x
+            || point.x > surviving.max.x
+            || point.y < surviving.min.y
+            || point.y > surviving.max.y
+    };
+    assert!(
+        outside(a),
+        "island seed {a:?} must be outside {surviving:?}"
+    );
+    assert!((a - b).length() > 1.0);
+    assert!(
+        snapshot
+            .nodes
+            .positions
+            .iter()
+            .all(|point| point.x.is_finite() && point.y.is_finite())
+    );
+}
+
+#[test]
+fn reload_lays_out_from_scratch_when_most_of_the_scene_is_new() {
+    let previous = SceneSnapshot::demo();
+    let mut grown = previous.clone();
+    let base = grown.nodes.ids.len() as u64;
+    for offset in 0..grown.nodes.ids.len() as u64 * 2 {
+        grown.nodes.ids.push(base + offset);
+        grown.nodes.labels.push("Fresh".into());
+        grown.nodes.positions.push(Vec2::ZERO);
+        grown.nodes.degrees.push(0);
+        grown.nodes.vector_counts.push(0);
+        grown.nodes.properties.push(Arc::from([]));
+    }
+    let reloaded = grown.anchored_on(
+        &previous,
+        &previous.nodes.positions,
+        LayoutOptions::default(),
+    );
+    assert!(reloaded.relaid);
+    assert!(reloaded.entrances.iter().all(Option::is_none));
+    assert_eq!(reloaded.delta.added_nodes, previous.nodes.ids.len() * 2);
+
+    // A mismatched presentation is never trusted for anchoring.
+    let unchanged =
+        previous
+            .clone()
+            .anchored_on(&previous, &[Vec2::ZERO], LayoutOptions::default());
+    assert!(unchanged.relaid);
+    assert!(unchanged.delta.is_empty());
+}
+
+#[test]
+fn workspace_entrances_spring_new_nodes_into_place() {
+    let snapshot = SceneSnapshot::demo();
+    let mut workspace = GraphWorkspace::new(&snapshot);
+    let target = workspace.positions()[3];
+    let origin = workspace.positions()[0];
+    let mut entrances = vec![None; snapshot.nodes.ids.len()];
+    entrances[3] = Some(origin);
+    workspace.set_pinned(5, true);
+    entrances[5] = Some(origin);
+    workspace.enter_from(&entrances);
+    assert_eq!(workspace.positions()[3], origin);
+    assert_ne!(workspace.positions()[5], origin, "pinned nodes stay put");
+    assert!(workspace.is_moving());
+    for _ in 0..240 {
+        workspace.step(1.0 / 60.0, false);
+    }
+    assert!((workspace.positions()[3] - target).length() < 0.05);
+}
+
+#[test]
+fn node_connections_group_by_type_and_direction_with_full_counts() {
+    let mut snapshot = SceneSnapshot::demo();
+    // Node 0 gets a self-loop on top of the demo's NEXT and SUPPORTS edges.
+    snapshot.edges.ids.push(10_000);
+    snapshot.edges.sources.push(0);
+    snapshot.edges.targets.push(0);
+    snapshot.edges.labels.push("MENTIONS".into());
+    snapshot.edges.vector_counts.push(0);
+    snapshot.edges.properties.push(Arc::from([]));
+
+    let connections = snapshot.node_connections(0, 1);
+    let incident = snapshot
+        .edges
+        .sources
+        .iter()
+        .zip(&snapshot.edges.targets)
+        .filter(|&(&source, &target)| source == 0 || target == 0)
+        .count();
+    assert_eq!(connections.total, incident);
+    assert_eq!(
+        connections
+            .groups
+            .iter()
+            .map(|group| group.total)
+            .sum::<usize>(),
+        incident
+    );
+    assert!(
+        connections
+            .groups
+            .windows(2)
+            .all(|pair| pair[0].total >= pair[1].total)
+    );
+    assert!(
+        connections
+            .groups
+            .iter()
+            .all(|group| group.connections.len() == 1)
+    );
+    let next_out = connections
+        .groups
+        .iter()
+        .find(|group| &*group.label == "NEXT" && group.outgoing)
+        .unwrap();
+    let edge = next_out.connections[0].edge;
+    assert_eq!(snapshot.edges.sources[edge], 0);
+    assert_eq!(next_out.connections[0].neighbor, 1);
+    let self_loop = connections
+        .groups
+        .iter()
+        .find(|group| &*group.label == "MENTIONS")
+        .unwrap();
+    assert!(self_loop.outgoing);
+    assert_eq!(self_loop.total, 1);
+    assert_eq!(self_loop.connections[0].neighbor, 0);
+
+    assert_eq!(
+        snapshot.node_connections(usize::MAX, 4),
+        NodeConnections::default()
+    );
+}
+
+#[test]
+fn reload_places_a_node_with_several_anchors_between_them() {
+    fn scene(node_count: u64, edges: &[(u32, u32)]) -> SceneSnapshot {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.nodes = SceneNodes {
+            ids: (0..node_count).collect(),
+            labels: vec!["Node".into(); node_count as usize],
+            positions: vec![Vec2::ZERO; node_count as usize],
+            degrees: vec![0; node_count as usize],
+            vector_counts: vec![0; node_count as usize],
+            properties: vec![Arc::from([]); node_count as usize],
+        };
+        snapshot.edges = SceneEdges {
+            ids: (0..edges.len() as u64).collect(),
+            sources: edges.iter().map(|&(source, _)| source).collect(),
+            targets: edges.iter().map(|&(_, target)| target).collect(),
+            labels: vec!["LINKS".into(); edges.len()],
+            vector_counts: vec![0; edges.len()],
+            properties: vec![Arc::from([]); edges.len()],
+        };
+        snapshot
+    }
+    let previous = scene(3, &[]);
+    let presented = [
+        Vec2::new(-200.0, 0.0),
+        Vec2::new(200.0, 0.0),
+        Vec2::new(0.0, 300.0),
+    ];
+    let reloaded =
+        scene(4, &[(3, 0), (3, 1)]).anchored_on(&previous, &presented, LayoutOptions::default());
+    assert!(!reloaded.relaid);
+    let placed = reloaded.snapshot.nodes.positions[3];
+    assert!(
+        placed.length() <= LayoutOptions::default().edge_length * 0.5 + 0.01,
+        "{placed:?} should sit near the anchors' centroid"
+    );
+    let entrance = reloaded.entrances[3].unwrap();
+    assert!(entrance == presented[0] || entrance == presented[1]);
+}
+
+#[test]
+fn element_titles_prefer_naming_keys_then_first_lines() {
+    let property = |key: &str, value: &str| SceneProperty {
+        key: key.into(),
+        value: Value::String(value.into()),
+    };
+    // Priority follows the key list, not property order.
+    assert_eq!(
+        element_title(&[property("path", "src/lib.rs"), property("name", "lib")]).as_deref(),
+        Some("lib")
+    );
+    assert_eq!(
+        element_title(&[property("command", "cargo test -p vecgra")]).as_deref(),
+        Some("cargo test -p vecgra")
+    );
+    assert_eq!(
+        element_title(&[
+            property("sha", "abc123"),
+            property("message", "\n  Fix the reload race\n\nLonger body"),
+        ])
+        .as_deref(),
+        Some("Fix the reload race")
+    );
+    assert_eq!(element_title(&[property("title", "   ")]), None);
+    let long = "x".repeat(200);
+    let title = element_title(&[property("title", &long)]).unwrap();
+    assert_eq!(title.chars().count(), 120);
+    assert!(title.ends_with('…'));
+
+    let mut snapshot = SceneSnapshot::demo();
+    assert_eq!(&*snapshot.node_title(0), "Context element 0");
+    snapshot.nodes.properties[0] = Arc::from([]);
+    assert_eq!(snapshot.node_title(0), snapshot.nodes.labels[0].clone());
+}
+
+#[test]
+fn search_and_paths_name_message_only_nodes_by_their_first_line() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let source = transaction.create_node(
+        "File",
+        [("path", Value::String("src/reload.rs".into()))],
+        &[],
+    );
+    let commit = transaction.create_node(
+        "Commit",
+        [
+            ("sha", Value::String("abc123".into())),
+            (
+                "message",
+                Value::String("\n  Fix the reload race\n\nLonger body".into()),
+            ),
+        ],
+        &[],
+    );
+    transaction.create_edge(
+        commit,
+        source,
+        "CHANGED",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "reload race",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let hit = report
+        .hits
+        .iter()
+        .find(|hit| hit.element == ElementRef::Node(commit))
+        .unwrap();
+    assert_eq!(hit.title.as_ref(), "Fix the reload race");
+    assert_eq!(hit.detail.as_ref(), "Fix the reload race Longer body");
+
+    let report =
+        evidence_path_database(&file.0, source, commit, Direction::Both, None, 2, 32).unwrap();
+    assert_eq!(report.end.title.as_ref(), "Fix the reload race");
+    let path = report.path.unwrap();
+    assert_eq!(path.nodes[1].title.as_ref(), "Fix the reload race");
+}
+
+#[test]
+fn relationship_results_without_a_name_are_titled_by_their_ends() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let session = transaction.create_node(
+        "Session",
+        [("title", Value::String("Fix flaky layout test".into()))],
+        &[],
+    );
+    let source = transaction.create_node(
+        "File",
+        [("path", Value::String("src/layout.rs".into()))],
+        &[],
+    );
+    let edited = transaction.create_edge(
+        session,
+        source,
+        "EDITED",
+        [("lines", Value::Int(4242))],
+        &[],
+    );
+    let named = transaction.create_edge(
+        session,
+        source,
+        "CITES",
+        [("title", Value::String("Layout regression 4242".into()))],
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "4242",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let title = |id| {
+        report
+            .hits
+            .iter()
+            .find(|hit| hit.element == ElementRef::Edge(id))
+            .map(|hit| (hit.title.to_string(), hit.detail.to_string()))
+    };
+    assert_eq!(
+        title(edited),
+        Some((
+            "Fix flaky layout test → layout.rs".to_string(),
+            format!("node:{session} → node:{source}")
+        ))
+    );
+    assert_eq!(
+        title(named).map(|(title, _)| title).as_deref(),
+        Some("Layout regression 4242")
+    );
+}
+
+#[test]
+fn results_that_share_a_name_are_told_apart_by_short_properties() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let mut session = |agent: &str, model: &str| {
+        transaction.create_node(
+            "Session",
+            [
+                ("agent", Value::String(agent.into())),
+                ("model", Value::String(model.into())),
+                ("title", Value::String("Fix flaky layout test".into())),
+            ],
+            &[],
+        )
+    };
+    let codex = session("codex", "gpt-5.6");
+    let copilot = session("copilot", "gpt-5.6-mini");
+    let commit = transaction.create_node(
+        "Commit",
+        [
+            ("message", Value::String("Fix flaky layout test".into())),
+            ("sha", Value::String("758dd63cb9".into())),
+        ],
+        &[],
+    );
+    // Dates and long text say little at a glance; the ID stays.
+    let issue = transaction.create_node(
+        "Issue",
+        [
+            ("title", Value::String("Flaky layout test".into())),
+            ("created_at", Value::String("2026-10-19T14:03:00Z".into())),
+            ("notes", Value::String("x".repeat(80).into())),
+        ],
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "flaky",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let detail = |id| {
+        report
+            .hits
+            .iter()
+            .find(|hit| hit.element == ElementRef::Node(id))
+            .map(|hit| hit.detail.to_string())
+    };
+    assert_eq!(detail(codex).as_deref(), Some("codex · gpt-5.6"));
+    assert_eq!(detail(copilot).as_deref(), Some("copilot · gpt-5.6-mini"));
+    assert_eq!(detail(commit).as_deref(), Some("758dd63cb9"));
+    assert_eq!(detail(issue), Some(format!("node:{issue}")));
+}
+
+#[test]
+fn path_titles_split_into_name_and_directory() {
+    assert_eq!(
+        split_path_title("crates/vecgra/src/error.rs"),
+        Some(("error.rs", "crates/vecgra/src"))
+    );
+    assert_eq!(
+        split_path_title("crates/vecgra/src/"),
+        Some(("src", "crates/vecgra"))
+    );
+    assert_eq!(
+        split_path_title(r"C:\repo\main.rs"),
+        Some(("main.rs", r"C:\repo"))
+    );
+    assert_eq!(split_path_title("/etc"), None);
+    assert_eq!(split_path_title("README.md"), None);
+    assert_eq!(split_path_title("Fix A/B test flake"), None);
+    assert_eq!(split_path_title("https://example.com/a/b"), None);
+}
+
+#[test]
+fn recent_databases_keep_the_newest_existing_files_once() {
+    let directory = std::env::temp_dir().join(format!("vecgra-recent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let file = directory.join("nested").join("studio-recent");
+    assert_eq!(RecentDatabases::load(&file), RecentDatabases::default());
+
+    std::fs::create_dir_all(&directory).unwrap();
+    let databases: Vec<_> = (0..RecentDatabases::LIMIT + 2)
+        .map(|index| {
+            let path = directory.join(format!("graph-{index}.vg"));
+            std::fs::write(&path, b"").unwrap();
+            path
+        })
+        .collect();
+    let mut recent = RecentDatabases::default();
+    for path in &databases {
+        recent.remember(path.clone());
+    }
+    recent.remember(databases[RecentDatabases::LIMIT].clone());
+    recent.remember(directory.join("bad\nname.vg"));
+    assert_eq!(recent.paths().len(), RecentDatabases::LIMIT);
+    assert_eq!(recent.paths()[0], databases[RecentDatabases::LIMIT]);
+    assert_eq!(recent.paths()[1], databases[RecentDatabases::LIMIT + 1]);
+    assert!(!recent.paths().contains(&databases[0]));
+
+    recent.save(&file).unwrap();
+    std::fs::remove_file(&databases[RecentDatabases::LIMIT + 1]).unwrap();
+    let loaded = RecentDatabases::load(&file);
+    assert_eq!(loaded.paths().len(), RecentDatabases::LIMIT - 1);
+    assert_eq!(loaded.paths()[0], databases[RecentDatabases::LIMIT]);
+    assert!(
+        !loaded
+            .paths()
+            .contains(&databases[RecentDatabases::LIMIT + 1]),
+        "a database deleted since it was saved is dropped"
+    );
+
+    let mut forgotten = loaded.clone();
+    forgotten.forget(&databases[RecentDatabases::LIMIT]);
+    assert_eq!(forgotten.paths().len(), RecentDatabases::LIMIT - 2);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn snapshots_find_every_relationship_after_a_checkpointed_database_changes() {
+    let original = TestFile::new();
+    let compacted = TestFile::new();
+    let database = Database::create(
+        &original.0,
+        DatabaseOptions {
+            vector_dimension: 4,
+            similarity: Similarity::Cosine,
+            vector_encoding: VectorEncoding::F32,
+            sync_on_commit: false,
+        },
+    )
+    .unwrap();
+    let mut transaction = database.transaction();
+    let nodes: Vec<_> = (0..4)
+        .map(|_| transaction.create_node("Item", std::iter::empty::<(&str, Value)>(), &[]))
+        .collect();
+    let edges: Vec<_> = nodes
+        .windows(2)
+        .map(|pair| {
+            transaction.create_edge(
+                pair[0],
+                pair[1],
+                "NEXT",
+                std::iter::empty::<(&str, Value)>(),
+                &[],
+            )
+        })
+        .collect();
+    transaction.commit().unwrap();
+    database
+        .compact_to(&compacted.0, VectorEncoding::F32)
+        .unwrap();
+    drop(database);
+
+    // Changing the first relationship of a compacted file moves it after the
+    // rest in the database's own listing.
+    let database = Database::open(&compacted.0).unwrap();
+    let mut transaction = database.transaction();
+    transaction
+        .update_edge(
+            edges[0],
+            nodes[0],
+            nodes[1],
+            "NEXT",
+            [("weight", Value::Int(2))],
+            &[],
+        )
+        .unwrap();
+    transaction.commit().unwrap();
+
+    let snapshot = SceneSnapshot::from_database(&database, SnapshotOptions::default()).unwrap();
+    assert!(snapshot.edges.ids.is_sorted());
+    for &edge in &edges {
+        let index = snapshot
+            .edge_index(edge)
+            .expect("every relationship is found by ID");
+        assert_eq!(snapshot.edges.ids[index], edge);
+    }
+    assert_eq!(snapshot.relationship_counts(), vec![(Arc::from("NEXT"), 3)]);
+}
+
+#[test]
+fn command_history_keeps_the_newest_entries_across_sessions() {
+    let directory =
+        std::env::temp_dir().join(format!("vecgra-studio-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let file = directory.join("nested").join("studio-history");
+    assert_eq!(CommandHistory::load(&file), CommandHistory::default());
+
+    let mut history = CommandHistory::default();
+    assert!(history.remember("  path 0 54 out "));
+    assert!(!history.remember("path 0 54 out"), "a repeat is kept once");
+    assert!(!history.remember("   "));
+    assert!(!history.remember("two\nlines"));
+    assert!(history.remember("codec"));
+    assert!(history.remember("path 0 54 out"));
+    assert_eq!(
+        history.entries(),
+        ["path 0 54 out", "codec", "path 0 54 out"]
+    );
+    history.save(&file).unwrap();
+    assert_eq!(CommandHistory::load(&file), history);
+
+    for index in 0..CommandHistory::LIMIT {
+        history.remember(&format!("node {index}"));
+    }
+    assert_eq!(history.entries().len(), CommandHistory::LIMIT);
+    assert_eq!(history.entries()[0], "node 0");
+    history.save(&file).unwrap();
+    assert_eq!(CommandHistory::load(&file), history);
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn date_properties_read_as_ages() {
+    let then = 1_792_620_180_000; // 2026-10-21T22:03:00Z
+    assert_eq!(parse_iso_datetime_ms("2026-10-21T22:03:00Z"), Some(then));
+    assert_eq!(
+        parse_iso_datetime_ms("2026-10-21T23:03:00.25+01:00"),
+        Some(then + 250)
+    );
+    assert_eq!(
+        parse_iso_datetime_ms("2024-02-29T12:00:00Z"),
+        Some(1_709_208_000_000)
+    );
+    for text in [
+        "2026-02-30T00:00:00Z",
+        "2026-10-21",
+        "2026-10-21T22:03:00",
+        "2026-10-21T22:03:00+0100",
+        "a release on 2026-10-21T22:03:00Z",
+        "not a date",
+    ] {
+        assert_eq!(parse_iso_datetime_ms(text), None, "{text}");
+    }
+
+    let minute = 60_000;
+    let day = 24 * 60 * minute;
+    assert_eq!(relative_age(then - 30_000, then), "just now");
+    assert_eq!(relative_age(then - 5 * minute, then), "5 minutes ago");
+    assert_eq!(relative_age(then - 60 * minute, then), "1 hour ago");
+    assert_eq!(relative_age(then - 3 * day, then), "3 days ago");
+    assert_eq!(relative_age(then - 15 * day, then), "2 weeks ago");
+    assert_eq!(relative_age(then - 400 * day, then), "1 year ago");
+    assert_eq!(relative_age(then + 2 * day, then), "in 2 days");
+
+    let now = then + day + 5 * minute;
+    assert_eq!(
+        property_time_hint(
+            "created_at",
+            &PropertyValue::String("2026-10-21T22:03:00Z".into()),
+            now
+        )
+        .as_deref(),
+        Some("1 day ago")
+    );
+    assert_eq!(
+        property_time_hint("created_at_ms", &PropertyValue::Int(then), now).as_deref(),
+        Some("2026-10-21 22:03 UTC · 1 day ago")
+    );
+    // Numbers are dates only when named as milliseconds and in range.
+    assert_eq!(
+        property_time_hint("count", &PropertyValue::Int(then), now),
+        None
+    );
+    assert_eq!(
+        property_time_hint("size_ms", &PropertyValue::Int(1_500), now),
+        None
+    );
+    assert_eq!(
+        property_time_hint(
+            "title",
+            &PropertyValue::String("Fix flaky test".into()),
+            now
+        ),
+        None
+    );
+}
+
+#[test]
+fn hidden_nodes_leave_the_scene_and_come_back_beside_their_neighbors() {
+    let mut full = SceneSnapshot::demo();
+    full.layout(LayoutOptions::default());
+    // The best-connected node, so hiding it removes many relationships.
+    let hub = (0..full.nodes.ids.len())
+        .max_by_key(|&index| full.nodes.degrees[index])
+        .unwrap();
+    let hub_id = full.nodes.ids[hub];
+    let touching = (0..full.edges.ids.len())
+        .filter(|&edge| {
+            full.edges.sources[edge] as usize == hub || full.edges.targets[edge] as usize == hub
+        })
+        .count();
+    let hidden = HiddenElements {
+        ids: [hub_id].into(),
+        ..HiddenElements::default()
+    };
+
+    let shown = full.without_hidden(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - 1);
+    assert_eq!(shown.edges.ids.len(), full.edges.ids.len() - touching);
+    assert_eq!(shown.node_index(hub_id), None);
+    for edge in 0..shown.edges.ids.len() {
+        let original = full.edge_index(shown.edges.ids[edge]).unwrap();
+        for (now, then) in [
+            (shown.edges.sources[edge], full.edges.sources[original]),
+            (shown.edges.targets[edge], full.edges.targets[original]),
+        ] {
+            assert_eq!(shown.nodes.ids[now as usize], full.nodes.ids[then as usize]);
+        }
+    }
+    for (index, &id) in shown.nodes.ids.iter().enumerate() {
+        let original = full.node_index(id).unwrap();
+        assert_eq!(shown.nodes.positions[index], full.nodes.positions[original]);
+    }
+
+    // Showing it again anchors the full scene on the one in view: everything
+    // else stays put and the hub enters from a neighbor.
+    let restored = full.anchored_on(&shown, &shown.nodes.positions, LayoutOptions::default());
+    assert!(!restored.relaid);
+    assert_eq!(restored.delta.added_nodes, 1);
+    assert_eq!(restored.delta.added_edges, touching);
+    assert_eq!(restored.delta.removed_nodes, 0);
+    assert!(restored.entrances[hub].is_some());
+    for (index, &id) in shown.nodes.ids.iter().enumerate() {
+        let back = restored.snapshot.node_index(id).unwrap();
+        assert_eq!(
+            restored.snapshot.nodes.positions[back],
+            shown.nodes.positions[index]
+        );
+    }
+}
+
+#[test]
+fn a_hidden_label_or_type_hides_every_element_with_it() {
+    let mut full = SceneSnapshot::demo();
+    full.layout(LayoutOptions::default());
+    let label = full.nodes.labels[0].clone();
+    let with_label = full
+        .nodes
+        .labels
+        .iter()
+        .filter(|other| **other == label)
+        .count();
+    let hidden = HiddenElements {
+        labels: [label.clone()].into(),
+        ..HiddenElements::default()
+    };
+    assert!(hidden.hides(full.nodes.ids[0], &label));
+    let shown = full.without_hidden(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - with_label);
+    assert!(shown.nodes.labels.iter().all(|other| *other != label));
+    assert!(HiddenElements::default().is_empty() && !hidden.is_empty());
+
+    // A node can be shown as an exception to its hidden label.
+    let mut excepted = hidden.clone();
+    excepted.shown.insert(full.nodes.ids[0]);
+    assert!(!excepted.hides(full.nodes.ids[0], &label));
+    let shown = full.without_hidden(&excepted);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len() - with_label + 1);
+    assert!(shown.node_index(full.nodes.ids[0]).is_some());
+    assert!(
+        HiddenElements {
+            shown: [full.nodes.ids[0]].into(),
+            ..HiddenElements::default()
+        }
+        .is_empty()
+    );
+
+    // A hidden relationship type leaves every node in place.
+    let relationship = full.edges.labels[0].clone();
+    let of_type = full
+        .edges
+        .labels
+        .iter()
+        .filter(|other| **other == relationship)
+        .count();
+    let hidden = HiddenElements {
+        relationships: [relationship.clone()].into(),
+        ..HiddenElements::default()
+    };
+    let shown = full.without_hidden(&hidden);
+    assert_eq!(shown.nodes.ids.len(), full.nodes.ids.len());
+    assert_eq!(shown.edges.ids.len(), full.edges.ids.len() - of_type);
+    assert!(
+        shown
+            .edges
+            .labels
+            .iter()
+            .all(|other| *other != relationship)
     );
 }

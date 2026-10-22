@@ -8,6 +8,11 @@ const TITLE_BAR_PLATFORM_INSET: f32 = 80.0;
 const TITLE_BAR_PLATFORM_INSET: f32 = 12.0;
 const TOOLBAR_GAP: f32 = 8.0;
 const OVERVIEW_SIDEBAR_WIDTH: f32 = 218.0;
+const INSPECTOR_PROPERTY_LIMIT: usize = 24;
+const INSPECTOR_CONNECTIONS_PER_GROUP: usize = 6;
+/// How many of a group's connections the inspector lists once expanded.
+pub(super) const INSPECTOR_CONNECTIONS_EXPANDED: usize = 100;
+const INSPECTOR_CONNECTION_GROUPS: usize = 8;
 const DETAIL_SIDEBAR_WIDTH: f32 = 306.0;
 
 impl StudioView {
@@ -86,7 +91,7 @@ impl StudioView {
                                         .debug_selector(|| "compact-search-field".into())
                                         .flex_1()
                                         .min_w(px(180.0))
-                                        .child(Input::new(&self.query_input).small()),
+                                        .child(self.render_query_input(cx)),
                                 )
                                 .child(self.render_bezel_zoom_controls(cx)),
                         )
@@ -124,12 +129,65 @@ impl StudioView {
                             .flex_1()
                             .min_w(px(180.0))
                             .max_w(px(620.0))
-                            .child(Input::new(&self.query_input).small()),
+                            .child(self.render_query_input(cx)),
                     )
                     .child(self.render_bezel_search_modes(cx))
                     .child(div().flex_1()),
             )
             .into_any_element()
+    }
+
+    /// The command box, ending in a hint that says what Enter will do: run
+    /// the command typed, search, or go to the selected result of the search
+    /// already shown.
+    fn render_query_input(&self, cx: &Context<Self>) -> Input {
+        let query = self.query_input.read(cx).value();
+        let shown = match &self.search_state {
+            SearchState::Ready(report)
+                if report.query.as_ref() == query.trim() && report.mode == self.search_mode =>
+            {
+                Some(report.hits.is_empty())
+            }
+            _ => None,
+        };
+        let hint = match shown {
+            Some(false) => Some("go to result"),
+            // With nothing found, Enter goes to what a bare ID names, if
+            // anything.
+            Some(true) => match self.id_matches(&query).first() {
+                Some(SceneSelection::Node(_)) => Some("node"),
+                Some(SceneSelection::Edge(_)) => Some("edge"),
+                None => None,
+            },
+            None => enter_hint(&query),
+        };
+        let input = Input::new(&self.query_input).small();
+        let Some(hint) = hint else {
+            return input;
+        };
+        input.suffix(
+            div()
+                .debug_selector(|| "search-enter-hint".into())
+                .flex_none()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("↵ {hint}")),
+        )
+    }
+
+    /// A panel row clicked with the pointer hands keyboard focus to the
+    /// graph, so Backspace, Enter and the arrows act on what it showed rather
+    /// than on the command box; a row chosen by keyboard keeps focus for the
+    /// next one.
+    pub(super) fn focus_graph_after(
+        &self,
+        event: &gpui::ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, gpui::ClickEvent::Keyboard(_)) {
+            window.focus(&self.focus_handle, cx);
+        }
     }
 
     pub(super) fn render_left_panel(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -177,6 +235,9 @@ impl StudioView {
             .when(showing_path, |this| {
                 this.child(self.render_evidence_path(cx))
             })
+            .when(showing_context, |this| {
+                this.children(self.render_context_heading(cx))
+            })
             .when(!showing_search && !showing_path, |this| {
                 this.child(section_label(
                     "RELATIONSHIPS",
@@ -195,60 +256,89 @@ impl StudioView {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::Relationship(label.clone()));
                             let facet = FacetLens::Relationship(label.clone());
-                            Button::new(format!("relationship-facet:{label}"))
-                                .ghost()
-                                .small()
-                                .compact()
+                            let selector = format!("relationship-facet:{label}");
+                            let menu_facet = facet.clone();
+                            let outside_context = showing_context
+                                && self
+                                    .context_summary
+                                    .as_ref()
+                                    .is_some_and(|summary| !summary.has_type(label));
+                            div()
                                 .w_full()
-                                .label(label.to_string())
-                                .accessibility_id(format!("relationship-facet:{label}"))
-                                .toggled(active)
-                                .selected(active)
-                                .cursor_pointer()
-                                .when(active, |this| {
-                                    this.border_l_2().border_color(cx.theme().ring)
-                                })
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.activate_facet(facet.clone(), window, cx);
-                                }))
-                                .child(
-                                    h_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap_1()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .size(px(7.0))
-                                                .rounded_full()
-                                                .bg(relationship_color(label)),
-                                        )
-                                        .child(div().flex_1())
-                                        .when(active, |this| {
-                                            this.child(
-                                                div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(cx.theme().ring)
-                                                    .child("LENS"),
-                                            )
-                                        })
-                                        .when(!active, |this| {
-                                            this.child(
-                                                div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(format_count(*count)),
-                                            )
-                                        }),
+                                .debug_selector(move || selector)
+                                // While a context is open, rows it holds
+                                // nothing of recede.
+                                .when(outside_context, |this| this.opacity(0.4))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        this.open_facet_menu(
+                                            menu_facet.clone(),
+                                            event.position,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
                                 )
-                        })),
+                                .child(
+                                    Button::new(format!("relationship-facet:{label}"))
+                                        .ghost()
+                                        .small()
+                                        .compact()
+                                        .w_full()
+                                        .label(label.to_string())
+                                        .accessibility_id(format!("relationship-facet:{label}"))
+                                        .toggled(active)
+                                        .selected(active)
+                                        .cursor_pointer()
+                                        .when(active, |this| {
+                                            this.border_l_2().border_color(cx.theme().ring)
+                                        })
+                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                            this.focus_graph_after(event, window, cx);
+                                            this.activate_facet(facet.clone(), window, cx);
+                                        }))
+                                        .child(
+                                            h_flex()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .gap_1()
+                                                .items_center()
+                                                .child(
+                                                    div()
+                                                        .size(px(7.0))
+                                                        .rounded_full()
+                                                        .bg(self.label_colors.relationship(label)),
+                                                )
+                                                .child(div().flex_1())
+                                                .when(active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .font_weight(gpui::FontWeight::BOLD)
+                                                            .text_color(cx.theme().ring)
+                                                            .child("LENS"),
+                                                    )
+                                                })
+                                                .when(!active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(format_count(*count)),
+                                                    )
+                                                }),
+                                        ),
+                                )
+                        }))
+                        .children(self.hidden_relationship_rows(cx)),
                 )
             })
             .when(!showing_search && !showing_path, |this| {
@@ -265,56 +355,290 @@ impl StudioView {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::NodeLabel(label.clone()));
                             let facet = FacetLens::NodeLabel(label.clone());
-                            Button::new(format!("node-label-facet:{label}"))
-                                .ghost()
-                                .small()
-                                .compact()
+                            let selector = format!("node-label-facet:{label}");
+                            let menu_facet = facet.clone();
+                            let outside_context = showing_context
+                                && self
+                                    .context_summary
+                                    .as_ref()
+                                    .is_some_and(|summary| !summary.has_label(label));
+                            div()
                                 .w_full()
-                                .label(label.to_string())
-                                .accessibility_id(format!("node-label-facet:{label}"))
-                                .toggled(active)
-                                .selected(active)
-                                .cursor_pointer()
-                                .when(active, |this| {
-                                    this.border_l_2().border_color(cx.theme().ring)
-                                })
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.activate_facet(facet.clone(), window, cx);
-                                }))
-                                .child(
-                                    h_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .items_center()
-                                        .child(div().flex_1())
-                                        .when(active, |this| {
-                                            this.child(
-                                                div()
-                                                    .mr_2()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(cx.theme().ring)
-                                                    .child("LENS"),
-                                            )
-                                        })
-                                        .when(!active, |this| {
-                                            this.child(
-                                                div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(format_count(*count)),
-                                            )
-                                        }),
+                                .debug_selector(move || selector)
+                                // While a context is open, rows it holds
+                                // nothing of recede.
+                                .when(outside_context, |this| this.opacity(0.4))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        this.open_facet_menu(
+                                            menu_facet.clone(),
+                                            event.position,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
                                 )
-                        })),
+                                .child(
+                                    Button::new(format!("node-label-facet:{label}"))
+                                        .ghost()
+                                        .small()
+                                        .compact()
+                                        .w_full()
+                                        .label(label.to_string())
+                                        .accessibility_id(format!("node-label-facet:{label}"))
+                                        .toggled(active)
+                                        .selected(active)
+                                        .cursor_pointer()
+                                        .when(active, |this| {
+                                            this.border_l_2().border_color(cx.theme().ring)
+                                        })
+                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                            this.focus_graph_after(event, window, cx);
+                                            this.activate_facet(facet.clone(), window, cx);
+                                        }))
+                                        .child(
+                                            h_flex()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .gap_1()
+                                                .items_center()
+                                                // The colour the canvas draws
+                                                // these nodes in, so the list
+                                                // is also the legend.
+                                                .child({
+                                                    let selector =
+                                                        format!("node-label-colour:{label}");
+                                                    div()
+                                                        .debug_selector(move || selector)
+                                                        .size(px(7.0))
+                                                        .rounded_full()
+                                                        .bg(self.label_colors.color(label))
+                                                })
+                                                .child(div().flex_1())
+                                                .when(active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .mr_2()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .font_weight(gpui::FontWeight::BOLD)
+                                                            .text_color(cx.theme().ring)
+                                                            .child("LENS"),
+                                                    )
+                                                })
+                                                .when(!active, |this| {
+                                                    this.child(
+                                                        div()
+                                                            .font_family(
+                                                                cx.theme().mono_font_family.clone(),
+                                                            )
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(format_count(*count)),
+                                                    )
+                                                }),
+                                        ),
+                                )
+                        }))
+                        .children(self.hidden_label_rows(cx)),
                 )
             })
+    }
+
+    /// The node a 2-hop context is around, and what the context holds.
+    fn render_context_heading(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        let summary = self.context_summary.as_ref()?;
+        let summary_node = summary.node;
+        let snapshot = self.snapshot()?;
+        let index = snapshot.node_index(summary_node)?;
+        Some(
+            v_flex()
+                .debug_selector(|| "context-heading".into())
+                .px_4()
+                .pt_3()
+                .pb_1()
+                .gap_0p5()
+                // The title points the node out and selects it again after
+                // walking away from it inside the context.
+                .child(
+                    div()
+                        .id("context-heading-title")
+                        .debug_selector(|| "context-heading-title".into())
+                        .role(Role::Button)
+                        .aria_label(format!("Select {}", snapshot.node_title(index)))
+                        .mx(px(-4.0))
+                        .px(px(3.0))
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().sidebar_accent))
+                        .tooltip(|window, cx| Tooltip::text("Select this node", window, cx))
+                        .on_activate(cx, move |this, window, cx| {
+                            this.go_to_id_match(SceneSelection::Node(index), window, cx);
+                        })
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            this.preview_node(summary_node, *hovered, cx);
+                        }))
+                        .child(
+                            title_line(&snapshot.node_title(index), cx)
+                                .text_sm()
+                                .font_weight(gpui::FontWeight::SEMIBOLD),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "{} direct · {} two-hop",
+                            summary.direct, summary.indirect
+                        )),
+                )
+                .when(!summary.labels.is_empty(), |this| {
+                    let (shown, others) = summary.label_mix();
+                    this.child(self.render_context_mix(
+                        "context-label-mix",
+                        shown,
+                        (others > 0).then(|| counted(others, "more label", "more labels")),
+                        |label| self.label_colors.color(label),
+                        cx,
+                    ))
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(counted(
+                            summary.relationships,
+                            "relationship",
+                            "relationships",
+                        )),
+                )
+                .when(!summary.types.is_empty(), |this| {
+                    let (shown, others) = summary.type_mix();
+                    this.child(self.render_context_mix(
+                        "context-type-mix",
+                        shown,
+                        (others > 0).then(|| counted(others, "more type", "more types")),
+                        |label| self.label_colors.relationship(label),
+                        cx,
+                    ))
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// The commonest labels or types in a context, each beside its legend
+    /// colour. The line wraps between entries rather than inside one.
+    fn render_context_mix(
+        &self,
+        selector: &'static str,
+        shown: &[(Arc<str>, usize)],
+        more: Option<String>,
+        color: impl Fn(&str) -> gpui::Hsla,
+        cx: &Context<Self>,
+    ) -> gpui::Div {
+        h_flex()
+            .debug_selector(move || selector.into())
+            .flex_wrap()
+            .gap_x_2()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .children(shown.iter().map(|(label, count)| {
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(div().size(px(6.0)).rounded_full().bg(color(label)))
+                    .child(format!("{count} {label}"))
+            }))
+            .children(more)
+    }
+
+    /// Rows above the search results for the node and relationship a bare
+    /// number names by ID.
+    fn render_id_matches(&self, query: &str, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        let Some(snapshot) = self.snapshot() else {
+            return Vec::new();
+        };
+        self.id_matches(query)
+            .into_iter()
+            .map(|selection| {
+                let (kind, label, title, color) = match selection {
+                    SceneSelection::Node(index) => (
+                        "node",
+                        snapshot.nodes.labels[index].clone(),
+                        snapshot.node_title(index).to_string(),
+                        palette().celadon,
+                    ),
+                    SceneSelection::Edge(index) => {
+                        let label = snapshot.edges.labels[index].clone();
+                        let color = self.label_colors.relationship(&label);
+                        (
+                            "edge",
+                            label,
+                            format!(
+                                "{} → {}",
+                                status_node_name(snapshot, snapshot.edges.sources[index] as usize),
+                                status_node_name(snapshot, snapshot.edges.targets[index] as usize)
+                            ),
+                            color,
+                        )
+                    }
+                };
+                v_flex()
+                    .id(SharedString::from(format!("search-id-match:{kind}")))
+                    .debug_selector(move || format!("search-id-match:{kind}"))
+                    .role(Role::ListItem)
+                    .aria_label(format!("{kind} {} by ID, {title}, {label}", query.trim()))
+                    .mx_0p5()
+                    .mb_1()
+                    .p_2()
+                    .gap_1()
+                    .rounded(px(5.0))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().sidebar_accent))
+                    .on_click(cx.listener(move |this, event, window, cx| {
+                        this.focus_graph_after(event, window, cx);
+                        this.go_to_id_match(selection, window, cx);
+                    }))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(color)
+                                    .child(kind.to_uppercase()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("ID {}", query.trim())),
+                            ),
+                    )
+                    .child(
+                        title_line(&title, cx)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD),
+                    )
+                    .into_any_element()
+            })
+            .collect()
     }
 
     fn left_panel_width(&self) -> f32 {
@@ -324,6 +648,38 @@ impl StudioView {
             OVERVIEW_SIDEBAR_WIDTH
         } else {
             DETAIL_SIDEBAR_WIDTH
+        }
+    }
+
+    /// The ends of a path being traced, or that could not be, as the cards a
+    /// found path shows them; by ID when the scene does not hold them.
+    fn pending_path_ends(&self, start: u64, end: u64, cx: &Context<Self>) -> gpui::AnyElement {
+        let card = |role, id, color| {
+            let snapshot = self.snapshot()?;
+            let index = snapshot.node_index(id)?;
+            Some(
+                path_endpoint_card_data(
+                    role,
+                    id,
+                    &snapshot.nodes.labels[index],
+                    &scene_node_title(snapshot, index),
+                    color,
+                    cx,
+                )
+                .into_any_element(),
+            )
+        };
+        match (
+            card("FROM", start, palette().celadon),
+            card("TO", end, palette().copper),
+        ) {
+            (Some(from), Some(to)) => v_flex().gap_2().child(from).child(to).into_any_element(),
+            _ => div()
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("node:{start}  →  node:{end}"))
+                .into_any_element(),
         }
     }
 
@@ -534,13 +890,7 @@ impl StudioView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child("Tracing exact evidence path"),
                 )
-                .child(
-                    div()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{start}  →  node:{end}")),
-                )
+                .child(self.pending_path_ends(*start, *end, cx))
                 .child(
                     div()
                         .text_xs()
@@ -560,13 +910,7 @@ impl StudioView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child("Could not trace evidence path"),
                 )
-                .child(
-                    div()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{start}  →  node:{end}")),
-                )
+                .child(self.pending_path_ends(*start, *end, cx))
                 .child(
                     div()
                         .text_xs()
@@ -614,6 +958,7 @@ impl StudioView {
                 let total_nodes = report.path.as_ref().map_or(2, |path| path.nodes.len());
                 let total_edges = report.path.as_ref().map_or(0, |path| path.steps.len());
                 let partial = visible_nodes < total_nodes || visible_edges < total_edges;
+                let retries = path_retries(report);
                 let summary = match report.termination {
                     EvidencePathTermination::Found if hop_count == 0 => {
                         format!("Same node · {elapsed_ms:.1} ms")
@@ -659,7 +1004,33 @@ impl StudioView {
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
                                             .child(summary),
-                                    ),
+                                    )
+                                    .when_some(evidence_path_text(report), |this, text| {
+                                        this.child(
+                                            div()
+                                                .debug_selector(|| "evidence-path-copy".into())
+                                                .child(
+                                                    Button::new("evidence-path-copy")
+                                                        .ghost()
+                                                        .small()
+                                                        .compact()
+                                                        .label("Copy")
+                                                        .tooltip("Copy the path as text")
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                cx.write_to_clipboard(
+                                                                    gpui::ClipboardItem::new_string(
+                                                                        text.clone(),
+                                                                    ),
+                                                                );
+                                                                this.status =
+                                                                    "Copied the path as text".into();
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                ),
+                                        )
+                                    }),
                             )
                             .child(path_endpoint_card("FROM", &report.start, palette().celadon, cx))
                             .child(path_endpoint_card("TO", &report.end, palette().copper, cx))
@@ -669,7 +1040,7 @@ impl StudioView {
                                     div()
                                         .font_family(cx.theme().mono_font_family.clone())
                                         .text_xs()
-                                        .text_color(relationship_color(&label))
+                                        .text_color(self.label_colors.relationship(&label))
                                         .child(format!("relationship:{label}")),
                                 )
                             })
@@ -684,7 +1055,12 @@ impl StudioView {
                                         .line_height(px(16.0))
                                         .text_color(cx.theme().warning)
                                         .child(format!(
-                                            "Exact database result; sampled canvas shows {visible_nodes}/{total_nodes} nodes and {visible_edges}/{total_edges} relationships."
+                                            "Exact database result; {} shows {visible_nodes}/{total_nodes} nodes and {visible_edges}/{total_edges} relationships.",
+                                            if self.hidden.is_some() {
+                                                "with nodes hidden, the canvas"
+                                            } else {
+                                                "sampled canvas"
+                                            }
                                         )),
                                 )
                             }),
@@ -739,8 +1115,10 @@ impl StudioView {
                                     orientation
                                 );
                                 let ring = cx.theme().ring;
+                                let edge_id = step.edge_id;
                                 div()
                                     .id(("evidence-path-step", step.edge_id))
+                                    .debug_selector(move || format!("evidence-path-step-{index}"))
                                     .focusable()
                                     .tab_stop(true)
                                     .role(Role::Button)
@@ -753,7 +1131,7 @@ impl StudioView {
                                     .py_1()
                                     .rounded(px(5.0))
                                     .border_l_2()
-                                    .border_color(relationship_color(&step.label))
+                                    .border_color(self.label_colors.relationship(&step.label))
                                     .when(selected, |this| {
                                         this.bg(cx.theme().sidebar_accent)
                                             .border_1()
@@ -765,6 +1143,9 @@ impl StudioView {
                                     .focus(move |style| style.border_1().border_color(ring))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.activate_evidence_step(index, window, cx);
+                                    }))
+                                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                        this.preview_edge(edge_id, *hovered, cx);
                                     }))
                                     .on_key_down(cx.listener(
                                         move |this, event: &gpui::KeyDownEvent, window, cx| {
@@ -791,7 +1172,7 @@ impl StudioView {
                                                     .font_family(cx.theme().mono_font_family.clone())
                                                     .text_xs()
                                                     .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(relationship_color(&step.label))
+                                                    .text_color(self.label_colors.relationship(&step.label))
                                                     .child(format!("{:02}", index + 1)),
                                             )
                                             .child(
@@ -815,13 +1196,24 @@ impl StudioView {
                                                                         .clone(),
                                                                 )
                                                                 .text_xs()
-                                                                .text_color(relationship_color(
+                                                                .text_color(self.label_colors.relationship(
                                                                     &step.label,
                                                                 ))
                                                                 .truncate()
                                                                 .child(step.label.to_string()),
                                                         )
                                                     })
+                                                    .when_some(
+                                                        evidence_step_names(path, index),
+                                                        |this, names| {
+                                                            this.child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .truncate()
+                                                                    .child(names),
+                                                            )
+                                                        },
+                                                    )
                                                     .child(
                                                         div()
                                                             .font_family(cx.theme().mono_font_family.clone())
@@ -869,7 +1261,7 @@ impl StudioView {
                                     })
                                     .child(match report.termination {
                                         EvidencePathTermination::NotFoundWithinHops => format!(
-                                            "The complete search found no matching chain up to {} hops. Increase max-hops to widen the proof boundary.",
+                                            "The complete search found no matching chain up to {} hops.",
                                             report.max_hops
                                         ),
                                         EvidencePathTermination::ExpansionLimit => format!(
@@ -881,6 +1273,16 @@ impl StudioView {
                                         }
                                     }),
                             )
+                            .when(!retries.is_empty(), |this| {
+                                this.child(
+                                    h_flex()
+                                        .flex_wrap()
+                                        .gap_1()
+                                        .children(retries.iter().map(|&retry| {
+                                            path_retry_button(retry, cx)
+                                        })),
+                                )
+                            })
                             .into_any_element(),
                     })
                     .into_any_element()
@@ -964,21 +1366,37 @@ impl StudioView {
                                             .child(summary),
                                     ),
                             )
-                            .when_some(report.embedding_model.clone(), |this, model| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .truncate()
-                                        .child(format!("Vectors · {model}")),
-                                )
-                            })
+                            // Without the semantic half, naming the vectors
+                            // would suggest they ranked these results.
+                            .when_some(
+                                report
+                                    .embedding_model
+                                    .clone()
+                                    .filter(|_| report.warning.is_none()),
+                                |this, model| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .truncate()
+                                            .child(format!("Vectors · {model}")),
+                                    )
+                                },
+                            )
+                            // One line, with the reason on hover: it repeats
+                            // on every search of a database the model cannot
+                            // embed for.
                             .when_some(report.warning.clone(), |this, warning| {
+                                let detail = warning.clone();
                                 this.child(
                                     div()
+                                        .id("search-warning")
                                         .text_xs()
-                                        .line_height(px(16.0))
+                                        .truncate()
                                         .text_color(cx.theme().warning)
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::text(detail.to_string(), window, cx)
+                                        })
                                         .child(warning.to_string()),
                                 )
                             }),
@@ -993,15 +1411,19 @@ impl StudioView {
                             .overflow_y_scroll()
                             .px_2()
                             .pb_3()
-                            .when(report.hits.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .p_3()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("No matching graph elements"),
-                                )
-                            })
+                            .children(self.render_id_matches(&report.query, cx))
+                            .when(
+                                report.hits.is_empty() && self.id_matches(&report.query).is_empty(),
+                                |this| {
+                                    this.child(
+                                        div()
+                                            .p_3()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("No matching graph elements"),
+                                    )
+                                },
+                            )
                             .children(report.hits.iter().enumerate().map(|(index, hit)| {
                                 let selected = index == self.selected_search_result;
                                 let result_id = match hit.kind_label() {
@@ -1009,16 +1431,18 @@ impl StudioView {
                                     _ => ("search-result-node", hit.id()),
                                 };
                                 let kind_color = if hit.kind_label() == "EDGE" {
-                                    relationship_color(&hit.label)
+                                    self.label_colors.relationship(&hit.label)
                                 } else {
                                     palette().celadon
                                 };
+                                let hidden = self.hit_is_hidden(hit);
                                 let accessible_label = format!(
-                                    "{} {}, {}, relevance {:.0} percent",
+                                    "{} {}, {}, relevance {:.0} percent{}",
                                     hit.kind_label().to_lowercase(),
                                     hit.title,
                                     hit.label,
-                                    hit.score * 100.0
+                                    hit.score * 100.0,
+                                    if hidden { ", hidden" } else { "" }
                                 );
                                 v_flex()
                                     .id(result_id)
@@ -1042,6 +1466,17 @@ impl StudioView {
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.activate_search_result(index, window, cx);
                                     }))
+                                    .on_hover({
+                                        let id = hit.id();
+                                        let edge = hit.kind_label() == "EDGE";
+                                        cx.listener(move |this, hovered: &bool, _, cx| {
+                                            if edge {
+                                                this.preview_edge(id, *hovered, cx);
+                                            } else {
+                                                this.preview_node(id, *hovered, cx);
+                                            }
+                                        })
+                                    })
                                     .child(
                                         h_flex()
                                             .gap_2()
@@ -1061,6 +1496,26 @@ impl StudioView {
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(hit.label.to_string()),
                                             )
+                                            // A hidden hit is still listed, so
+                                            // the search stays complete, but
+                                            // says it is not on the canvas.
+                                            .when(hidden, |this| {
+                                                this.child(
+                                                    div()
+                                                        .debug_selector({
+                                                            let id = hit.id();
+                                                            move || {
+                                                                format!("search-result-hidden:{id}")
+                                                            }
+                                                        })
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_xs()
+                                                        .text_color(palette().copper)
+                                                        .child("hidden"),
+                                                )
+                                            })
                                             .child(
                                                 div()
                                                     .font_family(
@@ -1072,11 +1527,9 @@ impl StudioView {
                                             ),
                                     )
                                     .child(
-                                        div()
+                                        title_line(&hit.title, cx)
                                             .text_sm()
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .truncate()
-                                            .child(hit.title.to_string()),
+                                            .font_weight(gpui::FontWeight::SEMIBOLD),
                                     )
                                     .child(
                                         div()
@@ -1118,7 +1571,19 @@ impl StudioView {
 
     pub(super) fn render_inspector(&self, cx: &Context<Self>) -> impl IntoElement {
         let colors = palette();
-        let header = inspector_header_label("INSPECTOR");
+        let header = h_flex()
+            .items_center()
+            .justify_between()
+            .pr_2()
+            .child(inspector_header_label("INSPECTOR"))
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .pt_2()
+                    .child(self.copy_selection_button(cx))
+                    .child(self.history_button(true, cx))
+                    .child(self.history_button(false, cx)),
+            );
         let content = match (self.snapshot(), self.selection) {
             (Some(snapshot), Some(SceneSelection::Node(index))) => {
                 let properties = snapshot.nodes.properties[index].clone();
@@ -1142,18 +1607,51 @@ impl StudioView {
                         v_flex()
                             .gap_1()
                             .child(
-                                div()
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
                                     .text_xs()
-                                    .text_color(colors.celadon)
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .child(format!("node:{}", snapshot.nodes.ids[index])),
+                                    .child(copyable_id(
+                                        "inspector-copy-node-id",
+                                        format!("node:{node_id}"),
+                                        colors.celadon,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .truncate()
+                                            .child(snapshot.nodes.labels[index].to_string()),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(snapshot.nodes.labels[index].to_string()),
-                            )
+                            .child({
+                                let title = scene_node_title(snapshot, index);
+                                let (heading, directory) = match split_path_title(&title) {
+                                    Some((name, parent)) => {
+                                        (name.to_string(), Some(parent.to_string()))
+                                    }
+                                    None => (title.to_string(), None),
+                                };
+                                v_flex()
+                                    .debug_selector(|| "inspector-node-title".into())
+                                    .child(
+                                        div()
+                                            .text_lg()
+                                            .line_height(px(24.0))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child(heading),
+                                    )
+                                    .when_some(directory, |this, directory| {
+                                        this.child(
+                                            div()
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(directory),
+                                        )
+                                    })
+                            })
                             .child(
                                 div()
                                     .text_xs()
@@ -1187,6 +1685,37 @@ impl StudioView {
                                                 })),
                                         ),
                                 )
+                            }),
+                    )
+                    .child(div().h(px(1.0)).bg(cx.theme().border))
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(inspector_label("PROPERTIES"))
+                            .when(properties.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("No node properties"),
+                                )
+                            })
+                            .children(
+                                properties
+                                    .iter()
+                                    .take(INSPECTOR_PROPERTY_LIMIT)
+                                    .enumerate()
+                                    .map(|(position, property)| {
+                                        property_row(position, &property.key, &property.value, cx)
+                                    }),
+                            )
+                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
+                                this.child(more_row(
+                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
+                                    "property",
+                                    "properties",
+                                    cx,
+                                ))
                             }),
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
@@ -1259,16 +1788,7 @@ impl StudioView {
                             }),
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .child(inspector_label("PROPERTIES"))
-                            .children(
-                                properties.iter().take(24).map(|property| {
-                                    property_row(&property.key, &property.value, cx)
-                                }),
-                            ),
-                    )
+                    .child(self.render_node_connections(snapshot, index, cx))
                     .into_any_element()
             }
             (Some(snapshot), Some(SceneSelection::Edge(index))) => {
@@ -1283,11 +1803,15 @@ impl StudioView {
                         v_flex()
                             .gap_1()
                             .child(
-                                div()
+                                h_flex()
                                     .text_xs()
-                                    .text_color(relationship_color(label))
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .child(format!("edge:{}", snapshot.edges.ids[index])),
+                                    .child(copyable_id(
+                                        "inspector-copy-edge-id",
+                                        format!("edge:{}", snapshot.edges.ids[index]),
+                                        self.label_colors.relationship(label),
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
@@ -1315,30 +1839,20 @@ impl StudioView {
                         v_flex()
                             .gap_2()
                             .child(inspector_label("DIRECTION"))
-                            .child(endpoint_row(
-                                "FROM",
-                                snapshot.nodes.ids[source],
-                                &snapshot.nodes.labels[source],
-                                cx,
-                            ))
+                            .child(endpoint_row("FROM", source, snapshot, cx))
                             .child(
                                 div()
                                     .pl_2()
-                                    .text_color(relationship_color(label))
+                                    .text_color(self.label_colors.relationship(label))
                                     .text_sm()
                                     .child("↓"),
                             )
-                            .child(endpoint_row(
-                                "TO",
-                                snapshot.nodes.ids[target],
-                                &snapshot.nodes.labels[target],
-                                cx,
-                            )),
+                            .child(endpoint_row("TO", target, snapshot, cx)),
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
                         v_flex()
-                            .gap_2()
+                            .gap_1()
                             .child(inspector_label("PROPERTIES"))
                             .when(properties.is_empty(), |this| {
                                 this.child(
@@ -1349,10 +1863,22 @@ impl StudioView {
                                 )
                             })
                             .children(
-                                properties.iter().take(24).map(|property| {
-                                    property_row(&property.key, &property.value, cx)
-                                }),
-                            ),
+                                properties
+                                    .iter()
+                                    .take(INSPECTOR_PROPERTY_LIMIT)
+                                    .enumerate()
+                                    .map(|(position, property)| {
+                                        property_row(position, &property.key, &property.value, cx)
+                                    }),
+                            )
+                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
+                                this.child(more_row(
+                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
+                                    "property",
+                                    "properties",
+                                    cx,
+                                ))
+                            }),
                     )
                     .into_any_element()
             }
@@ -1373,8 +1899,12 @@ impl StudioView {
                             .gap_2()
                             .child(inspector_shortcut(&theme, "↵", "Open connected context"))
                             .child(inspector_shortcut(&theme, "⌘K", "Search the graph"))
-                            .child(inspector_shortcut(&theme, "esc", "Return to overview")),
+                            .child(inspector_shortcut(&theme, "esc", "Return to overview"))
+                            .child(inspector_shortcut(&theme, "⌘O", "Open a database")),
                     )
+                    .when_some(self.render_recent_databases(cx), |this, recent| {
+                        this.child(recent)
+                    })
                     .into_any_element()
             }
         };
@@ -1411,10 +1941,6 @@ impl StudioView {
     ) -> impl IntoElement {
         let entity = cx.entity().clone();
         let navigator_entity = entity.clone();
-        let dragging_node = match self.drag {
-            Some(DragState::Node { index, .. }) => Some(index),
-            Some(DragState::Canvas { .. }) | None => None,
-        };
         let scene = match &self.state {
             LoadState::Ready(snapshot) => self.workspace.as_ref().map_or_else(
                 || {
@@ -1431,14 +1957,7 @@ impl StudioView {
                         .child(graph_canvas(
                             snapshot.clone(),
                             workspace.clone(),
-                            GraphCanvasPresentation {
-                                camera: self.camera,
-                                world_bounds: self.world_bounds,
-                                selection: self.selection,
-                                dragging: dragging_node,
-                                emphasis: self.lens.as_ref().map(LensTransition::emphasis),
-                                path_endpoints: self.path_endpoints,
-                            },
+                            self.canvas_presentation(snapshot),
                         ))
                         .into_any_element()
                 },
@@ -1448,7 +1967,11 @@ impl StudioView {
                 format!("Mapping {name}, building a bounded scene, then laying it out."),
                 cx,
             ),
-            LoadState::Failed(error) => centered_state("Could not open graph", error.clone(), cx),
+            LoadState::Failed(error) => centered_state(
+                "Could not open graph",
+                format!("{error}\n⌘O opens another database."),
+                cx,
+            ),
         };
         let main_viewport = self
             .canvas_bounds
@@ -1471,6 +1994,7 @@ impl StudioView {
                                 main_viewport,
                                 selection: self.selection,
                                 emphasis: self.lens.as_ref().map(LensTransition::emphasis),
+                                label_colors: self.label_colors.clone(),
                             },
                         )
                         .into_any_element()
@@ -1488,8 +2012,21 @@ impl StudioView {
             .bg(palette().graphite)
             .track_focus(&self.focus_handle)
             .cursor_grab()
+            .when(
+                self.hovered_node.is_some() || self.hovered_edge.is_some(),
+                |this| this.cursor_pointer(),
+            )
             .when(self.drag.is_some(), |this| this.cursor_grabbing())
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !hovered {
+                    this.set_hovered_node(None, cx);
+                }
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(Self::on_secondary_mouse_down),
+            )
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -1501,6 +2038,8 @@ impl StudioView {
                 });
             })
             .child(scene)
+            .children(self.render_fresh_rings())
+            .children(self.render_hover_card(cx))
             .when_some(navigator, |this, navigator| {
                 this.child(
                     div()
@@ -1629,20 +2168,586 @@ impl StudioView {
             .font_family(cx.theme().mono_font_family.clone())
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(format!("{} nodes", format_count(nodes)))
-            .child(format!("{} edges", format_count(edges)))
+            .child(counted(nodes, "node", "nodes"))
+            .child(counted(edges, "relationship", "relationships"))
             .when(sampled, |this| this.child("sampled"))
             .child(format!(
                 "{} layout",
                 self.layout_kind.label().to_lowercase()
             ))
             .when(pinned > 0, |this| this.child(format!("{pinned} pinned")))
+            .when_some(self.hidden_summary(), |this, summary| {
+                this.child(
+                    div()
+                        .id("show-hidden")
+                        .debug_selector(|| "show-hidden".into())
+                        .role(Role::Button)
+                        .aria_label("Show what is hidden")
+                        .aria_keyshortcuts("Shift+Meta+H")
+                        .px_1()
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .text_color(palette().copper)
+                        .hover(|this| this.bg(cx.theme().secondary_hover))
+                        .tooltip(|window, cx| {
+                            Tooltip::with_keystroke("Show what is hidden", "⇧⌘H", window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.show_hidden_nodes(cx)))
+                        .child(format!("{summary} hidden")),
+                )
+            })
             .when(moving, |this| this.child("settling"))
-            .child(div().flex_1())
-            .child(self.status.clone())
+            .when(self.database_path.is_some(), |this| {
+                this.child(self.render_live_refresh_toggle(cx))
+            })
+            // The status message gives way first in a narrow window, so the
+            // timing and help button stay in view.
+            .child(
+                h_flex().flex_1().min_w_0().justify_end().child(
+                    div()
+                        .debug_selector(|| "status-message".into())
+                        .min_w_0()
+                        .truncate()
+                        .child(self.status.clone()),
+                ),
+            )
             .when_some(self.load_ms, |this, load_ms| {
                 this.child(format!("{load_ms:.1} ms load+layout"))
             })
+            .child(
+                div()
+                    .id("help-toggle")
+                    .debug_selector(|| "help-toggle".into())
+                    .role(Role::Button)
+                    .aria_label("Shortcuts and commands")
+                    .aria_keyshortcuts("Meta+Slash")
+                    .px_1()
+                    .rounded(px(4.0))
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .tooltip(|window, cx| {
+                        Tooltip::with_keystroke("Shortcuts and commands", "⌘/", window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let visible = !this.help_visible;
+                        this.set_help_visible(visible, window, cx);
+                    }))
+                    .child("?"),
+            )
+    }
+}
+
+impl StudioView {
+    fn render_node_connections(
+        &self,
+        snapshot: &Arc<SceneSnapshot>,
+        index: usize,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let connections = self.inspector_connections(snapshot, index);
+        let mut shown_groups = 0;
+        let mut hidden_groups = 0;
+        let mut hidden_in_groups = 0;
+        let mut groups = Vec::new();
+        for group in &connections.groups {
+            if shown_groups == INSPECTOR_CONNECTION_GROUPS {
+                hidden_groups += 1;
+                hidden_in_groups += group.total;
+                continue;
+            }
+            shown_groups += 1;
+            groups.push(group);
+        }
+        v_flex()
+            .debug_selector(|| "inspector-connections".into())
+            .gap_2()
+            .child(
+                h_flex()
+                    .items_center()
+                    .child(inspector_label("CONNECTIONS"))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{} IN VIEW", format_count(connections.total))),
+                    ),
+            )
+            .when(connections.total == 0, |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No relationships in this view"),
+                )
+            })
+            .children(groups.into_iter().map(|group| {
+                let color = self.label_colors.relationship(&group.label);
+                let arrow = if group.outgoing { "→" } else { "←" };
+                let key = (group.label.clone(), group.outgoing);
+                let expanded = self.expanded_connections.contains(&key);
+                let shown = group.connections.len().min(if expanded {
+                    INSPECTOR_CONNECTIONS_EXPANDED
+                } else {
+                    INSPECTOR_CONNECTIONS_PER_GROUP
+                });
+                let selector = format!(
+                    "{}:{}",
+                    group.label,
+                    if group.outgoing { "out" } else { "in" }
+                );
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .child(div().text_color(color).child(arrow))
+                            .child(
+                                div()
+                                    .text_color(color)
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(group.label.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if group.outgoing { "out" } else { "in" }),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format_count(group.total)),
+                            ),
+                    )
+                    .children(group.connections.iter().take(shown).map(|connection| {
+                        let neighbor = connection.neighbor;
+                        let edge = connection.edge;
+                        let edge_id = snapshot.edges.ids[edge];
+                        let neighbor_id = snapshot.nodes.ids[neighbor];
+                        let title = scene_node_title(snapshot, neighbor);
+                        h_flex()
+                            .id(("inspector-connection", edge_id))
+                            .debug_selector(move || format!("inspector-connection:{neighbor_id}"))
+                            .role(Role::Button)
+                            .aria_label(format!(
+                                "Select {} {} node {}",
+                                group.label,
+                                if group.outgoing { "target" } else { "source" },
+                                title
+                            ))
+                            .gap_2()
+                            .items_center()
+                            .ml_3()
+                            .px_1()
+                            .py(px(1.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .hover(|style| style.bg(cx.theme().sidebar_accent))
+                            .on_activate(cx, move |this, window, cx| {
+                                this.select_related_node(neighbor, Some(edge), window, cx);
+                            })
+                            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                this.preview_node(neighbor_id, *hovered, cx);
+                            }))
+                            .child(title_line(&title, cx).flex_1().text_sm())
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .max_w(px(96.0))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(snapshot.nodes.labels[neighbor].to_string()),
+                            )
+                    }))
+                    .when(shown < group.connections.len(), |this| {
+                        this.child(connections_toggle(
+                            format!("inspector-connections-more:{selector}"),
+                            format!("Show {} more", group.connections.len() - shown),
+                            key.clone(),
+                            cx,
+                        ))
+                    })
+                    .when(group.total > group.connections.len() && expanded, |this| {
+                        this.child(div().ml_3().px_1().child(more_row(
+                            group.total - group.connections.len(),
+                            "relationship",
+                            "relationships",
+                            cx,
+                        )))
+                    })
+                    .when(expanded, |this| {
+                        this.child(connections_toggle(
+                            format!("inspector-connections-fewer:{selector}"),
+                            "Show fewer".into(),
+                            key,
+                            cx,
+                        ))
+                    })
+            }))
+            .when(hidden_groups > 0, |this| {
+                this.child(more_row(
+                    hidden_in_groups,
+                    "relationship",
+                    "relationships",
+                    cx,
+                ))
+            })
+    }
+
+    fn render_live_refresh_toggle(&self, cx: &Context<Self>) -> impl IntoElement {
+        let colors = palette();
+        let (marker, label, color) = if !self.live_refresh {
+            ("○", "live off", cx.theme().muted_foreground)
+        } else if self.reload_waiting {
+            ("●", "updates waiting", colors.copper)
+        } else if self.reload_in_progress {
+            ("●", "refreshing", colors.celadon)
+        } else {
+            ("●", "live", colors.celadon)
+        };
+        h_flex()
+            .id("live-refresh-toggle")
+            .debug_selector(|| "live-refresh-toggle".into())
+            .role(Role::Switch)
+            .aria_label("Live refresh")
+            .aria_toggled(if self.live_refresh {
+                gpui::Toggled::True
+            } else {
+                gpui::Toggled::False
+            })
+            .gap_1()
+            .px_1()
+            .rounded(px(4.0))
+            .cursor_pointer()
+            .text_color(color)
+            .hover(|this| this.bg(cx.theme().secondary_hover))
+            .tooltip(|window, cx| Tooltip::with_keystroke("Toggle live refresh", "⇧⌘L", window, cx))
+            .on_click(cx.listener(|this, _, window, cx| {
+                let enabled = !this.live_refresh;
+                this.set_live_refresh(enabled, window, cx);
+            }))
+            .child(marker)
+            .child(label)
+    }
+}
+
+impl StudioView {
+    /// A small card beside the node under the pointer naming it, so the graph
+    /// can be read without selecting every node. It follows the node while
+    /// the layout moves and stays out of the way of a drag.
+    /// The hovered node's card, and a ring that marks the node itself so a
+    /// node pointed at from a list can be found on the canvas. Nothing is
+    /// drawn for a node outside the visible canvas.
+    fn render_hover_card(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        if let Some(elements) = self.hover_card_elements(cx) {
+            return Vec::from(elements);
+        }
+        self.edge_hover_elements(cx).unwrap_or_default()
+    }
+
+    /// The hovered relationship's card, opened where the pointer found it,
+    /// and rings on whichever of its ends are on the canvas.
+    fn edge_hover_elements(&self, cx: &Context<Self>) -> Option<Vec<gpui::AnyElement>> {
+        const WIDTH: f32 = 280.0;
+        const OFFSET: f32 = 14.0;
+        if self.drag.is_some() {
+            return None;
+        }
+        let hovered = self.hovered_edge?;
+        let snapshot = self.snapshot()?;
+        let edge = snapshot.edge_index(hovered.id)?;
+        let bounds = self.canvas_bounds?;
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let source = snapshot.edges.sources[edge] as usize;
+        let target = snapshot.edges.targets[edge] as usize;
+        let mut elements: Vec<gpui::AnyElement> = {
+            let workspace = self.workspace.as_ref()?.borrow();
+            [source, target]
+                .into_iter()
+                .filter_map(|index| workspace.position(index))
+                .map(|world| self.camera.project(world, self.world_bounds, viewport))
+                .filter(|anchor| {
+                    anchor.x >= 0.0
+                        && anchor.y >= 0.0
+                        && anchor.x <= viewport.x
+                        && anchor.y <= viewport.y
+                })
+                .map(hover_ring)
+                .collect()
+        };
+        let anchor = hovered.anchor;
+        let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
+            anchor.x + OFFSET
+        } else {
+            (anchor.x - OFFSET - WIDTH).max(8.0)
+        };
+        let top = (anchor.y + OFFSET).clamp(8.0, (viewport.y - 84.0).max(8.0));
+        let label = snapshot.edges.labels[edge].clone();
+        let color = self.label_colors.relationship(&label);
+        elements.push(
+            v_flex()
+                .debug_selector(|| "graph-hover-edge-card".into())
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .max_w(px(WIDTH))
+                .px_2p5()
+                .py_1p5()
+                .gap_0p5()
+                .rounded(px(8.0))
+                .bg(rgb(0x10181e).opacity(0.94))
+                .border_1()
+                .border_color(cx.theme().border)
+                .shadow_md()
+                .child(
+                    div()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(color)
+                        .child(label.to_string()),
+                )
+                .child(title_line(&scene_node_title(snapshot, source), cx).text_sm())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .min_w_0()
+                        .child(div().text_sm().text_color(color).child("→"))
+                        .child(
+                            title_line(&scene_node_title(snapshot, target), cx)
+                                .flex_1()
+                                .text_sm(),
+                        ),
+                )
+                .children(hover_properties(&snapshot.edges.properties[edge], "", cx))
+                .into_any_element(),
+        );
+        Some(elements)
+    }
+
+    fn hover_card_elements(&self, cx: &Context<Self>) -> Option<[gpui::AnyElement; 2]> {
+        const WIDTH: f32 = 260.0;
+        const OFFSET: f32 = 14.0;
+        if self.drag.is_some() {
+            return None;
+        }
+        let snapshot = self.snapshot()?;
+        let index = snapshot.node_index(self.hovered_node?)?;
+        let bounds = self.canvas_bounds?;
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let world = self.workspace.as_ref()?.borrow().position(index)?;
+        let anchor = self.camera.project(world, self.world_bounds, viewport);
+        if anchor.x < 0.0 || anchor.y < 0.0 || anchor.x > viewport.x || anchor.y > viewport.y {
+            return None;
+        }
+        let ring = hover_ring(anchor);
+        // Open to the right of the node unless that would leave the canvas.
+        let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
+            anchor.x + OFFSET
+        } else {
+            (anchor.x - OFFSET - WIDTH).max(8.0)
+        };
+        let top = (anchor.y - 18.0).clamp(8.0, (viewport.y - 64.0).max(8.0));
+        let label = snapshot.nodes.labels[index].clone();
+        let color = self.label_colors.color(&label);
+        let card = v_flex()
+            .debug_selector(|| "graph-hover-card".into())
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .max_w(px(WIDTH))
+            .px_2p5()
+            .py_1p5()
+            .gap_0p5()
+            .rounded(px(8.0))
+            .bg(rgb(0x10181e).opacity(0.94))
+            .border_1()
+            .border_color(cx.theme().border)
+            .shadow_md()
+            .child(
+                title_line(&scene_node_title(snapshot, index), cx)
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD),
+            )
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div().size(px(6.0)).rounded_full().bg(color))
+                    .child(label.to_string())
+                    .child("·")
+                    .child(format!(
+                        "{} relationships",
+                        format_count(snapshot.nodes.degrees[index] as usize)
+                    )),
+            )
+            .children(hover_properties(
+                &snapshot.nodes.properties[index],
+                &scene_node_title(snapshot, index),
+                cx,
+            ))
+            .into_any_element();
+        Some([ring, card])
+    }
+
+    /// Rings on the nodes the last reload added, fading out, so new arrivals
+    /// stand out while they spring into place.
+    fn render_fresh_rings(&self) -> Vec<gpui::AnyElement> {
+        const RING: f32 = 24.0;
+        let (Some(fresh), Some(snapshot), Some(workspace), Some(bounds)) = (
+            self.fresh_nodes.as_ref(),
+            self.snapshot(),
+            self.workspace.as_ref(),
+            self.canvas_bounds,
+        ) else {
+            return Vec::new();
+        };
+        let opacity = fresh.opacity();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let workspace = workspace.borrow();
+        fresh
+            .ids
+            .iter()
+            .filter_map(|&id| workspace.position(snapshot.node_index(id)?))
+            .map(|world| self.camera.project(world, self.world_bounds, viewport))
+            .filter(|anchor| {
+                anchor.x >= 0.0
+                    && anchor.y >= 0.0
+                    && anchor.x <= viewport.x
+                    && anchor.y <= viewport.y
+            })
+            .map(|anchor| {
+                div()
+                    .debug_selector(|| "graph-fresh-ring".into())
+                    .absolute()
+                    .left(px(anchor.x - RING / 2.0))
+                    .top(px(anchor.y - RING / 2.0))
+                    .size(px(RING))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(palette().celadon.opacity(0.9 * opacity))
+                    .bg(palette().celadon.opacity(0.12 * opacity))
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    /// Recently opened databases, offered while nothing is selected.
+    fn render_recent_databases(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        const SHOWN: usize = 5;
+        let recent: Vec<PathBuf> = self.other_recent_databases().take(SHOWN).cloned().collect();
+        if recent.is_empty() {
+            return None;
+        }
+        Some(
+            v_flex()
+                .debug_selector(|| "inspector-recent".into())
+                .pt_4()
+                .gap_0p5()
+                .child(div().pb_1().child(inspector_label("RECENT")))
+                .children(recent.into_iter().enumerate().map(|(position, path)| {
+                    let title = display_path(&path);
+                    let label = format!("Open {title}");
+                    h_flex()
+                        .id(("inspector-recent", position))
+                        .debug_selector(move || format!("inspector-recent:{position}"))
+                        .role(Role::Button)
+                        .aria_label(label)
+                        .mx(px(-4.0))
+                        .px_1()
+                        .py(px(1.0))
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().sidebar_accent))
+                        .on_activate(cx, move |this, window, cx| {
+                            this.open_database(path.clone(), window, cx);
+                        })
+                        .child(title_line(&title, cx).flex_1().text_sm())
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn copy_selection_button(&self, cx: &Context<Self>) -> impl IntoElement {
+        let enabled = self.selection.is_some();
+        div()
+            .id("inspector-copy")
+            .debug_selector(|| "inspector-copy".into())
+            .role(Role::Button)
+            .aria_label("Copy selection")
+            .aria_keyshortcuts("Meta+C")
+            .h(px(22.0))
+            .px_1p5()
+            .flex()
+            .items_center()
+            .rounded(px(4.0))
+            .text_xs()
+            .text_color(if enabled {
+                cx.theme().foreground
+            } else {
+                cx.theme().muted_foreground.opacity(0.45)
+            })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .on_click(cx.listener(|this, _, _, cx| this.copy_selection(cx)))
+            })
+            .tooltip(|window, cx| Tooltip::with_keystroke("Copy as text", "⌘C", window, cx))
+            .child("Copy")
+    }
+
+    fn history_button(&self, backward: bool, cx: &Context<Self>) -> impl IntoElement {
+        let (id, glyph, label, keystroke, shortcut) = if backward {
+            ("inspector-back", "←", "Back", "⌘[", "Meta+BracketLeft")
+        } else {
+            (
+                "inspector-forward",
+                "→",
+                "Forward",
+                "⌘]",
+                "Meta+BracketRight",
+            )
+        };
+        let enabled = if backward {
+            !self.selection_back.is_empty()
+        } else {
+            !self.selection_forward.is_empty()
+        };
+        div()
+            .id(id)
+            .debug_selector(move || id.into())
+            .role(Role::Button)
+            .aria_label(label)
+            .aria_keyshortcuts(shortcut)
+            .size(px(22.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .text_sm()
+            .text_color(if enabled {
+                cx.theme().foreground
+            } else {
+                cx.theme().muted_foreground.opacity(0.45)
+            })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.navigate_selection_history(backward, window, cx);
+                    }))
+            })
+            .tooltip(move |window, cx| Tooltip::with_keystroke(label, keystroke, window, cx))
+            .child(glyph)
     }
 }
 
@@ -1708,6 +2813,8 @@ fn path_endpoint_card(
     path_endpoint_card_data(role, node.id, &node.label, &node.title, color, cx)
 }
 
+/// A path end: hovering points the node out on the canvas, and choosing it
+/// selects it, when it is in the current scene.
 fn path_endpoint_card_data(
     role: &'static str,
     id: u64,
@@ -1716,7 +2823,26 @@ fn path_endpoint_card_data(
     color: gpui::Hsla,
     cx: &Context<StudioView>,
 ) -> impl IntoElement {
+    let selector = format!("path-endpoint:{}", role.to_lowercase());
     h_flex()
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector)
+        .role(Role::Button)
+        .aria_label(format!("Select {} node {title}", role.to_lowercase()))
+        .mx(px(-4.0))
+        .px(px(3.0))
+        .py(px(1.0))
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().sidebar_accent))
+        .on_activate(cx, move |this, window, cx| {
+            if let Some(index) = this.snapshot().and_then(|snapshot| snapshot.node_index(id)) {
+                this.select_related_node(index, None, window, cx);
+            }
+        })
+        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.preview_node(id, *hovered, cx);
+        }))
         .gap_2()
         .items_center()
         .child(div().w(px(3.0)).h(px(30.0)).rounded_full().bg(color))
@@ -1744,29 +2870,49 @@ fn path_endpoint_card_data(
                         ),
                 )
                 .child(
-                    div()
+                    title_line(title, cx)
                         .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .truncate()
-                        .child(title.to_string()),
+                        .font_weight(gpui::FontWeight::SEMIBOLD),
                 ),
         )
 }
 
+/// A one-line element title. A path-like title leads with its last segment
+/// and follows with the muted directory, so a list of files that truncates
+/// still shows which file each row is.
+fn title_line(title: &str, cx: &gpui::App) -> gpui::Div {
+    match split_path_title(title) {
+        Some((name, parent)) => h_flex()
+            .min_w_0()
+            .gap_1p5()
+            .items_baseline()
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(relative(0.8))
+                    .truncate()
+                    .child(name.to_string()),
+            )
+            .child(
+                // A folder's nearest part says most, so a long one is cut
+                // at its start: "…studio-core/src".
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(parent.to_string()),
+            ),
+        None => div().min_w_0().truncate().child(title.to_string()),
+    }
+}
+
 fn scene_node_title(snapshot: &SceneSnapshot, index: usize) -> Arc<str> {
-    const PREFERRED_KEYS: [&str; 6] = ["title", "name", "headline", "path", "tag_name", "login"];
-    snapshot.nodes.properties[index]
-        .iter()
-        .find_map(|property| {
-            PREFERRED_KEYS
-                .contains(&property.key.as_ref())
-                .then_some(&property.value)
-        })
-        .and_then(|value| match value {
-            PropertyValue::String(value) if !value.is_empty() => Some(value.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| snapshot.nodes.labels[index].clone())
+    snapshot.node_title(index)
 }
 
 pub(super) const fn path_direction_label(direction: PathDirection) -> &'static str {
@@ -1783,6 +2929,143 @@ const fn path_direction_compact_label(direction: PathDirection) -> &'static str 
         PathDirection::Incoming => "TO ORIGIN",
         PathDirection::Both => "EITHER WAY",
     }
+}
+
+/// A found path as plain text to paste into notes or a prompt: one numbered
+/// line per node, and between them the relationship, with `→` when it is
+/// stored in path order and `←` when the path follows it backwards.
+pub(super) fn evidence_path_text(report: &EvidencePathReport) -> Option<String> {
+    let path = report.path.as_ref()?;
+    let hops = path.steps.len();
+    let mut text = format!(
+        "Path from {} to {}: {}\n",
+        report.start.title,
+        report.end.title,
+        match hops {
+            0 => "same node".to_string(),
+            1 => "1 hop".to_string(),
+            hops => format!("{hops} hops"),
+        }
+    );
+    for (index, node) in path.nodes.iter().enumerate() {
+        text.push_str(&format!(
+            "{}. {} ({}, node:{})\n",
+            index + 1,
+            node.title,
+            node.label,
+            node.id
+        ));
+        if let Some(step) = path.steps.get(index) {
+            text.push_str(&format!(
+                "   {} {} (relationship:{})\n",
+                if step.forward { "→" } else { "←" },
+                step.label,
+                step.edge_id
+            ));
+        }
+    }
+    Some(text)
+}
+
+/// How many neighbors of each relationship group a copied node lists.
+const COPIED_NEIGHBORS_PER_GROUP: usize = 20;
+
+/// The selection as plain text for notes or a prompt: its title, label and
+/// ID, its properties, and for a node its relationships in view, grouped as
+/// the inspector groups them.
+pub(super) fn selection_text(snapshot: &SceneSnapshot, selection: SceneSelection) -> String {
+    let node = |index: usize| {
+        format!(
+            "{} ({}, node:{})",
+            snapshot.node_title(index),
+            snapshot.nodes.labels[index],
+            snapshot.nodes.ids[index]
+        )
+    };
+    let properties = |text: &mut String, properties: &[vecgra_studio_core::SceneProperty]| {
+        for property in properties {
+            if !matches!(property.value, PropertyValue::Bytes(_)) {
+                text.push_str(&format!(
+                    "{}: {}\n",
+                    property.key,
+                    format_value(&property.value)
+                ));
+            }
+        }
+    };
+    match selection {
+        SceneSelection::Node(index) => {
+            let mut text = format!("{}\n", node(index));
+            properties(&mut text, &snapshot.nodes.properties[index]);
+            for group in snapshot
+                .node_connections(index, COPIED_NEIGHBORS_PER_GROUP)
+                .groups
+            {
+                let neighbors: Vec<String> = group
+                    .connections
+                    .iter()
+                    .map(|connection| node(connection.neighbor))
+                    .collect();
+                let hidden = group.total - group.connections.len();
+                text.push_str(&format!(
+                    "{} {} ({}): {}{}\n",
+                    if group.outgoing { "→" } else { "←" },
+                    group.label,
+                    group.total,
+                    neighbors.join(", "),
+                    if hidden > 0 {
+                        format!(", and {hidden} more")
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            text
+        }
+        SceneSelection::Edge(index) => {
+            let mut text = format!(
+                "{}: {} → {}\nrelationship:{}\n",
+                snapshot.edges.labels[index],
+                node(snapshot.edges.sources[index] as usize),
+                node(snapshot.edges.targets[index] as usize),
+                snapshot.edges.ids[index]
+            );
+            properties(&mut text, &snapshot.edges.properties[index]);
+            text
+        }
+    }
+}
+
+/// A path step's two nodes by name, in path order, with file paths shortened
+/// to their file name.
+pub(super) fn evidence_step_names(
+    path: &vecgra_studio_core::EvidencePath,
+    index: usize,
+) -> Option<String> {
+    let short = |title: &str| {
+        split_path_title(title)
+            .map_or(title, |(name, _)| name)
+            .to_owned()
+    };
+    let from = path.nodes.get(index)?;
+    let to = path.nodes.get(index + 1)?;
+    Some(format!("{} → {}", short(&from.title), short(&to.title)))
+}
+
+fn path_retry_button(retry: PathRetry, cx: &Context<StudioView>) -> impl IntoElement {
+    let (selector, label) = match retry {
+        PathRetry::EitherDirection => ("path-retry-direction", "Either direction".to_string()),
+        PathRetry::AnyRelationship => ("path-retry-relationship", "Any relationship".to_string()),
+        PathRetry::MoreHops(max_hops) => ("path-retry-hops", format!("Up to {max_hops} hops")),
+    };
+    div().debug_selector(move || selector.into()).child(
+        Button::new(selector)
+            .label(label)
+            .small()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.retry_evidence_path(retry, window, cx);
+            })),
+    )
 }
 
 fn path_hop_button(max_hops: usize, selected_max_hops: usize, cx: &Context<StudioView>) -> Button {
@@ -1964,15 +3247,169 @@ fn inspector_label(label: &'static str) -> impl IntoElement {
         .child(label)
 }
 
+/// The current time in Unix milliseconds, for reading dated properties.
+fn unix_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
+/// Up to three of an element's properties for a hover card, one line each.
+fn hover_properties(
+    properties: &[vecgra_studio_core::SceneProperty],
+    title: &str,
+    cx: &Context<StudioView>,
+) -> Option<gpui::AnyElement> {
+    let rows: Vec<_> = hover_property_lines(properties, title, unix_now_ms())
+        .into_iter()
+        .map(|(key, value)| {
+            h_flex()
+                .gap_1p5()
+                .min_w_0()
+                .text_xs()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(key.to_string()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(value),
+                )
+        })
+        .collect();
+    (!rows.is_empty()).then(|| {
+        v_flex()
+            .debug_selector(|| "graph-hover-properties".into())
+            .pt_1()
+            .gap_0p5()
+            .children(rows)
+            .into_any_element()
+    })
+}
+
+/// The properties a hover card lists, as key and one-line value: up to
+/// three, leaving out byte strings and the one already shown as the title.
+/// Dates read as ages relative to `now_ms`, and a millisecond twin of a date
+/// (`created_at_ms` beside `created_at`) is left out.
+pub(super) fn hover_property_lines(
+    properties: &[vecgra_studio_core::SceneProperty],
+    title: &str,
+    now_ms: i64,
+) -> Vec<(Arc<str>, String)> {
+    const SHOWN: usize = 3;
+    let title_prefix = title.strip_suffix('…').unwrap_or(title);
+    let is_date = |key: &str| {
+        properties.iter().any(|property| {
+            &*property.key == key
+                && vecgra_studio_core::property_time_ms(key, &property.value).is_some()
+        })
+    };
+    properties
+        .iter()
+        .filter_map(|property| {
+            if matches!(property.value, PropertyValue::Bytes(_)) {
+                return None;
+            }
+            if let Some(ms) = vecgra_studio_core::property_time_ms(&property.key, &property.value) {
+                let twin = property.key.strip_suffix("_ms").is_some_and(is_date);
+                return (!twin).then(|| {
+                    (
+                        property.key.clone(),
+                        vecgra_studio_core::relative_age(ms, now_ms),
+                    )
+                });
+            }
+            let value = format_value(&property.value);
+            let line = value.lines().map(str::trim).find(|line| !line.is_empty())?;
+            let is_title = !title.is_empty() && (line == title || line.starts_with(title_prefix));
+            (!is_title).then(|| (property.key.clone(), line.to_string()))
+        })
+        .take(SHOWN)
+        .collect()
+}
+
+/// A ring around a node on the canvas, at its canvas-local position.
+fn hover_ring(anchor: Vec2) -> gpui::AnyElement {
+    const RING: f32 = 22.0;
+    div()
+        .debug_selector(|| "graph-hover-ring".into())
+        .absolute()
+        .left(px(anchor.x - RING / 2.0))
+        .top(px(anchor.y - RING / 2.0))
+        .size(px(RING))
+        .rounded_full()
+        .border_2()
+        .border_color(palette().mist.opacity(0.85))
+        .into_any_element()
+}
+
+/// Clickable rows that keyboard users can reach with Tab and activate with
+/// Enter or Space, outlined while focused from the keyboard. The outline is a
+/// border that is always there, so rows take a pixel less padding to keep
+/// their height. A pointer click hands focus back to the graph, so Enter
+/// afterwards still acts on the selection rather than on the clicked row.
+trait ActivatableRow: Sized {
+    fn on_activate(
+        self,
+        cx: &Context<StudioView>,
+        activate: impl Fn(&mut StudioView, &mut Window, &mut Context<StudioView>) + 'static,
+    ) -> Self;
+}
+
+impl ActivatableRow for gpui::Stateful<gpui::Div> {
+    fn on_activate(
+        self,
+        cx: &Context<StudioView>,
+        activate: impl Fn(&mut StudioView, &mut Window, &mut Context<StudioView>) + 'static,
+    ) -> Self {
+        let ring = cx.theme().ring;
+        self.focusable()
+            .tab_stop(true)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(move |style| style.border_color(ring))
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    this.focus_graph_after(event, window, cx);
+                    activate(this, window, cx);
+                }),
+            )
+    }
+}
+
 fn endpoint_row(
     direction: &'static str,
-    id: u64,
-    label: &str,
+    index: usize,
+    snapshot: &SceneSnapshot,
     cx: &Context<StudioView>,
 ) -> impl IntoElement {
+    let id = snapshot.nodes.ids[index];
     h_flex()
+        .id(("inspector-endpoint", id))
+        .role(Role::Button)
+        .aria_label(format!(
+            "Select {} endpoint node {id}",
+            direction.to_lowercase()
+        ))
         .gap_2()
         .items_center()
+        .p(px(3.0))
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().sidebar_accent))
+        .on_activate(cx, move |this, window, cx| {
+            this.select_related_node(index, None, window, cx);
+        })
+        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.preview_node(id, *hovered, cx);
+        }))
         .child(
             div()
                 .w(px(42.0))
@@ -1984,21 +3421,135 @@ fn endpoint_row(
         )
         .child(
             v_flex()
+                .min_w_0()
                 .gap_0p5()
-                .child(div().text_sm().child(label.to_string()))
+                .child(title_line(&scene_node_title(snapshot, index), cx).text_sm())
                 .child(
                     div()
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{id}")),
+                        .truncate()
+                        .child(format!("node:{id} · {}", snapshot.nodes.labels[index])),
                 ),
         )
 }
 
-fn property_row(key: &str, value: &PropertyValue, cx: &Context<StudioView>) -> impl IntoElement {
+fn copyable_id(
+    element_id: &'static str,
+    text: String,
+    color: gpui::Hsla,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    let copied = text.clone();
+    div()
+        .id(element_id)
+        .role(Role::Button)
+        .aria_label(format!("Copy {text}"))
+        .flex_shrink_0()
+        .rounded(px(3.0))
+        .cursor_pointer()
+        .text_color(color)
+        .hover(|style| style.underline())
+        .tooltip(|window, cx| Tooltip::text("Copy ID", window, cx))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(copied.clone()));
+            this.status = format!("Copied {copied}").into();
+            cx.notify();
+        }))
+        .child(text)
+}
+
+/// Expands or collapses one connection group in the inspector.
+fn connections_toggle(
+    selector: String,
+    text: String,
+    key: (Arc<str>, bool),
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    div()
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector)
+        .role(Role::Button)
+        .ml_3()
+        .px_1()
+        .rounded(px(4.0))
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .cursor_pointer()
+        .hover(|style| {
+            style
+                .bg(cx.theme().sidebar_accent)
+                .text_color(cx.theme().foreground)
+        })
+        .on_activate(cx, move |this, _, cx| {
+            if let Some(position) = this
+                .expanded_connections
+                .iter()
+                .position(|expanded| *expanded == key)
+            {
+                this.expanded_connections.remove(position);
+            } else {
+                this.expanded_connections.push(key.clone());
+            }
+            cx.notify();
+        })
+        .child(text)
+}
+
+fn more_row(
+    hidden: usize,
+    singular: &'static str,
+    plural: &'static str,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(format!(
+            "+{} more {}",
+            format_count(hidden),
+            if hidden == 1 { singular } else { plural }
+        ))
+}
+
+/// One property in the inspector. Clicking it copies the value, at full
+/// precision for floats; byte strings have nothing useful to copy.
+fn property_row(
+    position: usize,
+    key: &str,
+    value: &PropertyValue,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    let copy = match value {
+        PropertyValue::Bytes(_) => None,
+        PropertyValue::Float(value) => Some(value.to_string()),
+        value => Some(format_value(value)),
+    };
+    let selector = format!("inspector-property:{key}");
+    let age_selector = format!("inspector-property-age:{key}");
+    let copied_key = key.to_string();
+    let age = vecgra_studio_core::property_time_hint(key, value, unix_now_ms());
     v_flex()
+        .id(("inspector-property", position))
+        .debug_selector(move || selector)
         .gap_1()
+        .px_2()
+        .py(px(3.0))
+        .mx(px(-8.0))
+        .rounded(px(6.0))
+        .when_some(copy, |this, copy| {
+            this.role(Role::Button)
+                .aria_label(format!("Copy {copied_key}"))
+                .cursor_pointer()
+                .hover(|style| style.bg(cx.theme().secondary_hover))
+                .tooltip(|window, cx| Tooltip::text("Copy value", window, cx))
+                .on_activate(cx, move |this, _, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
+                    this.status = format!("Copied {copied_key}").into();
+                    cx.notify();
+                })
+        })
         .child(
             div()
                 .text_xs()
@@ -2012,6 +3563,15 @@ fn property_row(key: &str, value: &PropertyValue, cx: &Context<StudioView>) -> i
                 .line_height(px(17.0))
                 .child(format_value(value)),
         )
+        .when_some(age, |this, age| {
+            this.child(
+                div()
+                    .debug_selector(move || age_selector)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(age),
+            )
+        })
 }
 
 fn format_value(value: &PropertyValue) -> String {
@@ -2054,7 +3614,7 @@ fn centered_state(
         .into_any_element()
 }
 
-fn format_count(value: usize) -> String {
+pub(super) fn format_count(value: usize) -> String {
     let text = value.to_string();
     let mut output = String::with_capacity(text.len() + text.len() / 3);
     for (index, character) in text.chars().enumerate() {
@@ -2064,6 +3624,15 @@ fn format_count(value: usize) -> String {
         output.push(character);
     }
     output
+}
+
+/// "1 node", "1,204 relationships": a count with its noun.
+pub(super) fn counted(count: usize, one: &str, many: &str) -> String {
+    format!(
+        "{} {}",
+        format_count(count),
+        if count == 1 { one } else { many }
+    )
 }
 
 pub(super) fn visible_facet_counts(

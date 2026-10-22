@@ -8,7 +8,7 @@ use gpui::{
 };
 use vecgra_studio_core::{Camera, GraphWorkspace, Rect, SceneSelection, SceneSnapshot, Vec2};
 
-use crate::graph_canvas::{GraphEmphasis, circle, label_color};
+use crate::graph_canvas::{GraphEmphasis, LabelColors, circle};
 use crate::theme::palette;
 
 const NAVIGATOR_PADDING: f32 = 9.0;
@@ -58,6 +58,7 @@ struct NavigatorPresentation<'a> {
     main_viewport: Vec2,
     selected: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
+    label_colors: &'a LabelColors,
 }
 
 pub(crate) struct GraphNavigatorPresentation {
@@ -66,6 +67,7 @@ pub(crate) struct GraphNavigatorPresentation {
     pub main_viewport: Vec2,
     pub selection: Option<SceneSelection>,
     pub emphasis: Option<GraphEmphasis>,
+    pub label_colors: Arc<LabelColors>,
 }
 
 /// A bounded, density-aware navigator for deep graph exploration. It bins the
@@ -89,6 +91,7 @@ pub(crate) fn graph_navigator(
                     main_viewport: presentation.main_viewport,
                     selected: presentation.selection.and_then(SceneSelection::node),
                     emphasis: presentation.emphasis.as_ref(),
+                    label_colors: &presentation.label_colors,
                 },
                 bounds,
             )
@@ -192,7 +195,10 @@ fn prepare_navigator(
                     } else {
                         (0.7 + density * 0.42).min(2.0)
                     },
-                    color: label_color(&snapshot.nodes.labels[bin.label_index]).opacity(opacity),
+                    color: presentation
+                        .label_colors
+                        .color(&snapshot.nodes.labels[bin.label_index])
+                        .opacity(opacity),
                     selected: bin.selected,
                 }
             })
@@ -323,6 +329,7 @@ mod tests {
                 main_viewport: viewport,
                 selected: Some(3),
                 emphasis: None,
+                label_colors: &LabelColors::default(),
             },
             bounds,
         );
@@ -339,6 +346,7 @@ mod tests {
                 main_viewport: viewport,
                 selected: Some(3),
                 emphasis: None,
+                label_colors: &LabelColors::default(),
             },
             bounds,
         );
@@ -356,6 +364,7 @@ mod tests {
                 main_viewport: viewport,
                 selected: Some(3),
                 emphasis: None,
+                label_colors: &LabelColors::default(),
             },
             bounds,
         );

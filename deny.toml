@@ -14,6 +14,9 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is confined to the IVF probe dev dependency and GPUI; no maintained compatible upstream release is available" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through GPUI SVG rendering; migration must happen upstream" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through GPUI text/SVG rendering; migration must happen upstream" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant is transitive through GPUI's Linux platform (AccessKit, ashpd, oo7); zbus 6 migration must happen upstream" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names is transitive through GPUI's Linux platform (AccessKit, ashpd, oo7); zbus 6 migration must happen upstream" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is transitive through GPUI's Linux platform (AccessKit, ashpd, oo7); zbus 6 migration must happen upstream" },
 ]
 
 [licenses]

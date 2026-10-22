@@ -11,8 +11,10 @@ mod view;
 pub use theme::apply_studio_theme;
 pub use view::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
-    FitView, FocusSearch, NextSearchResult, PreviousSearchResult, ReleaseSelected, StudioView,
-    ZoomIn, ZoomOut,
+    CopySelection, ExportView, FitView, FocusSearch, HideSelection, NextSearchResult, OpenDatabase,
+    PreviousSearchResult, ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp,
+    SelectionBack, SelectionForward, ShowHidden, StudioView, ToggleHelp, ToggleLiveRefresh,
+    UndoHide, ZoomIn, ZoomOut,
 };
 
 /// Install Bezel's environment theme and bundled fonts for the Studio chrome.

@@ -1,15 +1,18 @@
 use std::path::PathBuf;
 
 use gpui::{
-    App, AppContext as _, KeyBinding, Styled as _, WindowBounds, WindowOptions, actions, px, size,
+    App, AppContext as _, KeyBinding, Menu, MenuItem, Styled as _, WindowBounds, WindowOptions,
+    actions, px, size,
 };
 #[cfg(feature = "visual-test")]
 use gpui::{Entity, Window};
 use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
-    FitView, FocusSearch, NextSearchResult, PreviousSearchResult, ReleaseSelected, StudioView,
-    ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
+    CopySelection, ExportView, FitView, FocusSearch, HideSelection, NextSearchResult, OpenDatabase,
+    PreviousSearchResult, ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp,
+    SelectionBack, SelectionForward, ShowHidden, StudioView, ToggleHelp, ToggleLiveRefresh,
+    UndoHide, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -62,13 +65,35 @@ fn main() {
             KeyBinding::new("cmd-3", ArrangeOrbit, Some("VecgraStudio")),
             KeyBinding::new("cmd-4", ArrangeStructure, Some("VecgraStudio")),
             KeyBinding::new("cmd-shift-r", ReleaseSelected, Some("VecgraStudio")),
+            KeyBinding::new("cmd-r", ReloadDatabase, Some("VecgraStudio")),
+            KeyBinding::new("cmd-o", OpenDatabase, Some("VecgraStudio")),
+            KeyBinding::new("cmd-shift-e", ExportView, Some("VecgraStudio")),
+            KeyBinding::new("cmd-[", SelectionBack, Some("VecgraStudio")),
+            KeyBinding::new("cmd-]", SelectionForward, Some("VecgraStudio")),
+            KeyBinding::new("cmd-shift-l", ToggleLiveRefresh, Some("VecgraStudio")),
+            KeyBinding::new("cmd-/", ToggleHelp, Some("VecgraStudio")),
+            KeyBinding::new("f1", ToggleHelp, Some("VecgraStudio")),
             KeyBinding::new("enter", ActivateSelection, Some("VecgraStudio")),
             KeyBinding::new("cmd-k", FocusSearch, Some("VecgraStudio")),
             KeyBinding::new("down", NextSearchResult, Some("VecgraStudio")),
             KeyBinding::new("up", PreviousSearchResult, Some("VecgraStudio")),
+            // In the command box, Up and Down step through earlier commands or the
+            // listed results instead of doing nothing, as a one-line input would.
+            KeyBinding::new("up", SearchBoxUp, Some("VecgraStudio > Input")),
+            KeyBinding::new("down", SearchBoxDown, Some("VecgraStudio > Input")),
             KeyBinding::new("escape", ClearSelection, Some("VecgraStudio")),
+            // The command box keeps its own Copy, bound deeper in the Input context.
+            KeyBinding::new("cmd-c", CopySelection, Some("VecgraStudio")),
+            // The command box keeps Backspace and Delete, bound deeper in the
+            // Input context.
+            KeyBinding::new("backspace", HideSelection, Some("VecgraStudio")),
+            KeyBinding::new("delete", HideSelection, Some("VecgraStudio")),
+            KeyBinding::new("cmd-shift-h", ShowHidden, Some("VecgraStudio")),
+            // The command box keeps its own Undo, bound deeper in the Input context.
+            KeyBinding::new("cmd-z", UndoHide, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+        cx.set_menus(app_menus());
 
         let mut window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(
@@ -111,6 +136,53 @@ fn main() {
         })
         .detach();
     });
+}
+
+/// The menu bar, which also lists each command's shortcut. Items act on the
+/// focused Studio window.
+fn app_menus() -> Vec<Menu> {
+    vec![
+        Menu::new("Vecgra Studio").items([
+            MenuItem::action("Shortcuts and Commands", ToggleHelp),
+            MenuItem::separator(),
+            MenuItem::action("Quit Vecgra Studio", Quit),
+        ]),
+        Menu::new("File").items([
+            MenuItem::action("Open…", OpenDatabase),
+            MenuItem::action("Reload", ReloadDatabase),
+            MenuItem::action("Live Refresh", ToggleLiveRefresh),
+            MenuItem::separator(),
+            MenuItem::action("Export View as SVG…", ExportView),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::action("Undo Hide", UndoHide),
+            MenuItem::separator(),
+            MenuItem::action("Copy Selection as Text", CopySelection),
+        ]),
+        Menu::new("View").items([
+            MenuItem::action("Search", FocusSearch),
+            MenuItem::separator(),
+            MenuItem::action("Fit Graph", FitView),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::separator(),
+            MenuItem::action("Auto Layout", ArrangeAuto),
+            MenuItem::action("Force Layout", ArrangeForce),
+            MenuItem::action("Orbit Layout", ArrangeOrbit),
+            MenuItem::action("Structure Layout", ArrangeStructure),
+            MenuItem::separator(),
+            MenuItem::action("Release Pinned Node", ReleaseSelected),
+            MenuItem::action("Hide Selected Node", HideSelection),
+            MenuItem::action("Show Hidden Nodes", ShowHidden),
+        ]),
+        Menu::new("Go").items([
+            MenuItem::action("Back", SelectionBack),
+            MenuItem::action("Forward", SelectionForward),
+            MenuItem::separator(),
+            MenuItem::action("Return to Overview", ClearSelection),
+        ]),
+        Menu::new("Help").items([MenuItem::action("Shortcuts and Commands", ToggleHelp)]),
+    ]
 }
 
 fn window_dimension(variable: &str, default: f32, minimum: f32) -> f32 {

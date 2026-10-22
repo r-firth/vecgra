@@ -47,16 +47,96 @@ require the desktop stack, so they remain the workspace default members.
 The unit of exploration is a query result or bounded expansion, not an
 attempt to draw every record as a giant hairball.
 
-1. Open a `.vg` file and show useful structure immediately.
+1. Open a `.vg` file and show useful structure immediately. Pass it on the
+   command line, press `Cmd-O`, type `open <path>` in the command box, or
+   drop the file on the window. Opening another file retires every search,
+   path, lens, and selection from the previous one before the load starts.
+   The last eight databases opened successfully are remembered in the
+   platform configuration directory (`vecgra/studio-recent`), and the
+   inspector offers the most recent ones while nothing is selected.
 2. Search semantically, structurally, or with both in one command box.
-3. Pan and zoom without waiting for database work or graph layout.
+3. Pan and zoom without waiting for database work or graph layout. Hovering
+   a node shows its title, label, relationship count, and up to three other
+   properties beside it (dates as ages, without a millisecond copy of a date
+   already shown), and lights its relationships more faintly than the
+   selection's, without changing the selection; hovering a node in the
+   inspector's connections, a relationship's endpoints, a path's ends, or
+   the search results does the same and rings the node on the canvas, and
+   hovering a relationship search result or path step points out its line.
+   Below the
+   overview, hovering a relationship's line brightens it, shows its type,
+   both ends, and up to three of its properties, and rings the ends, and the
+   canvas names the selection (both ends, for a relationship), path
+   endpoints and the nodes a path runs through, the selection's
+   best-connected neighbors, and the strongest search
+   matches; zoomed in to individual elements with nothing selected, it
+   names the best-connected nodes in view. Names never overlap one another
+   or relationship captions.
 4. Select a node or relationship and inspect its label, properties, vectors,
-   neighbors, and provenance without losing the current view.
+   neighbors, and provenance without losing the current view. A node's
+   heading is its title, name, or path when it has one, else the first line
+   of its message or summary, and search results and evidence paths name
+   it the same way. Under its name, a search result shows its body,
+   description, message, URL, state or kind, else up to two short text
+   properties (an agent and model, a commit SHA) so results that share a
+   name stay distinguishable, and only then its ID; wherever a path
+   titles an element, the file name leads and the directory follows, muted,
+   so truncated lists of files stay distinguishable. Its relationships in
+   the current view are grouped by type and direction, six to a group until
+   **Show N more** lists the rest. Tab reaches these rows, endpoints,
+   property values and recent databases, and Enter or Space activates the
+   focused one, as Enter or Space does a focused path step or button; Enter
+   only lays out the selection's context while the graph itself has focus.
+   Choosing a neighbor,
+   or either endpoint of a selected relationship, selects it and springs the
+   camera to it at the current zoom, so the inspector can walk the graph.
+   `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by
+   element ID, skipping anything a reload removed. Clicking an element ID
+   or a property copies it; floats are copied at full precision. Dated
+   properties read as ages under their value: an ISO 8601 date-time shows
+   "3 days ago", and a millisecond timestamp whose key ends in `_ms` shows
+   its UTC date and age. **Copy** in
+   the inspector header, or `Cmd-C` outside the command box, copies the
+   selection as text for notes or a prompt: its title, label and ID, its
+   properties, and for a node its relationships in view, grouped by type and
+   direction with up to 20 named neighbors each. Right-clicking a node
+   selects it and opens a menu of what can be done with it: open its
+   connected context, trace a path to it from the node selected before (or
+   from the chosen path origin), set it as the path origin, release it when
+   pinned, hide it or every node with its label, show only its label, and
+   copy it as text or by ID. Escape, a click elsewhere, or a scroll closes the menu.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
+   Backspace or Delete with the graph focused, **Hide from view** in a
+   node's menu, or `hide [id]` takes a node and its relationships off the
+   canvas, such as a repository hub that every session touches; everything
+   else stays where it is. **Hide all N <label> nodes** in the menu, or
+   `hide label <label>`, does the same for a whole label, including nodes
+   with it that arrive later, and lists the label under the overview's
+   labels, where choosing it shows that label again. `hide relationship
+   <type>` takes every relationship of a type off the canvas and lists it
+   under the overview's relationships the same way. **Show only <label>
+   nodes** in the menu, or `only label|relationship <name>`, hides every
+   other label or type in view as one step. Right-clicking a label or type
+   in the overview offers the same three: its lens, hiding it, and showing
+   only it. With an overview label
+   or type lens on and nothing selected, Backspace hides that label or
+   type. Search still lists hidden elements, tagged "hidden", and choosing a
+   hidden node there shows it again while the rest of its label stays
+   hidden. Hidden elements stay hidden across reloads and live refresh, and
+   the status bar counts them. `Cmd-Z` (**Edit > Undo Hide**) takes back
+   the last hiding still in effect. Clicking that count, `Shift-Cmd-H`, or
+   `unhide` brings everything back where it was, ringed like nodes a reload
+   adds. Opening another database forgets them.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.
 7. Make query cost, result count, vector score, and structural distance
    inspectable without turning the main canvas into a monitoring dashboard.
+
+`Shift-Cmd-E`, **File > Export View as SVG…**, or `export <file.svg>` in the
+command box saves the canvas as it stands as an SVG image the size of the
+canvas: relationships weighted and colored as drawn, their arrowheads and
+captions, nodes with their selection and path rings, and the names on show,
+without the minimap, controls, or hover cards.
 
 Direct manipulation has a separate presentation model from graph truth. A
 press on a node wins over canvas pan, preserves the exact world-space grab
@@ -86,10 +166,34 @@ empty, or failed. Each request has a generation; superseded work cannot replace
 a newer scene. CPU layout and database reads never run on the GPUI application
 thread.
 
+Studio follows a database that another process is still writing. The
+read-only open coexists with the writer, and live refresh checks the file's
+metadata once a second; when a commit or a compaction swap changes it, Studio
+rereads the file off the application thread. Nodes that survive keep their
+presented positions and pins, the selection follows its element ID, and the
+camera stays put, so the view does not jump. New nodes spring out of the
+surviving neighbor they attach to, and new components with no surviving
+anchor enter just outside the existing scene. Up to 64 new nodes are ringed
+for six seconds, fading after the first two, so arrivals stand out. If
+fewer than half of the new
+scene's nodes survive, Studio lays it out from scratch instead. A search,
+path, lens, or context layout holds state for the current scene, so live
+refresh waits while one is active and the status bar shows `updates waiting`
+until the overview returns. `Cmd-R` or `reload` rereads on demand and first
+retires any such state; `Shift-Cmd-L`, `live on|off`, or the status-bar
+toggle switches live refresh, and `VECGRA_STUDIO_LIVE=0` starts with it off.
+
 The title-bar input is a maintained Unicode/IME-aware component. `Cmd-K`
 focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
-moves the ranked selection; a second Enter or click selects and frames the
-result. At widths below 1,280 logical pixels, the single command rail becomes
+moves the ranked selection, from the graph or from the box while it holds the
+listed search; a second Enter or click selects and frames the result. A bare
+number also lists the node and the relationship with that ID above the
+results, and when no text matches, the second Enter goes to the node. With any
+other text in the box, Up and Down step back through the last 100 searches
+and commands submitted and forward again to the text being written, so `path`
+commands can be rerun or adjusted without retyping. The history is kept
+across launches beside the recent list, one entry per line in
+`vecgra/studio-history`. At widths below 1,280 logical pixels, the single command rail becomes
 two rows so search, layout, pin, and camera controls remain present at the
 760-pixel minimum instead of clipping or silently disappearing. Text retrieval
 scans properties with a bounded top-K heap rather than materializing every
@@ -100,6 +204,22 @@ level. The selected result exposes labelled Text and Vector contribution rails,
 so relevance is not encoded by a single opaque score or color alone. Search
 failures are visible, and Hybrid can retain text results with an explicit
 warning if its remote embedding provider is unavailable.
+
+The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
+`layout`, `open`, and others). Text runs as a command only when the words
+after the command fit it, so a search such as `release notes`,
+`layout refresh`, or `open dialog for files` still searches; text that names
+a command's IDs but gets the rest wrong reports what the command expected.
+The end of the input says what Enter will do: `↵ search`, the command's
+name, or `↵ go to result` when the search is already showing.
+`node <id>` and `edge <id>` spring the camera to the element, at the current
+zoom, when any of it is off screen.
+`Cmd-/`, `F1`, `help`, or the `?` at the end of
+the status bar opens a dialog listing every shortcut and command; clicking a
+command closes the dialog and starts that command in the input. While the
+dialog is open, Escape and Enter dismiss it rather than acting on the graph
+behind it. On macOS the same commands appear in the menu bar (Vecgra Studio,
+File, View, Go, Help) with their shortcuts.
 
 A successful query retargets an interruptible camera spring to frame its
 visible matches and fades in a score-weighted graph lens. Nodes receive ranked
@@ -116,10 +236,20 @@ parent's circular ordering; discovery edges remain prominent while cross-links
 stay visible but quieter. The underlying Auto/Force/Structure/Orbit targets are
 preserved. Escape or the
 Overview row springs positions, camera, and emphasis back to that saved
-presentation. Reduced Motion snaps to the same semantic endpoints.
+presentation. Reduced Motion snaps to the same semantic endpoints. While a
+context is open, its tab is headed by the focus node's title, how many nodes
+sit one and two hops away and their commonest labels, and how many
+relationships it shows and their commonest types, each label or type with its
+legend colour. Hovering the title
+points the focus node out on the canvas, and clicking it, or Enter once Tab
+reaches it, selects the focus again after walking away within the context.
+Overview rows for labels and types the context holds none of recede meanwhile.
 
-The relationship and node-label taxonomies are controls rather than a passive
-legend. Activating a relationship row raises every visible relationship of
+The relationship and node-label taxonomies are controls as well as the
+canvas's legend: each row carries the color its relationships or nodes are
+drawn in. Node labels and relationship types each take ten distinct colors
+in the order they first appear by ID and keep them, so a label added by a
+reload, or hidden and shown again, does not recolor the others. Activating a relationship row raises every visible relationship of
 that type and both endpoints into the relevance field. Activating a node-label
 row raises matching nodes while retaining quieter incident evidence. The active
 row carries a focusable toggle semantic, a left-edge structural marker, and a
@@ -130,7 +260,10 @@ or failed search states. A command-selected label outside the usual top-ten
 summary replaces the last row while active, so the current control never falls
 out of view. `facet node <label>` and
 `facet relationship <label>` provide the same path through the command box and
-deterministic screenshot runner.
+deterministic screenshot runner. These commands and `hide label|relationship`
+forgive case and take the start of a name when only one label or type in view
+begins with it, so `hide label sym` hides Symbol; otherwise the status bar says
+which names were meant or lists the ones in view.
 
 Exact paths are a separate evidence mode rather than another generic filter.
 For direct manipulation, selecting a node exposes `Set as path origin` in the
@@ -147,7 +280,9 @@ preserve that destination-ready state, and both endpoint markers remain on the
 canvas while background search is pending. Escape or Overview cancels the
 draft. These are ordinary focusable buttons, so the workflow does not depend
 on pointer precision, color recognition, or a panel that disappears at the
-760-pixel minimum.
+760-pixel minimum. As a pointer shortcut, Shift-clicking a node traces the path
+to it straight away: from the chosen origin while one is set, otherwise from
+the selected node.
 
 `path-start <node> [both|out|in] [max-hops]` drives the same state for the
 command box and screenshot runner.
@@ -161,15 +296,24 @@ rail: endpoints, each relationship step, traversal orientation, plan, hop
 bound, elapsed time, and visited/read work map directly to the bright directed
 chain on the canvas. A compact planner ledger splits expanded nodes into
 Celadon `FROM` and Copper `TO` counts connected by a rule, so adaptive work is
-inspectable without relying on color or an ambiguous percentage. Step rows are
-stable, focusable controls; pointer, Enter, or Space selects and frames the
-matching relationship for inspection.
+inspectable without relying on color or an ambiguous percentage. **Copy**
+puts a found path on the clipboard as numbered lines of node titles, labels
+and IDs, with each relationship between them marked `→` when it is stored in
+path order and `←` when the path follows it backwards. Each step row
+names its two nodes in path order above their IDs, so intermediate nodes read
+as more than numbers. Step rows are stable, focusable controls; pointer,
+Enter, or Space selects and frames the matching relationship for inspection,
+and hovering a row points the relationship out on the canvas with its card and
+rings on both ends.
 
 The path state owns both a generation and its held task. A new path, search,
 facet, context, Escape, or Overview retires stale work and prevents a late
 background result from overwriting the current presentation. `Found`,
 `NotFoundWithinHops`, and `ExpansionLimit` have different language: the latter
-is explicitly incomplete and never presented as graph absence. When an exact
+is explicitly incomplete and never presented as graph absence. After a
+`NotFoundWithinHops` result, the rail offers to search again with one bound
+widened: either direction, any relationship type, or twice the hops (up to
+64), whichever apply. When an exact
 path includes elements outside the bounded snapshot, a background scene step
 injects their fully hydrated records and exact relationships before
 presentation. Existing overview positions and pins are preserved; missing path

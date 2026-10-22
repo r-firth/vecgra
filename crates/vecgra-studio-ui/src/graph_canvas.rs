@@ -1,29 +1,36 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
     App, Bounds, FontWeight, Hsla, IntoElement, PaintQuad, Path, PathBuilder, Pixels, Point,
-    SharedString, Styled, TextAlign, TextRun, Window, canvas, fill, point, px, quad, rgb, size,
+    SharedString, Styled, TextAlign, TextRun, Window, canvas, fill, point, px, quad, size,
 };
 use lyon_geom::{
     Line, Point as LyonPoint, Vector as LyonVector, point as lyon_point, vector as lyon_vector,
 };
 use vecgra_studio_core::{
     Camera, DetailLevel, GraphWorkspace, Rect, SceneSelection, SceneSnapshot, Vec2, detail_level,
+    split_path_title,
 };
 
 use crate::theme::{
-    RELATIONSHIP_COLOR_COUNT, palette, relationship_color, relationship_color_for_index,
+    RELATIONSHIP_COLOR_COUNT, node_color_for_index, palette, relationship_color_for_index,
     relationship_color_index,
 };
+
+mod svg;
+
+pub(crate) use svg::scene_svg;
 
 const EDGE_PATH_CHUNK: usize = 6_000;
 const COMMUNITY_EDGE_BUDGET: usize = 18_000;
 const REPRESENTATIVE_CAPTION_BUDGET: usize = 10;
 const LOCAL_CAPTION_BUDGET: usize = 24;
 const LOCAL_ARROW_BUDGET: usize = 48;
+const NODE_CAPTION_BUDGET: usize = 14;
+const NODE_CAPTION_CHARS: usize = 30;
 
 struct PaintNode {
     point: Point<Pixels>,
@@ -40,6 +47,13 @@ struct PaintNode {
 struct PaintPath {
     path: Path<Pixels>,
     color: Hsla,
+}
+
+/// A node's name drawn beside it.
+struct PaintNodeCaption {
+    text: SharedString,
+    origin: Point<Pixels>,
+    strong: bool,
 }
 
 /// A specialised tessellator for the canvas's disconnected straight strokes.
@@ -187,6 +201,8 @@ fn line_intersection_f64(
 
 struct PaintArrow {
     path: Path<Pixels>,
+    /// Tip, then the two back corners, for drawing it outside GPUI.
+    corners: [Point<Pixels>; 3],
     color: Hsla,
     selected: bool,
 }
@@ -212,6 +228,7 @@ struct PaintData {
     arrows: Vec<PaintArrow>,
     captions: Vec<PaintCaption>,
     nodes: Vec<PaintNode>,
+    node_captions: Vec<PaintNodeCaption>,
 }
 
 struct ScenePresentation<'a> {
@@ -221,12 +238,63 @@ struct ScenePresentation<'a> {
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
     path_endpoints: Option<GraphPathEndpoints>,
+    hovered_node: Option<usize>,
+    hovered_edge: Option<usize>,
+    label_colors: &'a LabelColors,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GraphPathEndpoints {
     pub start: usize,
     pub end: Option<usize>,
+}
+
+/// The colour each node label and relationship type is drawn in. Each
+/// takes its palette's colours in the order it first appears, by ID, and
+/// keeps them, so one added later, or hidden and shown again, never
+/// recolours the rest.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LabelColors {
+    nodes: HashMap<Arc<str>, usize>,
+    relationships: HashMap<Arc<str>, usize>,
+}
+
+impl LabelColors {
+    /// Gives each label and type in `snapshot` that has no colour yet the
+    /// next one.
+    pub(crate) fn extend(&mut self, snapshot: &SceneSnapshot) {
+        for (seen, labels) in [
+            (&mut self.nodes, &snapshot.nodes.labels),
+            (&mut self.relationships, &snapshot.edges.labels),
+        ] {
+            for label in labels {
+                if !seen.contains_key(label) {
+                    let next = seen.len();
+                    seen.insert(label.clone(), next);
+                }
+            }
+        }
+    }
+
+    /// A node label's colour.
+    pub(crate) fn color(&self, label: &str) -> Hsla {
+        match self.nodes.get(label) {
+            Some(&index) => node_color_for_index(index),
+            None => label_color(label),
+        }
+    }
+
+    /// Which of the relationship colours a type is drawn in.
+    pub(crate) fn relationship_index(&self, label: &str) -> usize {
+        self.relationships.get(label).map_or_else(
+            || relationship_color_index(label),
+            |&index| index % RELATIONSHIP_COLOR_COUNT,
+        )
+    }
+
+    pub(crate) fn relationship(&self, label: &str) -> Hsla {
+        relationship_color_for_index(self.relationship_index(label))
+    }
 }
 
 pub(crate) struct GraphCanvasPresentation {
@@ -236,9 +304,15 @@ pub(crate) struct GraphCanvasPresentation {
     pub dragging: Option<usize>,
     pub emphasis: Option<GraphEmphasis>,
     pub path_endpoints: Option<GraphPathEndpoints>,
+    /// The node or relationship under the pointer, or named by a hovered
+    /// list row, whose lines are lit more faintly than the selection's.
+    pub hovered_node: Option<usize>,
+    pub hovered_edge: Option<usize>,
+    pub label_colors: Arc<LabelColors>,
 }
 
 struct NodePaintContext<'a> {
+    label_colors: &'a LabelColors,
     selected: Option<usize>,
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
@@ -292,6 +366,9 @@ pub fn graph_canvas(
                     dragging: presentation.dragging,
                     emphasis: presentation.emphasis.as_ref(),
                     path_endpoints: presentation.path_endpoints,
+                    hovered_node: presentation.hovered_node,
+                    hovered_edge: presentation.hovered_edge,
+                    label_colors: &presentation.label_colors,
                 },
                 bounds,
             )
@@ -364,7 +441,9 @@ fn prepare_scene(
                     // remain in their dedicated passes below.
                     continue;
                 }
-                let color_index = relationship_color_index(&snapshot.edges.labels[edge_index]);
+                let color_index = presentation
+                    .label_colors
+                    .relationship_index(&snapshot.edges.labels[edge_index]);
                 builders[color_index]
                     .segment(absolute_point(bounds, from), absolute_point(bounds, to));
                 segment_counts[color_index] += 1;
@@ -423,17 +502,21 @@ fn prepare_scene(
                 continue;
             }
             let label = &snapshot.edges.labels[edge_index];
-            let color = relationship_color(label).opacity(0.42 + score * 0.58);
+            let color = presentation
+                .label_colors
+                .relationship(label)
+                .opacity(0.42 + score * 0.58);
             let mut builder = LinePathBuilder::stroke(px(1.2 + score * 1.5));
             builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
             if let Some(path) = builder.build() {
                 emphasis_edge_paths.push(PaintPath { path, color });
             }
             if arrows.len() < LOCAL_ARROW_BUDGET
-                && let Some(path) = arrowhead(bounds, from, to)
+                && let Some((path, corners)) = arrowhead(bounds, from, to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color,
                     selected: score > 0.9,
                 });
@@ -474,14 +557,15 @@ fn prepare_scene(
                 continue;
             }
             let label = &snapshot.edges.labels[edge_index];
-            let color_index = relationship_color_index(label);
+            let color_index = presentation.label_colors.relationship_index(label);
             builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
             segment_counts[color_index] += 1;
             if arrows.len() < LOCAL_ARROW_BUDGET
-                && let Some(path) = arrowhead(bounds, from, to)
+                && let Some((path, corners)) = arrowhead(bounds, from, to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color: relationship_color_for_index(color_index).opacity(0.92),
                     selected: false,
                 });
@@ -511,18 +595,59 @@ fn prepare_scene(
         }
     }
 
+    // The node or relationship under the pointer lights its lines, more
+    // faintly than the selection, so a neighborhood can be read before
+    // clicking. Lenses that dim the scene keep their own bounded edge set.
+    if emphasis.is_none_or(|lens| lens.dim < 0.35) {
+        if let Some(node_index) = presentation
+            .hovered_node
+            .filter(|&index| selected_node != Some(index))
+        {
+            incident_edge_paths.extend(hover_edge_paths(
+                snapshot,
+                presentation.label_colors,
+                &projected,
+                |source, target| source == node_index || target == node_index,
+                1.4,
+                0.7,
+                bounds,
+            ));
+        }
+        if let Some(edge_index) = presentation
+            .hovered_edge
+            .filter(|&index| selected_edge != Some(index))
+        {
+            let source = snapshot.edges.sources[edge_index] as usize;
+            let target = snapshot.edges.targets[edge_index] as usize;
+            let mut builder = LinePathBuilder::stroke(px(2.0));
+            builder.segment(
+                absolute_point(bounds, projected[source]),
+                absolute_point(bounds, projected[target]),
+            );
+            if let Some(path) = builder.build() {
+                incident_edge_paths.push(PaintPath {
+                    path,
+                    color: presentation
+                        .label_colors
+                        .relationship(&snapshot.edges.labels[edge_index]),
+                });
+            }
+        }
+    }
+
     let selected_edge_path = selected_edge.and_then(|edge_index| {
         let source = snapshot.edges.sources[edge_index] as usize;
         let target = snapshot.edges.targets[edge_index] as usize;
         let from = projected[source];
         let to = projected[target];
         let label = &snapshot.edges.labels[edge_index];
-        let color = relationship_color(label);
+        let color = presentation.label_colors.relationship(label);
         let mut builder = LinePathBuilder::stroke(px(2.5));
         builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
-        if let Some(path) = arrowhead(bounds, from, to) {
+        if let Some((path, corners)) = arrowhead(bounds, from, to) {
             arrows.push(PaintArrow {
                 path,
+                corners,
                 color,
                 selected: true,
             });
@@ -542,17 +667,18 @@ fn prepare_scene(
             .into_iter()
             .take(REPRESENTATIVE_CAPTION_BUDGET)
         {
-            let color = relationship_color(&label);
+            let color = presentation.label_colors.relationship(&label);
             if push_caption(
                 &mut captions,
                 label,
                 caption_center(bounds, candidate.from, candidate.to),
                 color,
                 false,
-            ) && let Some(path) = arrowhead(bounds, candidate.from, candidate.to)
+            ) && let Some((path, corners)) = arrowhead(bounds, candidate.from, candidate.to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color: color.opacity(0.86),
                     selected: false,
                 });
@@ -566,6 +692,7 @@ fn prepare_scene(
             workspace,
             &projected,
             &NodePaintContext {
+                label_colors: presentation.label_colors,
                 selected: selected_node,
                 dragging: presentation.dragging,
                 emphasis,
@@ -598,7 +725,7 @@ fn prepare_scene(
                         } else {
                             (3.1 + degree.ln_1p() * 0.52).min(6.2) * (1.0 + relevance * 0.48)
                         },
-                        color: label_color(label).opacity(lens_opacity),
+                        color: presentation.label_colors.color(label).opacity(lens_opacity),
                         selected: selected_node == Some(index),
                         pinned: workspace.is_pinned(index),
                         dragging: presentation.dragging == Some(index),
@@ -616,6 +743,27 @@ fn prepare_scene(
             .collect(),
     };
 
+    let node_captions = if level == DetailLevel::Overview {
+        Vec::new()
+    } else {
+        node_captions(
+            snapshot,
+            &projected,
+            &captions,
+            selected_edge,
+            &NodePaintContext {
+                label_colors: presentation.label_colors,
+                selected: selected_node,
+                dragging: presentation.dragging,
+                emphasis,
+                path_endpoints: presentation.path_endpoints,
+                bounds,
+                viewport,
+            },
+            level,
+        )
+    };
+
     PaintData {
         edge_paths,
         emphasis_edge_paths,
@@ -624,7 +772,207 @@ fn prepare_scene(
         arrows,
         captions,
         nodes,
+        node_captions,
     }
+}
+
+/// Chooses which nodes to name on the canvas: the selection, the selected
+/// relationship's endpoints, and path endpoints always, then the selection's
+/// neighbors by degree, the strongest
+/// search matches, and, when zoomed in to elements with nothing else to
+/// name, the best-connected visible nodes. A name that would overlap one
+/// already placed, or a relationship caption, is skipped, and at most
+/// [`NODE_CAPTION_BUDGET`] are drawn.
+/// Lines for the relationships `include` accepts, batched by color, drawn
+/// `width` wide at `opacity`.
+fn hover_edge_paths(
+    snapshot: &SceneSnapshot,
+    colors: &LabelColors,
+    projected: &[Vec2],
+    include: impl Fn(usize, usize) -> bool,
+    width: f32,
+    opacity: f32,
+    bounds: Bounds<Pixels>,
+) -> Vec<PaintPath> {
+    let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+    let mut builders: [LinePathBuilder; RELATIONSHIP_COLOR_COUNT] =
+        std::array::from_fn(|_| LinePathBuilder::stroke(px(width)));
+    let mut segment_counts = [0_usize; RELATIONSHIP_COLOR_COUNT];
+    for edge_index in 0..snapshot.edges.ids.len() {
+        let source = snapshot.edges.sources[edge_index] as usize;
+        let target = snapshot.edges.targets[edge_index] as usize;
+        if !include(source, target) {
+            continue;
+        }
+        let (from, to) = (projected[source], projected[target]);
+        if !segment_may_be_visible(from, to, viewport) {
+            continue;
+        }
+        let color_index = colors.relationship_index(&snapshot.edges.labels[edge_index]);
+        builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
+        segment_counts[color_index] += 1;
+    }
+    builders
+        .into_iter()
+        .zip(segment_counts)
+        .enumerate()
+        .filter(|&(_, (_, segments))| segments > 0)
+        .filter_map(|(color_index, (builder, _))| {
+            builder.build().map(|path| PaintPath {
+                path,
+                color: relationship_color_for_index(color_index).opacity(opacity),
+            })
+        })
+        .collect()
+}
+
+/// The lens score a traced path gives the nodes between its ends.
+pub(crate) const PATH_INTERIOR_SCORE: f32 = 0.76;
+
+fn node_captions(
+    snapshot: &SceneSnapshot,
+    projected: &[Vec2],
+    relationship_captions: &[PaintCaption],
+    selected_edge: Option<usize>,
+    context: &NodePaintContext<'_>,
+    level: DetailLevel,
+) -> Vec<PaintNodeCaption> {
+    let degrees = &snapshot.nodes.degrees;
+    let mut candidates: Vec<(usize, bool)> = Vec::new();
+    let mut push = |index: usize, strong: bool| {
+        if !candidates.iter().any(|&(existing, _)| existing == index) {
+            candidates.push((index, strong));
+        }
+    };
+    if let Some(selected) = context.selected {
+        push(selected, true);
+    }
+    if let Some(edge) = selected_edge {
+        push(snapshot.edges.sources[edge] as usize, true);
+        push(snapshot.edges.targets[edge] as usize, true);
+    }
+    if let Some(endpoints) = context.path_endpoints {
+        push(endpoints.start, true);
+        if let Some(end) = endpoints.end {
+            push(end, true);
+        }
+        // The nodes a traced path runs through come before the start's
+        // neighbors, which would otherwise fill the budget first.
+        if let Some(lens) = context.emphasis {
+            for index in 0..projected.len() {
+                if lens.node_score(index) >= PATH_INTERIOR_SCORE {
+                    push(index, false);
+                }
+            }
+        }
+    }
+    if let Some(selected) = context.selected {
+        let mut neighbors: Vec<usize> = snapshot
+            .edges
+            .sources
+            .iter()
+            .zip(&snapshot.edges.targets)
+            .filter_map(|(&source, &target)| {
+                let (source, target) = (source as usize, target as usize);
+                match (source == selected, target == selected) {
+                    (true, false) => Some(target),
+                    (false, true) => Some(source),
+                    _ => None,
+                }
+            })
+            .collect();
+        neighbors
+            .sort_unstable_by_key(|&neighbor| (std::cmp::Reverse(degrees[neighbor]), neighbor));
+        neighbors.dedup();
+        for neighbor in neighbors {
+            push(neighbor, false);
+        }
+    }
+    if let Some(lens) = context.emphasis {
+        let mut matches: Vec<(usize, f32)> = (0..projected.len())
+            .map(|index| (index, lens.node_score(index)))
+            .filter(|&(_, score)| score > 0.48)
+            .collect();
+        matches.sort_unstable_by(|left, right| right.1.total_cmp(&left.1));
+        for (index, _) in matches {
+            push(index, false);
+        }
+    }
+    if level == DetailLevel::Elements && context.selected.is_none() && context.emphasis.is_none() {
+        let mut visible: Vec<usize> = (0..projected.len())
+            .filter(|&index| point_is_visible(projected[index], context.viewport, 0.0))
+            .collect();
+        visible.sort_unstable_by_key(|&index| (std::cmp::Reverse(degrees[index]), index));
+        for index in visible.into_iter().take(NODE_CAPTION_BUDGET * 4) {
+            push(index, false);
+        }
+    }
+
+    // Widths here are estimates of the shaped text; they only have to keep
+    // names apart.
+    let mut placed: Vec<Bounds<Pixels>> = relationship_captions
+        .iter()
+        .map(|caption| {
+            let width = px(caption.text.chars().count() as f32 * 6.0 + 12.0);
+            Bounds {
+                origin: point(caption.center.x - width / 2.0, caption.center.y - px(9.0)),
+                size: size(width, px(18.0)),
+            }
+        })
+        .collect();
+    let mut captions = Vec::new();
+    for (index, strong) in candidates {
+        if captions.len() >= NODE_CAPTION_BUDGET {
+            break;
+        }
+        let position = projected[index];
+        if !point_is_visible(position, context.viewport, 0.0) {
+            continue;
+        }
+        // A lens that dims the scene fades what it leaves out nearly to
+        // nothing; a name there would label an empty spot.
+        if !strong
+            && context
+                .emphasis
+                .is_some_and(|lens| lens.dim >= 0.35 && lens.node_score(index) <= 0.01)
+        {
+            continue;
+        }
+        let text = node_caption_text(&snapshot.node_title(index));
+        let width = text.chars().count() as f32 * 6.2 + 10.0;
+        // Names sit right of their node unless that would run off the canvas.
+        let offset_x = if position.x + 11.0 + width > context.viewport.x - 4.0 {
+            -11.0 - width
+        } else {
+            11.0
+        };
+        let origin = absolute_point(context.bounds, position + Vec2::new(offset_x, -8.0));
+        let area = Bounds {
+            origin,
+            size: size(px(width), px(16.0)),
+        };
+        if !strong && placed.iter().any(|other| other.intersects(&area)) {
+            continue;
+        }
+        placed.push(area);
+        captions.push(PaintNodeCaption {
+            text,
+            origin,
+            strong,
+        });
+    }
+    captions
+}
+
+/// A canvas-length name: a path's file name, or the title cut to fit.
+pub(crate) fn node_caption_text(title: &str) -> SharedString {
+    let name = split_path_title(title).map_or(title, |(name, _)| name);
+    if name.chars().count() <= NODE_CAPTION_CHARS {
+        return SharedString::new(name);
+    }
+    let mut short: String = name.chars().take(NODE_CAPTION_CHARS - 1).collect();
+    short.push('…');
+    short.into()
 }
 
 fn aggregate_nodes(
@@ -694,7 +1042,9 @@ fn aggregate_nodes(
             PaintNode {
                 point: absolute_point(context.bounds, position),
                 radius: (1.7 + density * 1.15).min(6.8),
-                color: label_color(&snapshot.nodes.labels[bin.label_index])
+                color: context
+                    .label_colors
+                    .color(&snapshot.nodes.labels[bin.label_index])
                     .opacity((0.24 + density * 0.105).min(0.78) * lens_opacity),
                 selected: bin.selected,
                 pinned: bin.pinned,
@@ -824,6 +1174,44 @@ fn paint_scene(bounds: Bounds<Pixels>, scene: PaintData, window: &mut Window, cx
             }
         }
     });
+
+    for caption in scene.node_captions {
+        paint_node_caption(caption, window, cx);
+    }
+}
+
+fn paint_node_caption(caption: PaintNodeCaption, window: &mut Window, cx: &mut App) {
+    let font_size = px(10.5);
+    let line_height = px(14.0);
+    let text_run = TextRun {
+        len: caption.text.len(),
+        font: window
+            .text_style()
+            .highlight(if caption.strong {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::NORMAL
+            })
+            .font(),
+        color: palette()
+            .mist
+            .opacity(if caption.strong { 1.0 } else { 0.86 }),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window
+        .text_system()
+        .shape_line(caption.text, font_size, &[text_run], None);
+    window.paint_quad(fill(
+        Bounds {
+            origin: caption.origin,
+            size: size(line.width() + px(8.0), line_height + px(2.0)),
+        },
+        palette().graphite.opacity(0.72),
+    ));
+    let origin = point(caption.origin.x + px(4.0), caption.origin.y + px(1.0));
+    let _ = line.paint(origin, line_height, TextAlign::Left, None, window, cx);
 }
 
 fn lerp_score(from: f32, to: f32, mix: f32) -> f32 {
@@ -909,7 +1297,11 @@ fn caption_center(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Point<Pixels>
     absolute_point(bounds, (from + to) * 0.5 + perpendicular * 10.0)
 }
 
-fn arrowhead(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Option<Path<Pixels>> {
+fn arrowhead(
+    bounds: Bounds<Pixels>,
+    from: Vec2,
+    to: Vec2,
+) -> Option<(Path<Pixels>, [Point<Pixels>; 3])> {
     let delta = to - from;
     let length = delta.length();
     if length < 22.0 {
@@ -919,12 +1311,17 @@ fn arrowhead(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Option<Path<Pixels
     let perpendicular = Vec2::new(-direction.y, direction.x);
     let tip = to - direction * 7.0;
     let base = tip - direction * 7.5;
+    let corners = [
+        absolute_point(bounds, tip),
+        absolute_point(bounds, base + perpendicular * 3.8),
+        absolute_point(bounds, base - perpendicular * 3.8),
+    ];
     let mut builder = PathBuilder::fill();
-    builder.move_to(absolute_point(bounds, tip));
-    builder.line_to(absolute_point(bounds, base + perpendicular * 3.8));
-    builder.line_to(absolute_point(bounds, base - perpendicular * 3.8));
+    builder.move_to(corners[0]);
+    builder.line_to(corners[1]);
+    builder.line_to(corners[2]);
     builder.close();
-    builder.build().ok()
+    builder.build().ok().map(|path| (path, corners))
 }
 
 pub(crate) fn circle(center: Point<Pixels>, radius: f32, color: Hsla) -> PaintQuad {
@@ -960,17 +1357,97 @@ fn segment_may_be_visible(from: Vec2, to: Vec2, viewport: Vec2) -> bool {
     max_x >= -16.0 && max_y >= -16.0 && min_x <= viewport.x + 16.0 && min_y <= viewport.y + 16.0
 }
 
-pub(crate) fn label_color(label: &str) -> Hsla {
-    let colors = palette();
+/// A colour for a label no `LabelColors` has seen, from its name alone.
+fn label_color(label: &str) -> Hsla {
     let hash = label.bytes().fold(0_u64, |hash, byte| {
         hash.wrapping_mul(109).wrapping_add(byte as u64)
     });
-    match hash % 5 {
-        0 => colors.cobalt,
-        1 => colors.copper,
-        2 => colors.celadon,
-        3 => rgb(0x9b8cf2).into(),
-        _ => rgb(0xd6c56b).into(),
+    node_color_for_index(hash as usize)
+}
+
+#[cfg(test)]
+mod label_color_tests {
+    use super::*;
+    use crate::theme::NODE_COLOR_COUNT;
+
+    #[test]
+    fn every_palette_colour_is_distinct() {
+        for (count, color_for) in [
+            (NODE_COLOR_COUNT, node_color_for_index as fn(usize) -> Hsla),
+            (RELATIONSHIP_COLOR_COUNT, relationship_color_for_index),
+        ] {
+            let colors: Vec<Hsla> = (0..count).map(color_for).collect();
+            for (index, color) in colors.iter().enumerate() {
+                assert!(!colors[..index].contains(color), "colour {index} repeats");
+            }
+            // The palette wraps only after every colour is used.
+            assert_eq!(color_for(count), colors[0]);
+        }
+
+        // Ten relationship types, as in the agent-memory demo, each get
+        // their own colour.
+        let mut snapshot = SceneSnapshot::demo();
+        let types: Vec<Arc<str>> = (0..10)
+            .map(|index| Arc::from(format!("T{index}")))
+            .collect();
+        snapshot.edges.labels = types.clone();
+        let mut colors = LabelColors::default();
+        colors.extend(&snapshot);
+        let drawn: Vec<Hsla> = types
+            .iter()
+            .map(|label| colors.relationship(label))
+            .collect();
+        for (index, color) in drawn.iter().enumerate() {
+            assert!(
+                !drawn[..index].contains(color),
+                "type {index} repeats a colour"
+            );
+        }
+    }
+
+    #[test]
+    fn labels_keep_distinct_colours_in_the_order_they_appear() {
+        let mut snapshot = SceneSnapshot::demo();
+        let labels = ["Repository", "File", "Session", "File", "Commit", "Branch"];
+        for (index, label) in labels.iter().enumerate() {
+            snapshot.nodes.labels[index] = Arc::from(*label);
+        }
+        snapshot.nodes.labels.truncate(labels.len());
+        let types = ["READ", "CONTAINS", "READ", "EDITED"];
+        for (index, label) in types.iter().enumerate() {
+            snapshot.edges.labels[index] = Arc::from(*label);
+        }
+        snapshot.edges.labels.truncate(types.len());
+        let mut colors = LabelColors::default();
+        colors.extend(&snapshot);
+        // Relationship types take theirs the same way, from their own list.
+        assert_eq!(
+            ["READ", "CONTAINS", "EDITED"].map(|label| colors.relationship_index(label)),
+            [0, 1, 2]
+        );
+        let first: Vec<Hsla> = ["Repository", "File", "Session", "Commit", "Branch"]
+            .iter()
+            .map(|label| colors.color(label))
+            .collect();
+        assert_eq!(first[0], node_color_for_index(0));
+        assert_eq!(first[4], node_color_for_index(4));
+        for (index, color) in first.iter().enumerate() {
+            assert!(
+                !first[..index].contains(color),
+                "label {index} repeats a colour"
+            );
+        }
+
+        // A label that appears later takes the next colour, and the others
+        // keep theirs, even when a scene without them is read.
+        snapshot.nodes.labels = vec![Arc::from("ErrorSignature"), Arc::from("File")];
+        snapshot.edges.labels = vec![Arc::from("HIT"), Arc::from("READ")];
+        colors.extend(&snapshot);
+        assert_eq!(colors.relationship_index("HIT"), 3);
+        assert_eq!(colors.relationship_index("READ"), 0);
+        assert_eq!(colors.color("ErrorSignature"), node_color_for_index(5));
+        assert_eq!(colors.color("Repository"), first[0]);
+        assert_eq!(colors.color("Branch"), first[4]);
     }
 }
 
@@ -1036,5 +1513,261 @@ mod line_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod caption_tests {
+    use super::*;
+
+    fn context(selected: Option<usize>, viewport: Vec2) -> NodePaintContext<'static> {
+        NodePaintContext {
+            label_colors: Box::leak(Box::default()),
+            selected,
+            dragging: None,
+            emphasis: None,
+            path_endpoints: None,
+            bounds: Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(viewport.x), px(viewport.y)),
+            },
+            viewport,
+        }
+    }
+
+    #[test]
+    fn the_selection_and_its_neighbors_are_named_without_overlapping() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let viewport = Vec2::new(1_200.0, 900.0);
+        let camera = Camera::fit(snapshot.bounds);
+        let projected: Vec<Vec2> = snapshot
+            .nodes
+            .positions
+            .iter()
+            .map(|&position| camera.project(position, snapshot.bounds, viewport))
+            .collect();
+        let selected = (0..projected.len())
+            .max_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+
+        let captions = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            None,
+            &context(Some(selected), viewport),
+            DetailLevel::Communities,
+        );
+        assert!(!captions.is_empty() && captions.len() <= NODE_CAPTION_BUDGET);
+        assert!(captions[0].strong, "the selection is named first");
+        assert_eq!(
+            captions[0].text,
+            node_caption_text(&snapshot.node_title(selected))
+        );
+        assert!(captions[1..].iter().all(|caption| !caption.strong));
+        let areas: Vec<_> = captions
+            .iter()
+            .map(|caption| Bounds {
+                origin: caption.origin,
+                size: size(
+                    px(caption.text.chars().count() as f32 * 6.2 + 10.0),
+                    px(16.0),
+                ),
+            })
+            .collect();
+        for (index, area) in areas.iter().enumerate().skip(1) {
+            assert!(
+                areas[..index].iter().all(|other| !other.intersects(area)),
+                "{} overlaps an earlier name",
+                captions[index].text
+            );
+        }
+
+        // A node at the right edge is named on its left.
+        let mut edge = projected.clone();
+        edge[selected] = Vec2::new(viewport.x - 6.0, viewport.y / 2.0);
+        let flipped = node_captions(
+            &snapshot,
+            &edge,
+            &[],
+            None,
+            &context(Some(selected), viewport),
+            DetailLevel::Communities,
+        );
+        let right = flipped[0].origin.x + px(flipped[0].text.chars().count() as f32 * 6.2 + 10.0);
+        assert!(flipped[0].origin.x < px(viewport.x - 6.0) && right <= px(viewport.x));
+
+        let unselected = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            None,
+            &context(None, viewport),
+            DetailLevel::Communities,
+        );
+        assert!(
+            unselected.is_empty(),
+            "nothing is named at community zoom without a reason"
+        );
+
+        let relationship = 0;
+        let ends = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            Some(relationship),
+            &context(None, viewport),
+            DetailLevel::Communities,
+        );
+        let named: Vec<_> = ends.iter().map(|caption| caption.text.clone()).collect();
+        assert_eq!(
+            named,
+            [
+                snapshot.edges.sources[relationship],
+                snapshot.edges.targets[relationship]
+            ]
+            .map(|node| node_caption_text(&snapshot.node_title(node as usize))),
+            "a selected relationship names both of its ends"
+        );
+        assert!(ends.iter().all(|caption| caption.strong));
+    }
+
+    #[test]
+    fn a_traced_path_names_the_nodes_it_runs_through() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let viewport = Vec2::new(1_200.0, 900.0);
+        let camera = Camera::fit(snapshot.bounds);
+        let mut projected: Vec<Vec2> = snapshot
+            .nodes
+            .positions
+            .iter()
+            .map(|&position| camera.project(position, snapshot.bounds, viewport))
+            .collect();
+        // The path starts at the best-connected node, whose neighbors alone
+        // would fill the caption budget.
+        let start = (0..projected.len())
+            .max_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+        let interior = (0..projected.len())
+            .filter(|&index| index != start)
+            .min_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+        let end = (0..projected.len())
+            .find(|&index| index != start && index != interior)
+            .unwrap();
+        for other in 0..projected.len() {
+            if ![start, interior, end].contains(&other) {
+                snapshot.edges.ids.push(snapshot.edges.ids.len() as u64);
+                snapshot.edges.sources.push(start as u32);
+                snapshot.edges.targets.push(other as u32);
+                snapshot.edges.labels.push("SUPPORTS".into());
+                snapshot.edges.vector_counts.push(0);
+                snapshot.edges.properties.push(Arc::from([]));
+                snapshot.nodes.degrees[start] += 1;
+                snapshot.nodes.degrees[other] += 1;
+            }
+        }
+        projected[start] = Vec2::new(80.0, 80.0);
+        projected[end] = Vec2::new(80.0, 820.0);
+        projected[interior] = Vec2::new(600.0, 450.0);
+        let mut scores = vec![0.0; projected.len()];
+        scores[start] = 1.0;
+        scores[end] = 1.0;
+        scores[interior] = PATH_INTERIOR_SCORE;
+        let scores: Arc<[f32]> = scores.into();
+        let edges: Arc<[f32]> = vec![0.0; snapshot.edges.ids.len()].into();
+        let lens = GraphEmphasis {
+            from_nodes: scores.clone(),
+            target_nodes: scores,
+            from_edges: edges.clone(),
+            target_edges: edges,
+            mix: 1.0,
+            dim: 0.96,
+        };
+        let mut context = context(Some(start), viewport);
+        context.emphasis = Some(&lens);
+        context.path_endpoints = Some(GraphPathEndpoints {
+            start,
+            end: Some(end),
+        });
+
+        let captions = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            None,
+            &context,
+            DetailLevel::Communities,
+        );
+        let interior_name = node_caption_text(&snapshot.node_title(interior));
+        assert!(
+            captions.iter().any(|caption| caption.text == interior_name),
+            "the path's interior node is named"
+        );
+        // The start's other neighbors are dimmed almost out of sight by the
+        // path, so they go unnamed.
+        let path_names =
+            [start, interior, end].map(|node| node_caption_text(&snapshot.node_title(node)));
+        assert!(
+            captions
+                .iter()
+                .all(|caption| path_names.contains(&caption.text)),
+            "only the path is named, not {:?}",
+            captions
+                .iter()
+                .map(|caption| &caption.text)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn hovering_lights_the_lines_of_what_is_under_the_pointer() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let workspace = GraphWorkspace::new(&snapshot);
+        let bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(1_200.0), px(900.0)),
+        };
+        let lit = |hovered_node, hovered_edge, selection| {
+            prepare_scene(
+                &snapshot,
+                &workspace,
+                ScenePresentation {
+                    camera: Camera::fit(snapshot.bounds),
+                    world_bounds: snapshot.bounds,
+                    selection,
+                    dragging: None,
+                    emphasis: None,
+                    path_endpoints: None,
+                    hovered_node,
+                    hovered_edge,
+                    label_colors: &LabelColors::default(),
+                },
+                bounds,
+            )
+            .incident_edge_paths
+            .len()
+        };
+        assert_eq!(lit(None, None, None), 0);
+        // Node 5's lines are NEXT and SUPPORTS, one batch per color.
+        assert_eq!(lit(Some(5), None, None), 2);
+        assert_eq!(lit(None, Some(0), None), 1);
+        // The selection's lines are already lit.
+        let selection = Some(SceneSelection::Node(5));
+        assert_eq!(lit(Some(5), None, selection), lit(None, None, selection));
+        let selection = Some(SceneSelection::Edge(0));
+        assert_eq!(lit(None, Some(0), selection), lit(None, None, selection));
+    }
+
+    #[test]
+    fn long_titles_and_paths_are_cut_to_a_canvas_name() {
+        assert_eq!(node_caption_text("crates/vecgra/src/lib.rs"), "lib.rs");
+        let long = "a".repeat(NODE_CAPTION_CHARS + 5);
+        let caption = node_caption_text(&long);
+        assert_eq!(caption.chars().count(), NODE_CAPTION_CHARS);
+        assert!(caption.ends_with('…'));
     }
 }
