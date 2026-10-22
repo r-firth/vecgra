@@ -3417,6 +3417,14 @@ fn searching_a_bare_id_offers_what_it_names(cx: &mut TestAppContext) {
         assert!(report.hits.is_empty());
         let index = view.snapshot().unwrap().node_index(session).unwrap();
         assert_eq!(view.id_matches(&query), [SceneSelection::Node(index)]);
+        // It lights up like a result instead of leaving the canvas dark.
+        assert_eq!(view.lens.as_ref().unwrap().target_nodes[index], 1.0);
+        assert!(
+            view.status
+                .starts_with("No hybrid matches · ID names a node · "),
+            "{}",
+            view.status
+        );
         view.submit_query(&query, window, cx);
         assert_eq!(view.selection, Some(SceneSelection::Node(index)));
         assert_eq!(view.status.as_ref(), "Selected Live session");

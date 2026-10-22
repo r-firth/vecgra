@@ -51,7 +51,11 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
 /// Commands the search box understands. The first field is the syntax shown;
 /// the second is what clicking the row puts in the search box.
 const COMMANDS: &[(&str, &str, &str)] = &[
-    ("node <id>  ·  edge <id>", "node ", "Select by ID"),
+    (
+        "node <id>  ·  edge <id>",
+        "node ",
+        "Select by ID, or search the ID alone",
+    ),
     ("center <id>", "center ", "Move the camera to a node"),
     ("focus <id>", "focus ", "Lay out a node's context"),
     (

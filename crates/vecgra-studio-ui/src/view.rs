@@ -1885,12 +1885,17 @@ impl StudioView {
             .hits
             .first()
             .map_or(1.0, |hit| hit.score.max(f32::EPSILON));
+        // What a bare ID names lights up like the best result.
+        let id_matches = self.id_matches(&report.query);
         let workspace = workspace.borrow();
-        for hit in report.hits.iter() {
-            let score = (hit.score / maximum).clamp(0.18, 1.0);
-            let Some(selection) = hit.scene_selection(&snapshot) else {
-                continue;
-            };
+        let matches = id_matches
+            .into_iter()
+            .map(|selection| (selection, 1.0))
+            .chain(report.hits.iter().filter_map(|hit| {
+                let score = (hit.score / maximum).clamp(0.18, 1.0);
+                Some((hit.scene_selection(&snapshot)?, score))
+            }));
+        for (selection, score) in matches {
             match selection {
                 SceneSelection::Node(index) => {
                     node_scores[index] = node_scores[index].max(score);
@@ -2843,9 +2848,15 @@ impl StudioView {
                     Ok(report) => {
                         let count = report.hits.len();
                         let elapsed_ms = report.elapsed.as_secs_f64() * 1_000.0;
+                        let named = match this.id_matches(&query).as_slice() {
+                            [] => String::new(),
+                            [SceneSelection::Node(_)] => " · ID names a node".into(),
+                            [SceneSelection::Edge(_)] => " · ID names a relationship".into(),
+                            _ => " · ID names a node and a relationship".into(),
+                        };
                         this.status = if count == 0 {
                             format!(
-                                "No {} matches · {elapsed_ms:.1} ms",
+                                "No {} matches{named} · {elapsed_ms:.1} ms",
                                 mode.label().to_lowercase()
                             )
                             .into()
