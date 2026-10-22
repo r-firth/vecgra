@@ -1205,6 +1205,66 @@ fn relationship_results_without_a_name_are_titled_by_their_ends() {
 }
 
 #[test]
+fn results_that_share_a_name_are_told_apart_by_short_properties() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let mut session = |agent: &str, model: &str| {
+        transaction.create_node(
+            "Session",
+            [
+                ("agent", Value::String(agent.into())),
+                ("model", Value::String(model.into())),
+                ("title", Value::String("Fix flaky layout test".into())),
+            ],
+            &[],
+        )
+    };
+    let codex = session("codex", "gpt-5.6");
+    let copilot = session("copilot", "gpt-5.6-mini");
+    let commit = transaction.create_node(
+        "Commit",
+        [
+            ("message", Value::String("Fix flaky layout test".into())),
+            ("sha", Value::String("758dd63cb9".into())),
+        ],
+        &[],
+    );
+    // Dates and long text say little at a glance; the ID stays.
+    let issue = transaction.create_node(
+        "Issue",
+        [
+            ("title", Value::String("Flaky layout test".into())),
+            ("created_at", Value::String("2026-10-19T14:03:00Z".into())),
+            ("notes", Value::String("x".repeat(80).into())),
+        ],
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "flaky",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let detail = |id| {
+        report
+            .hits
+            .iter()
+            .find(|hit| hit.element == ElementRef::Node(id))
+            .map(|hit| hit.detail.to_string())
+    };
+    assert_eq!(detail(codex).as_deref(), Some("codex · gpt-5.6"));
+    assert_eq!(detail(copilot).as_deref(), Some("copilot · gpt-5.6-mini"));
+    assert_eq!(detail(commit).as_deref(), Some("758dd63cb9"));
+    assert_eq!(detail(issue), Some(format!("node:{issue}")));
+}
+
+#[test]
 fn path_titles_split_into_name_and_directory() {
     assert_eq!(
         split_path_title("crates/vecgra/src/error.rs"),

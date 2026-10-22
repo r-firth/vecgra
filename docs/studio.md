@@ -75,7 +75,10 @@ attempt to draw every record as a giant hairball.
    neighbors, and provenance without losing the current view. A node's
    heading is its title, name, or path when it has one, else the first line
    of its message or summary, and search results and evidence paths name
-   it the same way; wherever a path
+   it the same way. Under its name, a search result shows its body,
+   description, message, URL, state or kind, else up to two short text
+   properties (an agent and model, a commit SHA) so results that share a
+   name stay distinguishable, and only then its ID; wherever a path
    titles an element, the file name leads and the directory follows, muted,
    so truncated lists of files stay distinguishable. Its relationships in
    the current view are grouped by type and direction, six to a group until

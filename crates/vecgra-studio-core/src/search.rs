@@ -632,6 +632,38 @@ fn secondary_property(
         .into_iter()
         .filter_map(|key| read.property(properties, key).and_then(searchable_value))
         .find(|value| value != title && !value.is_empty())
+        .or_else(|| short_text_properties(read, properties, title))
+}
+
+const SHORT_TEXT_PROPERTY_CHARS: usize = 40;
+
+/// Up to two short one-line text properties besides the name, such as an
+/// agent and model or a commit SHA, which tell apart elements that share a
+/// name better than their IDs do.
+fn short_text_properties(
+    read: &ReadGuard<'_>,
+    properties: &[Property],
+    title: &str,
+) -> Option<String> {
+    let values: Vec<&str> = properties
+        .iter()
+        .filter_map(|property| {
+            let key = read.symbol(property.key)?;
+            let Value::String(value) = &property.value else {
+                return None;
+            };
+            let value = value.trim();
+            (!TITLE_PROPERTY_KEYS.contains(&key)
+                && !value.is_empty()
+                && value != title
+                && value.chars().count() <= SHORT_TEXT_PROPERTY_CHARS
+                && !value.contains('\n')
+                && parse_iso_datetime_ms(value).is_none())
+            .then_some(value)
+        })
+        .take(2)
+        .collect();
+    (!values.is_empty()).then(|| values.join(" · "))
 }
 
 fn truncate_text(text: &str, limit: usize) -> String {
