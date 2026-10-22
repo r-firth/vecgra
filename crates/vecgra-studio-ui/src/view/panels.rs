@@ -2656,10 +2656,14 @@ fn title_line(title: &str, cx: &gpui::App) -> gpui::Div {
                     .child(name.to_string()),
             )
             .child(
+                // A folder's nearest part says most, so a long one is cut
+                // at its start: "…studio-core/src".
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
                     .text_xs()
                     .font_weight(gpui::FontWeight::NORMAL)
                     .text_color(cx.theme().muted_foreground)
