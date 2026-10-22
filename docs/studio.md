@@ -67,7 +67,8 @@ attempt to draw every record as a giant hairball.
    heading is its title, name, or path when it has one; wherever a path
    titles an element, the file name leads and the directory follows, muted,
    so truncated lists of files stay distinguishable. Its relationships in
-   the current view are grouped by type and direction; choosing a neighbor,
+   the current view are grouped by type and direction, six to a group until
+   **Show N more** lists the rest; choosing a neighbor,
    or either endpoint of a selected relationship, selects it and springs the
    camera to it at the current zoom, so the inspector can walk the graph.
    `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by

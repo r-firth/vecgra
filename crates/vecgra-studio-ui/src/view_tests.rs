@@ -1178,6 +1178,83 @@ fn inspector_copies_property_values(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn long_connection_groups_expand_and_collapse(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("expand");
+    let mut transaction = live.database.transaction();
+    let session = transaction.create_node(
+        "Session",
+        [("title", vecgra::Value::String("Wide session".into()))],
+        &[],
+    );
+    for &file in &live.files {
+        transaction.create_edge(
+            session,
+            file,
+            "EDITED",
+            std::iter::empty::<(&str, vecgra::Value)>(),
+            &[],
+        );
+    }
+    transaction.commit().unwrap();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        assert!(view.is_ready(), "{}", view.status);
+        let index = view
+            .snapshot()
+            .unwrap()
+            .nodes
+            .ids
+            .iter()
+            .position(|&id| id == session)
+            .unwrap();
+        view.set_selection(Some(SceneSelection::Node(index)));
+        cx.notify();
+    });
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    draw(cx);
+    assert!(
+        cx.debug_bounds("inspector-connections-fewer:EDITED:out")
+            .is_none()
+    );
+    let more = cx
+        .debug_bounds("inspector-connections-more:EDITED:out")
+        .expect("eight edits list six and offer the rest");
+    cx.simulate_click(more.center(), Modifiers::none());
+    cx.run_until_parked();
+    draw(cx);
+    assert!(
+        cx.debug_bounds("inspector-connections-more:EDITED:out")
+            .is_none()
+    );
+    let fewer = cx
+        .debug_bounds("inspector-connections-fewer:EDITED:out")
+        .expect("an expanded group can collapse again");
+    cx.simulate_click(fewer.center(), Modifiers::none());
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        assert!(view.expanded_connections.is_empty());
+        view.expanded_connections.push(("EDITED".into(), true));
+        view.set_selection(None);
+        assert!(
+            view.expanded_connections.is_empty(),
+            "a new selection starts collapsed"
+        );
+        cx.notify();
+    });
+}
+
+#[gpui::test]
 fn back_and_forward_retrace_selections_by_id(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

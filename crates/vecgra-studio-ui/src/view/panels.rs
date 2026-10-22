@@ -9,7 +9,9 @@ const TITLE_BAR_PLATFORM_INSET: f32 = 12.0;
 const TOOLBAR_GAP: f32 = 8.0;
 const OVERVIEW_SIDEBAR_WIDTH: f32 = 218.0;
 const INSPECTOR_PROPERTY_LIMIT: usize = 24;
-pub(super) const INSPECTOR_CONNECTIONS_PER_GROUP: usize = 6;
+const INSPECTOR_CONNECTIONS_PER_GROUP: usize = 6;
+/// How many of a group's connections the inspector lists once expanded.
+pub(super) const INSPECTOR_CONNECTIONS_EXPANDED: usize = 100;
 const INSPECTOR_CONNECTION_GROUPS: usize = 8;
 const DETAIL_SIDEBAR_WIDTH: f32 = 306.0;
 
@@ -1805,6 +1807,18 @@ impl StudioView {
             .children(groups.into_iter().map(|group| {
                 let color = relationship_color(&group.label);
                 let arrow = if group.outgoing { "→" } else { "←" };
+                let key = (group.label.clone(), group.outgoing);
+                let expanded = self.expanded_connections.contains(&key);
+                let shown = group.connections.len().min(if expanded {
+                    INSPECTOR_CONNECTIONS_EXPANDED
+                } else {
+                    INSPECTOR_CONNECTIONS_PER_GROUP
+                });
+                let selector = format!(
+                    "{}:{}",
+                    group.label,
+                    if group.outgoing { "out" } else { "in" }
+                );
                 v_flex()
                     .gap_0p5()
                     .child(
@@ -1833,7 +1847,7 @@ impl StudioView {
                                     .child(format_count(group.total)),
                             ),
                     )
-                    .children(group.connections.iter().map(|connection| {
+                    .children(group.connections.iter().take(shown).map(|connection| {
                         let neighbor = connection.neighbor;
                         let edge = connection.edge;
                         let edge_id = snapshot.edges.ids[edge];
@@ -1869,13 +1883,29 @@ impl StudioView {
                                     .child(snapshot.nodes.labels[neighbor].to_string()),
                             )
                     }))
-                    .when(group.total > group.connections.len(), |this| {
-                        this.child(div().ml_3().child(more_row(
+                    .when(shown < group.connections.len(), |this| {
+                        this.child(connections_toggle(
+                            format!("inspector-connections-more:{selector}"),
+                            format!("Show {} more", group.connections.len() - shown),
+                            key.clone(),
+                            cx,
+                        ))
+                    })
+                    .when(group.total > group.connections.len() && expanded, |this| {
+                        this.child(div().ml_3().px_1().child(more_row(
                             group.total - group.connections.len(),
                             "relationship",
                             "relationships",
                             cx,
                         )))
+                    })
+                    .when(expanded, |this| {
+                        this.child(connections_toggle(
+                            format!("inspector-connections-fewer:{selector}"),
+                            "Show fewer".into(),
+                            key,
+                            cx,
+                        ))
                     })
             }))
             .when(hidden_groups > 0, |this| {
@@ -2472,6 +2502,43 @@ fn copyable_id(
         .on_click(cx.listener(move |this, _, _, cx| {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(copied.clone()));
             this.status = format!("Copied {copied}").into();
+            cx.notify();
+        }))
+        .child(text)
+}
+
+/// Expands or collapses one connection group in the inspector.
+fn connections_toggle(
+    selector: String,
+    text: String,
+    key: (Arc<str>, bool),
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    div()
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector)
+        .role(Role::Button)
+        .ml_3()
+        .px_1()
+        .rounded(px(4.0))
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .cursor_pointer()
+        .hover(|style| {
+            style
+                .bg(cx.theme().sidebar_accent)
+                .text_color(cx.theme().foreground)
+        })
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if let Some(position) = this
+                .expanded_connections
+                .iter()
+                .position(|expanded| *expanded == key)
+            {
+                this.expanded_connections.remove(position);
+            } else {
+                this.expanded_connections.push(key.clone());
+            }
             cx.notify();
         }))
         .child(text)

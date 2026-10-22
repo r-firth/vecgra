@@ -390,6 +390,9 @@ pub struct StudioView {
     bezel_overview_focus: FocusHandle,
     inspector_scroll_handle: ScrollHandle,
     connection_cache: RefCell<Option<ConnectionCache>>,
+    /// Connection groups the inspector lists in full for the current
+    /// selection, by relationship type and direction.
+    expanded_connections: Vec<(Arc<str>, bool)>,
     selection_back: Vec<SelectedElement>,
     selection_forward: Vec<SelectedElement>,
     help_visible: bool,
@@ -507,6 +510,7 @@ impl StudioView {
             bezel_overview_focus,
             inspector_scroll_handle: ScrollHandle::new(),
             connection_cache: RefCell::new(None),
+            expanded_connections: Vec::new(),
             selection_back: Vec::new(),
             selection_forward: Vec::new(),
             help_visible: false,
@@ -852,7 +856,7 @@ impl StudioView {
             return cached.connections.clone();
         }
         let connections =
-            Rc::new(snapshot.node_connections(node, panels::INSPECTOR_CONNECTIONS_PER_GROUP));
+            Rc::new(snapshot.node_connections(node, panels::INSPECTOR_CONNECTIONS_EXPANDED));
         *cache = Some(ConnectionCache {
             snapshot: snapshot.clone(),
             node,
@@ -1248,6 +1252,7 @@ impl StudioView {
     fn set_selection(&mut self, selection: Option<SceneSelection>) {
         if self.selection != selection {
             self.inspector_scroll_handle.set_offset(Default::default());
+            self.expanded_connections.clear();
             let previous = self.selected_element(self.selection);
             if previous.is_some() && previous != self.selected_element(selection) {
                 self.selection_back.extend(previous);
