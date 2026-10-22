@@ -960,6 +960,52 @@ fn reload_keeps_the_presentation_and_grows_new_commits_into_place(cx: &mut TestA
 }
 
 #[gpui::test]
+fn nodes_a_reload_adds_are_ringed_until_they_fade(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("fresh");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        assert!(view.is_ready(), "{}", view.status);
+        assert!(view.fresh_nodes.is_none(), "opening rings nothing");
+        view.set_live_refresh(false, window, cx);
+    });
+
+    let session = live.add_session();
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("reload", window, cx)
+    });
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        let fresh = view
+            .fresh_nodes
+            .as_ref()
+            .expect("the new session is ringed");
+        assert_eq!(fresh.ids, [session]);
+        assert_eq!(fresh.opacity(), 1.0);
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("graph-fresh-ring").is_some());
+
+    view.update(cx, |view, cx| {
+        view.fresh_nodes.as_mut().unwrap().since = Instant::now() - FRESH_NODE_DURATION;
+        cx.notify();
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("graph-fresh-ring").is_none());
+    view.read_with(&*cx, |view, _| assert!(view.fresh_nodes.is_none()));
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);

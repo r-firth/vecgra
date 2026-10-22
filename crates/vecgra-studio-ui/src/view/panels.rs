@@ -1601,6 +1601,7 @@ impl StudioView {
                 });
             })
             .child(scene)
+            .children(self.render_fresh_rings())
             .children(self.render_hover_card(cx))
             .when_some(navigator, |this, navigator| {
                 this.child(
@@ -2124,6 +2125,48 @@ impl StudioView {
             )
             .into_any_element();
         Some([ring, card])
+    }
+
+    /// Rings on the nodes the last reload added, fading out, so new arrivals
+    /// stand out while they spring into place.
+    fn render_fresh_rings(&self) -> Vec<gpui::AnyElement> {
+        const RING: f32 = 24.0;
+        let (Some(fresh), Some(snapshot), Some(workspace), Some(bounds)) = (
+            self.fresh_nodes.as_ref(),
+            self.snapshot(),
+            self.workspace.as_ref(),
+            self.canvas_bounds,
+        ) else {
+            return Vec::new();
+        };
+        let opacity = fresh.opacity();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let workspace = workspace.borrow();
+        fresh
+            .ids
+            .iter()
+            .filter_map(|&id| workspace.position(snapshot.node_index(id)?))
+            .map(|world| self.camera.project(world, self.world_bounds, viewport))
+            .filter(|anchor| {
+                anchor.x >= 0.0
+                    && anchor.y >= 0.0
+                    && anchor.x <= viewport.x
+                    && anchor.y <= viewport.y
+            })
+            .map(|anchor| {
+                div()
+                    .debug_selector(|| "graph-fresh-ring".into())
+                    .absolute()
+                    .left(px(anchor.x - RING / 2.0))
+                    .top(px(anchor.y - RING / 2.0))
+                    .size(px(RING))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(palette().celadon.opacity(0.9 * opacity))
+                    .bg(palette().celadon.opacity(0.12 * opacity))
+                    .into_any_element()
+            })
+            .collect()
     }
 
     /// Recently opened databases, offered while nothing is selected.

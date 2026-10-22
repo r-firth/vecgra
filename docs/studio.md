@@ -119,7 +119,9 @@ rereads the file off the application thread. Nodes that survive keep their
 presented positions and pins, the selection follows its element ID, and the
 camera stays put, so the view does not jump. New nodes spring out of the
 surviving neighbor they attach to, and new components with no surviving
-anchor enter just outside the existing scene. If fewer than half of the new
+anchor enter just outside the existing scene. Up to 64 new nodes are ringed
+for six seconds, fading after the first two, so arrivals stand out. If
+fewer than half of the new
 scene's nodes survive, Studio lays it out from scratch instead. A search,
 path, lens, or context layout holds state for the current scene, so live
 refresh waits while one is active and the status bar shows `updates waiting`

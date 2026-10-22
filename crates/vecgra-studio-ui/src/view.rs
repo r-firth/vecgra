@@ -399,6 +399,26 @@ fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
 /// edge, so it runs once per selection and scene rather than once per frame;
 /// holding the scene's `Arc` makes the identity check immune to reuse of a
 /// freed snapshot's address.
+/// How long nodes that a reload added stay ringed on the canvas, and how
+/// many are ringed at most.
+const FRESH_NODE_DURATION: Duration = Duration::from_secs(6);
+const FRESH_NODE_LIMIT: usize = 64;
+
+/// Nodes the last reload added, by ID, ringed on the canvas until they fade.
+struct FreshNodes {
+    ids: Vec<u64>,
+    since: Instant,
+}
+
+impl FreshNodes {
+    /// Ring opacity: full for the first two seconds, then fading out.
+    fn opacity(&self) -> f32 {
+        let elapsed = self.since.elapsed().as_secs_f32();
+        let duration = FRESH_NODE_DURATION.as_secs_f32();
+        (1.0 - (elapsed - 2.0).max(0.0) / (duration - 2.0)).clamp(0.0, 1.0)
+    }
+}
+
 /// The relationship under the pointer, by ID, and where on the canvas the
 /// pointer first found it, which is where its card opens.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -452,6 +472,7 @@ pub struct StudioView {
     /// another node.
     hovered_node: Option<u64>,
     hovered_edge: Option<HoveredEdge>,
+    fresh_nodes: Option<FreshNodes>,
     recent: RecentDatabases,
     /// Where the recent list is saved; `None` keeps it in memory, as tests do.
     recent_file: Option<PathBuf>,
@@ -569,6 +590,7 @@ impl StudioView {
             help_visible: false,
             hovered_node: None,
             hovered_edge: None,
+            fresh_nodes: None,
             recent: recent_file
                 .as_deref()
                 .map(RecentDatabases::load)
@@ -821,6 +843,7 @@ impl StudioView {
         }
         self.database_path = Some(path.clone());
         self.recent_current = None;
+        self.fresh_nodes = None;
         self.workspace = None;
         self.graph_navigator_cache.borrow_mut().clear();
         self.node_label_counts = Arc::from([]);
@@ -1058,6 +1081,27 @@ impl StudioView {
             delta,
             relaid,
         } = reloaded;
+        // A relaid scene is new everywhere, so nothing is singled out.
+        self.fresh_nodes = (!relaid && delta.added_nodes > 0)
+            .then(|| {
+                let previous: std::collections::HashSet<u64> = self
+                    .snapshot()
+                    .map(|previous| previous.nodes.ids.iter().copied().collect())
+                    .unwrap_or_default();
+                snapshot
+                    .nodes
+                    .ids
+                    .iter()
+                    .copied()
+                    .filter(|id| !previous.contains(id))
+                    .take(FRESH_NODE_LIMIT)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|ids| !ids.is_empty())
+            .map(|ids| FreshNodes {
+                ids,
+                since: Instant::now(),
+            });
         let snapshot = Arc::new(snapshot);
         let mut workspace = GraphWorkspace::new(&snapshot);
         for &id in pinned_ids {
@@ -3109,6 +3153,13 @@ impl Render for StudioView {
             }
         } else {
             self.last_motion_frame = None;
+        }
+        if let Some(fresh) = &self.fresh_nodes {
+            if fresh.since.elapsed() >= FRESH_NODE_DURATION {
+                self.fresh_nodes = None;
+            } else {
+                window.request_animation_frame();
+            }
         }
         let viewport_width = window.viewport_size().width;
         let show_inspector = viewport_width >= px(980.0);
