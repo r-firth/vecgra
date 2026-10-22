@@ -315,6 +315,8 @@ impl StudioView {
         }
         let count = others.len();
         self.hide_where(&current, HideStep::Groups(others));
+        // What is left is what the reader asked to see, so frame it.
+        self.fit(cx);
         self.report_hidden(
             format!(
                 "Showing only {label} {elements} · hid {}",
@@ -385,6 +387,10 @@ impl StudioView {
         }
         scene.steps.retain(|other| other != step);
         self.show_less_hidden(&current);
+        if matches!(step, HideStep::Groups(_)) {
+            // Showing only one label framed it; frame everything again.
+            self.fit(cx);
+        }
         self.status = format!("Showing {what} again").into();
         cx.notify();
         true

@@ -3160,9 +3160,20 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     // Showing only one label hides the others as one step.
     view.update_in(cx, |view, window, cx| {
         assert_eq!(view.node_label_counts.len(), 2);
+        view.camera.zoom = 3.0;
         view.execute_command("only label file", window, cx);
         let snapshot = view.snapshot().unwrap();
         assert!(snapshot.nodes.labels.iter().all(|label| &**label == "File"));
+        // The camera frames what is left.
+        assert_eq!(
+            view.world_bounds,
+            view.workspace
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .presentation_bounds()
+        );
+        assert_eq!(view.camera, Camera::fit(view.world_bounds));
         assert_eq!(view.node_label_counts.len(), 1);
         assert!(
             view.status
