@@ -1308,7 +1308,7 @@ impl StudioView {
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
                         v_flex()
-                            .gap_2()
+                            .gap_1()
                             .child(inspector_label("PROPERTIES"))
                             .when(properties.is_empty(), |this| {
                                 this.child(
@@ -1322,8 +1322,9 @@ impl StudioView {
                                 properties
                                     .iter()
                                     .take(INSPECTOR_PROPERTY_LIMIT)
-                                    .map(|property| {
-                                        property_row(&property.key, &property.value, cx)
+                                    .enumerate()
+                                    .map(|(position, property)| {
+                                        property_row(position, &property.key, &property.value, cx)
                                     }),
                             )
                             .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
@@ -1398,7 +1399,7 @@ impl StudioView {
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
                         v_flex()
-                            .gap_2()
+                            .gap_1()
                             .child(inspector_label("PROPERTIES"))
                             .when(properties.is_empty(), |this| {
                                 this.child(
@@ -1412,8 +1413,9 @@ impl StudioView {
                                 properties
                                     .iter()
                                     .take(INSPECTOR_PROPERTY_LIMIT)
-                                    .map(|property| {
-                                        property_row(&property.key, &property.value, cx)
+                                    .enumerate()
+                                    .map(|(position, property)| {
+                                        property_row(position, &property.key, &property.value, cx)
                                     }),
                             )
                             .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
@@ -2491,9 +2493,41 @@ fn more_row(
         ))
 }
 
-fn property_row(key: &str, value: &PropertyValue, cx: &Context<StudioView>) -> impl IntoElement {
+/// One property in the inspector. Clicking it copies the value, at full
+/// precision for floats; byte strings have nothing useful to copy.
+fn property_row(
+    position: usize,
+    key: &str,
+    value: &PropertyValue,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    let copy = match value {
+        PropertyValue::Bytes(_) => None,
+        PropertyValue::Float(value) => Some(value.to_string()),
+        value => Some(format_value(value)),
+    };
+    let selector = format!("inspector-property:{key}");
+    let copied_key = key.to_string();
     v_flex()
+        .id(("inspector-property", position))
+        .debug_selector(move || selector)
         .gap_1()
+        .px_2()
+        .py_1()
+        .mx(px(-8.0))
+        .rounded(px(6.0))
+        .when_some(copy, |this, copy| {
+            this.role(Role::Button)
+                .aria_label(format!("Copy {copied_key}"))
+                .cursor_pointer()
+                .hover(|style| style.bg(cx.theme().secondary_hover))
+                .tooltip(|window, cx| Tooltip::text("Copy value", window, cx))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
+                    this.status = format!("Copied {copied_key}").into();
+                    cx.notify();
+                }))
+        })
         .child(
             div()
                 .text_xs()

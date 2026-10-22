@@ -1149,6 +1149,35 @@ fn inspector_copies_element_ids(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn inspector_copies_property_values(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    view.update(cx, |view, cx| {
+        view.set_selection(Some(SceneSelection::Node(5)));
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let property = cx.debug_bounds("inspector-property:title").unwrap();
+    cx.simulate_click(property.center(), Modifiers::none());
+    cx.run_until_parked();
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    assert_eq!(
+        clipboard.and_then(|item| item.text()).as_deref(),
+        Some("Context element 5")
+    );
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.status.as_ref(), "Copied title");
+    });
+}
+
+#[gpui::test]
 fn back_and_forward_retrace_selections_by_id(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

@@ -72,7 +72,7 @@ attempt to draw every record as a giant hairball.
    camera to it at the current zoom, so the inspector can walk the graph.
    `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by
    element ID, skipping anything a reload removed. Clicking an element ID
-   copies it.
+   or a property copies it; floats are copied at full precision.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.
