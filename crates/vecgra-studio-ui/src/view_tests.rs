@@ -2453,6 +2453,10 @@ fn up_and_down_in_the_command_box_recall_commands_and_step_results(cx: &mut Test
     let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
     cx.simulate_resize(size(px(1_400.0), px(900.0)));
     cx.run_until_parked();
+    let history_file = std::env::temp_dir()
+        .join(format!("vecgra-studio-ui-history-{}", std::process::id()))
+        .join("studio-history");
+    view.update(cx, |view, _| view.history_file = Some(history_file.clone()));
     let input = view.read_with(&*cx, |view, _| view.query_input.clone());
     let type_text = |cx: &mut gpui::VisualTestContext, text: &str| {
         let text = text.to_string();
@@ -2481,12 +2485,15 @@ fn up_and_down_in_the_command_box_recall_commands_and_step_results(cx: &mut Test
     submit(cx, "rs");
     view.read_with(&*cx, |view, _| {
         assert_eq!(
-            view.command_history,
+            view.command_history.entries(),
             [&format!("node {}", live.files[1]), "zoom 2", "rs"]
         );
         assert!(matches!(&view.search_state, SearchState::Ready(report) if report.hits.len() > 2));
         assert_eq!(view.selected_search_result, 0);
+        // The next session starts with the same history.
+        assert_eq!(&CommandHistory::load(&history_file), &view.command_history);
     });
+    std::fs::remove_dir_all(history_file.parent().unwrap()).unwrap();
 
     // With its results listed, the search moves through them.
     assert_eq!(step(cx, false), "rs");

@@ -24,9 +24,9 @@ use gpui_component::{
     v_flex,
 };
 use vecgra_studio_core::{
-    Camera, CameraMotion, DatabaseFingerprint, DetailLevel, EvidenceNode, EvidencePathReport,
-    EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions,
-    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue,
+    Camera, CameraMotion, CommandHistory, DatabaseFingerprint, DetailLevel, EvidenceNode,
+    EvidencePathReport, EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind,
+    LayoutOptions, MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue,
     RecentDatabases, Rect, ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode,
     SearchReport, SnapshotOptions, Vec2, detail_level, display_path, element_title,
     evidence_path_database, hit_test_edges, hit_test_positions, search_database, split_path_title,
@@ -137,9 +137,6 @@ enum PathState {
         error: SharedString,
     },
 }
-
-/// How many submitted searches and commands the command box remembers.
-const COMMAND_HISTORY_LIMIT: usize = 100;
 
 /// Stepping through earlier commands from the command box.
 struct HistoryBrowse {
@@ -568,8 +565,8 @@ pub struct StudioView {
     expanded_connections: Vec<(Arc<str>, bool)>,
     selection_back: Vec<SelectedElement>,
     selection_forward: Vec<SelectedElement>,
-    /// Searches and commands submitted from the command box, oldest first.
-    command_history: Vec<String>,
+    command_history: CommandHistory,
+    history_file: Option<PathBuf>,
     history_browse: Option<HistoryBrowse>,
     node_menu: Option<NodeMenu>,
     help_visible: bool,
@@ -634,10 +631,13 @@ impl StudioView {
         let bezel_layout_focus = std::array::from_fn(|_| cx.focus_handle());
         let bezel_release_focus = cx.focus_handle();
         let bezel_overview_focus = cx.focus_handle();
-        let recent_file = if cfg!(test) {
-            None
+        let (recent_file, history_file) = if cfg!(test) {
+            (None, None)
         } else {
-            RecentDatabases::default_file()
+            (
+                RecentDatabases::default_file(),
+                CommandHistory::default_file(),
+            )
         };
         let (state, workspace, world_bounds) = if let Some(path) = &path {
             (
@@ -695,7 +695,11 @@ impl StudioView {
             expanded_connections: Vec::new(),
             selection_back: Vec::new(),
             selection_forward: Vec::new(),
-            command_history: Vec::new(),
+            command_history: history_file
+                .as_deref()
+                .map(CommandHistory::load)
+                .unwrap_or_default(),
+            history_file,
             history_browse: None,
             node_menu: None,
             help_visible: false,
@@ -2551,20 +2555,22 @@ impl StudioView {
         cx.notify();
     }
 
-    fn remember_command(&mut self, query: &str) {
+    /// Adds a submission to the history and writes it off the application
+    /// thread. A failed write only costs the history in the next session, so
+    /// it is not reported.
+    fn remember_command(&mut self, query: &str, cx: &mut Context<Self>) {
         self.history_browse = None;
-        if query.is_empty()
-            || self
-                .command_history
-                .last()
-                .is_some_and(|last| last == query)
-        {
+        if !self.command_history.remember(query) {
             return;
         }
-        if self.command_history.len() == COMMAND_HISTORY_LIMIT {
-            self.command_history.remove(0);
-        }
-        self.command_history.push(query.to_string());
+        let Some(file) = self.history_file.clone() else {
+            return;
+        };
+        let history = self.command_history.clone();
+        cx.background_spawn(async move {
+            let _ = history.save(&file);
+        })
+        .detach();
     }
 
     /// Up and Down in the command box. While the box holds the search whose
@@ -2583,13 +2589,12 @@ impl StudioView {
             return;
         }
         let current = self.history_browse.as_ref().map(|browse| browse.index);
+        let count = self.command_history.entries().len();
         let target = match (current, earlier) {
-            (None, true) => self.command_history.len().checked_sub(1),
+            (None, true) => count.checked_sub(1),
             (None, false) => return,
             (Some(index), true) => Some(index.saturating_sub(1)),
-            (Some(index), false) => {
-                Some(index + 1).filter(|&next| next < self.command_history.len())
-            }
+            (Some(index), false) => Some(index + 1).filter(|&next| next < count),
         };
         let value = match (target, self.history_browse.take()) {
             (Some(index), browse) => {
@@ -2598,7 +2603,7 @@ impl StudioView {
                     |browse| browse.draft,
                 );
                 self.history_browse = Some(HistoryBrowse { index, draft });
-                self.command_history[index].clone()
+                self.command_history.entries()[index].clone()
             }
             (None, Some(browse)) => browse.draft,
             (None, None) => return,
@@ -3211,7 +3216,7 @@ impl StudioView {
             return;
         }
         let query = input.read(cx).value().trim().to_string();
-        self.remember_command(&query);
+        self.remember_command(&query, cx);
         if matches!(
             &self.search_state,
             SearchState::Ready(report)

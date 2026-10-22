@@ -160,8 +160,10 @@ focuses it; Enter runs the selected Text, Semantic, or Hybrid mode; Up/Down
 moves the ranked selection, from the graph or from the box while it holds the
 listed search; a second Enter or click selects and frames the result. With any
 other text in the box, Up and Down step back through the last 100 searches
-and commands submitted this session and forward again to the text being
-written, so `path` commands can be rerun or adjusted without retyping. At widths below 1,280 logical pixels, the single command rail becomes
+and commands submitted and forward again to the text being written, so `path`
+commands can be rerun or adjusted without retyping. The history is kept
+across launches beside the recent list, one entry per line in
+`vecgra/studio-history`. At widths below 1,280 logical pixels, the single command rail becomes
 two rows so search, layout, pin, and camera controls remain present at the
 760-pixel minimum instead of clipping or silently disappearing. Text retrieval
 scans properties with a bounded top-K heap rather than materializing every

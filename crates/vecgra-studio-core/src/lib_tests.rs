@@ -1330,3 +1330,35 @@ fn snapshots_find_every_relationship_after_a_checkpointed_database_changes() {
     }
     assert_eq!(snapshot.relationship_counts(), vec![(Arc::from("NEXT"), 3)]);
 }
+
+#[test]
+fn command_history_keeps_the_newest_entries_across_sessions() {
+    let directory =
+        std::env::temp_dir().join(format!("vecgra-studio-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let file = directory.join("nested").join("studio-history");
+    assert_eq!(CommandHistory::load(&file), CommandHistory::default());
+
+    let mut history = CommandHistory::default();
+    assert!(history.remember("  path 0 54 out "));
+    assert!(!history.remember("path 0 54 out"), "a repeat is kept once");
+    assert!(!history.remember("   "));
+    assert!(!history.remember("two\nlines"));
+    assert!(history.remember("codec"));
+    assert!(history.remember("path 0 54 out"));
+    assert_eq!(
+        history.entries(),
+        ["path 0 54 out", "codec", "path 0 54 out"]
+    );
+    history.save(&file).unwrap();
+    assert_eq!(CommandHistory::load(&file), history);
+
+    for index in 0..CommandHistory::LIMIT {
+        history.remember(&format!("node {index}"));
+    }
+    assert_eq!(history.entries().len(), CommandHistory::LIMIT);
+    assert_eq!(history.entries()[0], "node 0");
+    history.save(&file).unwrap();
+    assert_eq!(CommandHistory::load(&file), history);
+    std::fs::remove_dir_all(&directory).unwrap();
+}
