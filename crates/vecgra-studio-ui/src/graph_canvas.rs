@@ -634,6 +634,7 @@ fn prepare_scene(
             snapshot,
             &projected,
             &captions,
+            selected_edge,
             &NodePaintContext {
                 selected: selected_node,
                 dragging: presentation.dragging,
@@ -658,8 +659,9 @@ fn prepare_scene(
     }
 }
 
-/// Chooses which nodes to name on the canvas: the selection and path
-/// endpoints always, then the selection's neighbors by degree, the strongest
+/// Chooses which nodes to name on the canvas: the selection, the selected
+/// relationship's endpoints, and path endpoints always, then the selection's
+/// neighbors by degree, the strongest
 /// search matches, and, when zoomed in to elements with nothing else to
 /// name, the best-connected visible nodes. A name that would overlap one
 /// already placed, or a relationship caption, is skipped, and at most
@@ -668,6 +670,7 @@ fn node_captions(
     snapshot: &SceneSnapshot,
     projected: &[Vec2],
     relationship_captions: &[PaintCaption],
+    selected_edge: Option<usize>,
     context: &NodePaintContext<'_>,
     level: DetailLevel,
 ) -> Vec<PaintNodeCaption> {
@@ -680,6 +683,10 @@ fn node_captions(
     };
     if let Some(selected) = context.selected {
         push(selected, true);
+    }
+    if let Some(edge) = selected_edge {
+        push(snapshot.edges.sources[edge] as usize, true);
+        push(snapshot.edges.targets[edge] as usize, true);
     }
     if let Some(endpoints) = context.path_endpoints {
         push(endpoints.start, true);
@@ -1275,6 +1282,7 @@ mod caption_tests {
             &snapshot,
             &projected,
             &[],
+            None,
             &context(Some(selected), viewport),
             DetailLevel::Communities,
         );
@@ -1310,6 +1318,7 @@ mod caption_tests {
             &snapshot,
             &edge,
             &[],
+            None,
             &context(Some(selected), viewport),
             DetailLevel::Communities,
         );
@@ -1320,6 +1329,7 @@ mod caption_tests {
             &snapshot,
             &projected,
             &[],
+            None,
             &context(None, viewport),
             DetailLevel::Communities,
         );
@@ -1327,6 +1337,27 @@ mod caption_tests {
             unselected.is_empty(),
             "nothing is named at community zoom without a reason"
         );
+
+        let relationship = 0;
+        let ends = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            Some(relationship),
+            &context(None, viewport),
+            DetailLevel::Communities,
+        );
+        let named: Vec<_> = ends.iter().map(|caption| caption.text.clone()).collect();
+        assert_eq!(
+            named,
+            [
+                snapshot.edges.sources[relationship],
+                snapshot.edges.targets[relationship]
+            ]
+            .map(|node| node_caption_text(&snapshot.node_title(node as usize))),
+            "a selected relationship names both of its ends"
+        );
+        assert!(ends.iter().all(|caption| caption.strong));
     }
 
     #[test]
