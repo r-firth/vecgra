@@ -80,6 +80,7 @@ actions!(
         SearchBoxDown,
         CopySelection,
         HideSelection,
+        UndoHide,
         ShowHidden
     ]
 );
@@ -3805,6 +3806,9 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &HideSelection, _, cx| {
                 this.hide_selected(cx);
+            }))
+            .on_action(cx.listener(|this, _: &UndoHide, _, cx| {
+                this.undo_hide(cx);
             }))
             .on_action(cx.listener(|this, _: &ShowHidden, _, cx| {
                 this.show_hidden_nodes(cx);

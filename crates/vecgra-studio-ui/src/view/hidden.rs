@@ -21,6 +21,8 @@ pub(super) struct HiddenScene {
     nodes: usize,
     /// How many of the full scene's relationships are hidden by type.
     relationships: usize,
+    /// What was hidden, in order, so ⌘Z can take back the last.
+    steps: Vec<HideStep>,
 }
 
 impl HiddenScene {
@@ -64,10 +66,17 @@ impl HiddenScene {
 }
 
 /// What an overview row for a hidden label or type brings back.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum HiddenGroup {
     Label(Arc<str>),
     Relationship(Arc<str>),
+}
+
+/// One thing hidden: a node by ID, or a label or type.
+#[derive(Clone, PartialEq)]
+enum HideStep {
+    Node(u64),
+    Group(HiddenGroup),
 }
 
 impl StudioView {
@@ -112,9 +121,7 @@ impl StudioView {
             return;
         };
         let name = status_node_name(&current, index);
-        self.hide_where(&current, |hidden| {
-            hidden.ids.insert(id);
-        });
+        self.hide_where(&current, HideStep::Node(id));
         self.report_hidden(format!("Hid {name}"), cx);
     }
 
@@ -136,9 +143,7 @@ impl StudioView {
             return;
         }
         let label: Arc<str> = label.into();
-        self.hide_where(&current, |hidden| {
-            hidden.labels.insert(label.clone());
-        });
+        self.hide_where(&current, HideStep::Group(HiddenGroup::Label(label.clone())));
         self.report_hidden(
             format!(
                 "Hid {count} {label} node{}",
@@ -166,9 +171,10 @@ impl StudioView {
             return;
         }
         let label: Arc<str> = label.into();
-        self.hide_where(&current, |hidden| {
-            hidden.relationships.insert(label.clone());
-        });
+        self.hide_where(
+            &current,
+            HideStep::Group(HiddenGroup::Relationship(label.clone())),
+        );
         self.report_hidden(
             format!(
                 "Hid {count} {label} relationship{}",
@@ -180,12 +186,12 @@ impl StudioView {
 
     fn report_hidden(&mut self, what: String, cx: &mut Context<Self>) {
         // The status bar's hidden count already says how much is hidden.
-        self.status = format!("{what} · ⇧⌘H shows what is hidden").into();
+        self.status = format!("{what} · ⌘Z undoes").into();
         cx.notify();
     }
 
     /// Adds to what is hidden and shows the scene without it.
-    fn hide_where(&mut self, current: &Arc<SceneSnapshot>, add: impl FnOnce(&mut HiddenElements)) {
+    fn hide_where(&mut self, current: &Arc<SceneSnapshot>, step: HideStep) {
         let overview = self
             .workspace
             .as_ref()
@@ -197,8 +203,20 @@ impl StudioView {
             positions: HashMap::new(),
             nodes: 0,
             relationships: 0,
+            steps: Vec::new(),
         });
-        add(&mut scene.hidden);
+        match &step {
+            HideStep::Node(id) => {
+                scene.hidden.ids.insert(*id);
+            }
+            HideStep::Group(HiddenGroup::Label(label)) => {
+                scene.hidden.labels.insert(label.clone());
+            }
+            HideStep::Group(HiddenGroup::Relationship(label)) => {
+                scene.hidden.relationships.insert(label.clone());
+            }
+        }
+        scene.steps.push(step);
         scene.recount();
         for (index, &id) in current.nodes.ids.iter().enumerate() {
             if scene.hidden.hides(id, &current.nodes.labels[index])
@@ -232,30 +250,55 @@ impl StudioView {
         cx.notify();
     }
 
-    /// Brings back what a hidden label or type hid, nodes where they were;
-    /// anything also hidden another way stays hidden.
+    /// Takes back the last hiding still in effect.
+    pub(super) fn undo_hide(&mut self, cx: &mut Context<Self>) {
+        while let Some(step) = self.hidden.as_mut().and_then(|scene| scene.steps.pop()) {
+            if self.show_again(&step, cx) {
+                return;
+            }
+        }
+        self.status = "Nothing to undo".into();
+        cx.notify();
+    }
+
+    /// Brings back what a hidden label or type hid.
     fn show_hidden_group(&mut self, group: HiddenGroup, cx: &mut Context<Self>) {
+        self.show_again(&HideStep::Group(group), cx);
+    }
+
+    /// Brings back what one step hid, nodes where they were; anything also
+    /// hidden another way stays hidden. Says whether the step was still in
+    /// effect.
+    fn show_again(&mut self, step: &HideStep, cx: &mut Context<Self>) -> bool {
         let Some(current) = self.snapshot().cloned() else {
-            return;
+            return false;
         };
         let Some(scene) = self.hidden.as_mut() else {
-            return;
+            return false;
         };
-        let (removed, what) = match &group {
-            HiddenGroup::Label(label) => {
+        let (removed, what) = match step {
+            HideStep::Node(id) => (
+                scene.hidden.ids.remove(id),
+                scene.full.node_index(*id).map_or_else(
+                    || format!("node {id}"),
+                    |index| status_node_name(&scene.full, index),
+                ),
+            ),
+            HideStep::Group(HiddenGroup::Label(label)) => {
                 (scene.hidden.labels.remove(label), format!("{label} nodes"))
             }
-            HiddenGroup::Relationship(label) => (
+            HideStep::Group(HiddenGroup::Relationship(label)) => (
                 scene.hidden.relationships.remove(label),
                 format!("{label} relationships"),
             ),
         };
         if !removed {
-            return;
+            return false;
         }
+        scene.steps.retain(|other| other != step);
         let (shown, places) = if scene.hidden.is_empty() {
             let Some(scene) = self.hidden.take() else {
-                return;
+                return false;
             };
             (Arc::unwrap_or_clone(scene.full), scene.positions)
         } else {
@@ -268,6 +311,7 @@ impl StudioView {
         self.show_scene(shown, &current, &places);
         self.status = format!("Showing {what} again").into();
         cx.notify();
+        true
     }
 
     /// Overview rows for the hidden node labels, under the labels in view;

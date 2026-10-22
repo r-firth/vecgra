@@ -25,7 +25,8 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("Right click", "A node's actions"),
             ("Tab  Enter", "Walk the inspector by keyboard"),
             ("⇧⌘R", "Release a pinned node"),
-            ("⌫  ⇧⌘H", "Hide, and show what is hidden"),
+            ("⌫  ⌘Z", "Hide, and undo hiding"),
+            ("⇧⌘H", "Show everything hidden"),
         ],
     ),
     (

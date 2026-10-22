@@ -2884,11 +2884,10 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         crate::apply_studio_theme(cx);
-        cx.bind_keys([KeyBinding::new(
-            "backspace",
-            HideSelection,
-            Some("VecgraStudio"),
-        )]);
+        cx.bind_keys([
+            KeyBinding::new("backspace", HideSelection, Some("VecgraStudio")),
+            KeyBinding::new("cmd-z", UndoHide, Some("VecgraStudio")),
+        ]);
     });
     let path = live.path.clone();
     let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
@@ -2926,8 +2925,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.selection, None);
         assert_eq!(view.hidden_count(), 1);
         assert!(
-            view.status
-                .starts_with("Hid 3.rs · ⇧⌘H shows what is hidden"),
+            view.status.starts_with("Hid 3.rs · ⌘Z undoes"),
             "{}",
             view.status
         );
@@ -3032,7 +3030,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert_eq!(view.snapshot().unwrap().node_index(session), None);
         assert_eq!(view.hidden_count(), 1);
         assert!(
-            view.status.starts_with("Hid 1 Session node · ⇧⌘H"),
+            view.status.starts_with("Hid 1 Session node · ⌘Z"),
             "{}",
             view.status
         );
@@ -3118,5 +3116,31 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("backspace");
     view.read_with(&*cx, |view, _| {
         assert_eq!(view.hidden_summary().as_deref(), Some("7 relationships"));
+    });
+
+    // Cmd-Z takes hiding back in the order it happened.
+    let node = view.update_in(cx, |view, window, cx| {
+        let id = view.snapshot().unwrap().nodes.ids[0];
+        view.execute_command(&format!("hide {id}"), window, cx);
+        assert_eq!(
+            view.hidden_summary().as_deref(),
+            Some("1 node · 7 relationships")
+        );
+        id
+    });
+    cx.simulate_keystrokes("cmd-z");
+    view.read_with(&*cx, |view, _| {
+        assert!(view.snapshot().unwrap().node_index(node).is_some());
+        assert_eq!(view.hidden_summary().as_deref(), Some("7 relationships"));
+        assert!(view.status.starts_with("Showing "), "{}", view.status);
+    });
+    cx.simulate_keystrokes("cmd-z");
+    view.read_with(&*cx, |view, _| {
+        assert!(view.hidden.is_none());
+        assert_eq!(view.status.as_ref(), "Showing IMPORTS relationships again");
+    });
+    cx.simulate_keystrokes("cmd-z");
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.status.as_ref(), "Nothing to undo");
     });
 }

@@ -117,8 +117,9 @@ attempt to draw every record as a giant hairball.
    under the overview's relationships the same way. With an overview label
    or type lens on and nothing selected, Backspace hides that label or
    type. Hidden elements stay hidden across reloads and live refresh, and
-   the status bar counts them. Clicking that count, `Shift-Cmd-H`, or
-   `unhide` brings them back where they were, ringed like nodes a reload
+   the status bar counts them. `Cmd-Z` (**Edit > Undo Hide**) takes back
+   the last hiding still in effect. Clicking that count, `Shift-Cmd-H`, or
+   `unhide` brings everything back where it was, ringed like nodes a reload
    adds. Opening another database forgets them.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.

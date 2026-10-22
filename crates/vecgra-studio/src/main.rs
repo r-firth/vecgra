@@ -11,8 +11,8 @@ use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
     CopySelection, ExportView, FitView, FocusSearch, HideSelection, NextSearchResult, OpenDatabase,
     PreviousSearchResult, ReleaseSelected, ReloadDatabase, SearchBoxDown, SearchBoxUp,
-    SelectionBack, SelectionForward, ShowHidden, StudioView, ToggleHelp, ToggleLiveRefresh, ZoomIn,
-    ZoomOut, apply_studio_theme, init_bezel,
+    SelectionBack, SelectionForward, ShowHidden, StudioView, ToggleHelp, ToggleLiveRefresh,
+    UndoHide, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -89,6 +89,8 @@ fn main() {
             KeyBinding::new("backspace", HideSelection, Some("VecgraStudio")),
             KeyBinding::new("delete", HideSelection, Some("VecgraStudio")),
             KeyBinding::new("cmd-shift-h", ShowHidden, Some("VecgraStudio")),
+            // The command box keeps its own Undo, bound deeper in the Input context.
+            KeyBinding::new("cmd-z", UndoHide, Some("VecgraStudio")),
         ]);
         cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
         cx.set_menus(app_menus());
@@ -151,6 +153,11 @@ fn app_menus() -> Vec<Menu> {
             MenuItem::action("Live Refresh", ToggleLiveRefresh),
             MenuItem::separator(),
             MenuItem::action("Export View as SVG…", ExportView),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::action("Undo Hide", UndoHide),
+            MenuItem::separator(),
+            MenuItem::action("Copy Selection as Text", CopySelection),
         ]),
         Menu::new("View").items([
             MenuItem::action("Search", FocusSearch),
