@@ -410,7 +410,7 @@ fn lexical_score(
         };
         let key = read.symbol(property.key).unwrap_or("");
         let weight = match key {
-            "title" | "name" | "headline" | "path" | "tag_name" | "login" => 1.5,
+            key if TITLE_PROPERTY_KEYS.contains(&key) => 1.5,
             "body" | "description" | "message" | "url" => 0.85,
             _ => 0.55,
         };
@@ -584,7 +584,7 @@ impl SearchSignals for SignalScores {
 }
 
 fn preferred_property(read: &ReadGuard<'_>, properties: &[Property]) -> Option<String> {
-    ["title", "name", "headline", "path", "tag_name", "login"]
+    TITLE_PROPERTY_KEYS
         .into_iter()
         .find_map(|key| read.property(properties, key).and_then(searchable_value))
 }

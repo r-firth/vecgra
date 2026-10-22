@@ -1051,3 +1051,189 @@ fn open_arguments_expand_home_strip_quotes_and_resolve_relative_paths() {
             .contains("is a folder")
     );
 }
+
+#[gpui::test]
+fn inspector_lists_connections_and_walks_the_graph(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    view.update(cx, |view, cx| {
+        view.set_selection(Some(SceneSelection::Node(0)));
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("inspector-connections").is_some());
+    assert!(cx.debug_bounds("inspector-node-title").is_some());
+
+    let (snapshot, connections) = view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap().clone();
+        let connections = view.inspector_connections(&snapshot, 0);
+        (snapshot, connections)
+    });
+    // The rendered list and a fresh grouping agree, and a second lookup for
+    // the same node and scene reuses the cached grouping.
+    assert_eq!(*connections, snapshot.node_connections(0, 6));
+    view.read_with(&*cx, |view, _| {
+        assert!(Rc::ptr_eq(
+            &connections,
+            &view.inspector_connections(&snapshot, 0)
+        ));
+    });
+
+    let next = connections
+        .groups
+        .iter()
+        .find(|group| &*group.label == "NEXT" && group.outgoing)
+        .unwrap()
+        .connections[0];
+    let connection_bounds = cx
+        .debug_bounds("inspector-connections")
+        .expect("connections render");
+    assert!(connection_bounds.size.height > px(0.0));
+    view.update_in(cx, |view, window, cx| {
+        view.select_related_node(next.neighbor, Some(next.edge), window, cx);
+        assert_eq!(view.selection, Some(SceneSelection::Node(next.neighbor)));
+        assert!(view.camera_motion.is_moving());
+        assert!(view.status.contains("via NEXT"));
+        let zoom = view.camera.zoom;
+        view.settle_presentation_for_capture();
+        let target = view
+            .workspace
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .position(next.neighbor)
+            .unwrap();
+        assert!((view.camera.center - target).length() < 0.5);
+        assert_eq!(view.camera.zoom, zoom, "walking keeps the zoom");
+    });
+}
+
+#[gpui::test]
+fn inspector_copies_element_ids(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    view.update(cx, |view, cx| {
+        view.set_selection(Some(SceneSelection::Node(5)));
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let id_bounds = cx.debug_bounds("inspector-node-title").unwrap();
+    // The ID sits on the line above the title.
+    cx.simulate_click(
+        point(id_bounds.origin.x + px(12.0), id_bounds.origin.y - px(10.0)),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    assert_eq!(
+        clipboard.and_then(|item| item.text()).as_deref(),
+        Some("node:5")
+    );
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.status.as_ref(), "Copied node:5");
+    });
+}
+
+#[gpui::test]
+fn back_and_forward_retrace_selections_by_id(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let window = cx.add_window(|window, cx| StudioView::new(None, window, cx));
+    window
+        .update(cx, |view, window, cx| {
+            view.execute_command("back", window, cx);
+            assert_eq!(view.status.as_ref(), "No earlier selection");
+
+            view.execute_command("node 3", window, cx);
+            view.execute_command("edge 0", window, cx);
+            view.select_related_node(9, None, window, cx);
+            view.clear_selection(cx);
+            assert_eq!(view.selection, None);
+
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(9)));
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Edge(0)));
+            assert_eq!(view.status.as_ref(), "Back · relationship 0");
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+
+            view.execute_command("forward", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Edge(0)));
+            // Choosing something new discards the forward branch.
+            view.execute_command("node 12", window, cx);
+            view.execute_command("forward", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(12)));
+            assert_eq!(view.status.as_ref(), "No later selection");
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Edge(0)));
+
+            // Elements missing from the scene are skipped rather than
+            // resolved to whatever now has that index.
+            view.selection_back.push(SelectedElement::Node(999_999));
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn inspector_header_buttons_step_through_selection_history(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("node 3", window, cx);
+        view.execute_command("node 7", window, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+
+    let back = cx.debug_bounds("inspector-back").expect("back renders");
+    cx.simulate_click(back.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+        assert!(view.selection_back.is_empty());
+    });
+
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    // With nothing earlier, the button stays inert rather than clearing.
+    let back = cx.debug_bounds("inspector-back").expect("back renders");
+    cx.simulate_click(back.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+    });
+
+    let forward = cx
+        .debug_bounds("inspector-forward")
+        .expect("forward renders");
+    cx.simulate_click(forward.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(7)));
+    });
+}

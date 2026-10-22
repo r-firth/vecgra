@@ -935,6 +935,69 @@ fn workspace_entrances_spring_new_nodes_into_place() {
 }
 
 #[test]
+fn node_connections_group_by_type_and_direction_with_full_counts() {
+    let mut snapshot = SceneSnapshot::demo();
+    // Node 0 gets a self-loop on top of the demo's NEXT and SUPPORTS edges.
+    snapshot.edges.ids.push(10_000);
+    snapshot.edges.sources.push(0);
+    snapshot.edges.targets.push(0);
+    snapshot.edges.labels.push("MENTIONS".into());
+    snapshot.edges.vector_counts.push(0);
+    snapshot.edges.properties.push(Arc::from([]));
+
+    let connections = snapshot.node_connections(0, 1);
+    let incident = snapshot
+        .edges
+        .sources
+        .iter()
+        .zip(&snapshot.edges.targets)
+        .filter(|&(&source, &target)| source == 0 || target == 0)
+        .count();
+    assert_eq!(connections.total, incident);
+    assert_eq!(
+        connections
+            .groups
+            .iter()
+            .map(|group| group.total)
+            .sum::<usize>(),
+        incident
+    );
+    assert!(
+        connections
+            .groups
+            .windows(2)
+            .all(|pair| pair[0].total >= pair[1].total)
+    );
+    assert!(
+        connections
+            .groups
+            .iter()
+            .all(|group| group.connections.len() == 1)
+    );
+    let next_out = connections
+        .groups
+        .iter()
+        .find(|group| &*group.label == "NEXT" && group.outgoing)
+        .unwrap();
+    let edge = next_out.connections[0].edge;
+    assert_eq!(snapshot.edges.sources[edge], 0);
+    assert_eq!(next_out.connections[0].neighbor, 1);
+    let self_loop = connections
+        .groups
+        .iter()
+        .find(|group| &*group.label == "MENTIONS")
+        .unwrap();
+    assert!(self_loop.outgoing);
+    assert_eq!(self_loop.total, 1);
+    assert_eq!(self_loop.connections[0].neighbor, 0);
+
+    assert_eq!(
+        snapshot.node_connections(usize::MAX, 4),
+        NodeConnections::default()
+    );
+}
+
+#[test]
 fn reload_places_a_node_with_several_anchors_between_them() {
     fn scene(node_count: u64, edges: &[(u32, u32)]) -> SceneSnapshot {
         let mut snapshot = SceneSnapshot::demo();
@@ -972,4 +1035,39 @@ fn reload_places_a_node_with_several_anchors_between_them() {
     );
     let entrance = reloaded.entrances[3].unwrap();
     assert!(entrance == presented[0] || entrance == presented[1]);
+}
+
+#[test]
+fn element_titles_prefer_naming_keys_then_first_lines() {
+    let property = |key: &str, value: &str| SceneProperty {
+        key: key.into(),
+        value: Value::String(value.into()),
+    };
+    // Priority follows the key list, not property order.
+    assert_eq!(
+        element_title(&[property("path", "src/lib.rs"), property("name", "lib")]).as_deref(),
+        Some("lib")
+    );
+    assert_eq!(
+        element_title(&[property("command", "cargo test -p vecgra")]).as_deref(),
+        Some("cargo test -p vecgra")
+    );
+    assert_eq!(
+        element_title(&[
+            property("sha", "abc123"),
+            property("message", "\n  Fix the reload race\n\nLonger body"),
+        ])
+        .as_deref(),
+        Some("Fix the reload race")
+    );
+    assert_eq!(element_title(&[property("title", "   ")]), None);
+    let long = "x".repeat(200);
+    let title = element_title(&[property("title", &long)]).unwrap();
+    assert_eq!(title.chars().count(), 120);
+    assert!(title.ends_with('…'));
+
+    let mut snapshot = SceneSnapshot::demo();
+    assert_eq!(&*snapshot.node_title(0), "Context element 0");
+    snapshot.nodes.properties[0] = Arc::from([]);
+    assert_eq!(snapshot.node_title(0), snapshot.nodes.labels[0].clone());
 }

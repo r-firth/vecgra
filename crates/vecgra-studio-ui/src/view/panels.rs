@@ -8,6 +8,9 @@ const TITLE_BAR_PLATFORM_INSET: f32 = 80.0;
 const TITLE_BAR_PLATFORM_INSET: f32 = 12.0;
 const TOOLBAR_GAP: f32 = 8.0;
 const OVERVIEW_SIDEBAR_WIDTH: f32 = 218.0;
+const INSPECTOR_PROPERTY_LIMIT: usize = 24;
+pub(super) const INSPECTOR_CONNECTIONS_PER_GROUP: usize = 6;
+const INSPECTOR_CONNECTION_GROUPS: usize = 8;
 const DETAIL_SIDEBAR_WIDTH: f32 = 306.0;
 
 impl StudioView {
@@ -1118,7 +1121,18 @@ impl StudioView {
 
     pub(super) fn render_inspector(&self, cx: &Context<Self>) -> impl IntoElement {
         let colors = palette();
-        let header = inspector_header_label("INSPECTOR");
+        let header = h_flex()
+            .items_center()
+            .justify_between()
+            .pr_2()
+            .child(inspector_header_label("INSPECTOR"))
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .pt_2()
+                    .child(self.history_button(true, cx))
+                    .child(self.history_button(false, cx)),
+            );
         let content = match (self.snapshot(), self.selection) {
             (Some(snapshot), Some(SceneSelection::Node(index))) => {
                 let properties = snapshot.nodes.properties[index].clone();
@@ -1142,17 +1156,31 @@ impl StudioView {
                         v_flex()
                             .gap_1()
                             .child(
-                                div()
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
                                     .text_xs()
-                                    .text_color(colors.celadon)
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .child(format!("node:{}", snapshot.nodes.ids[index])),
+                                    .child(copyable_id(
+                                        "inspector-copy-node-id",
+                                        format!("node:{node_id}"),
+                                        colors.celadon,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .truncate()
+                                            .child(snapshot.nodes.labels[index].to_string()),
+                                    ),
                             )
                             .child(
                                 div()
+                                    .debug_selector(|| "inspector-node-title".into())
                                     .text_lg()
+                                    .line_height(px(24.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(snapshot.nodes.labels[index].to_string()),
+                                    .child(scene_node_title(snapshot, index).to_string()),
                             )
                             .child(
                                 div()
@@ -1259,15 +1287,36 @@ impl StudioView {
                             }),
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
+                    .child(self.render_node_connections(snapshot, index, cx))
+                    .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
                         v_flex()
                             .gap_2()
                             .child(inspector_label("PROPERTIES"))
+                            .when(properties.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("No node properties"),
+                                )
+                            })
                             .children(
-                                properties.iter().take(24).map(|property| {
-                                    property_row(&property.key, &property.value, cx)
-                                }),
-                            ),
+                                properties
+                                    .iter()
+                                    .take(INSPECTOR_PROPERTY_LIMIT)
+                                    .map(|property| {
+                                        property_row(&property.key, &property.value, cx)
+                                    }),
+                            )
+                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
+                                this.child(more_row(
+                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
+                                    "property",
+                                    "properties",
+                                    cx,
+                                ))
+                            }),
                     )
                     .into_any_element()
             }
@@ -1283,11 +1332,15 @@ impl StudioView {
                         v_flex()
                             .gap_1()
                             .child(
-                                div()
+                                h_flex()
                                     .text_xs()
-                                    .text_color(relationship_color(label))
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .child(format!("edge:{}", snapshot.edges.ids[index])),
+                                    .child(copyable_id(
+                                        "inspector-copy-edge-id",
+                                        format!("edge:{}", snapshot.edges.ids[index]),
+                                        relationship_color(label),
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
@@ -1315,12 +1368,7 @@ impl StudioView {
                         v_flex()
                             .gap_2()
                             .child(inspector_label("DIRECTION"))
-                            .child(endpoint_row(
-                                "FROM",
-                                snapshot.nodes.ids[source],
-                                &snapshot.nodes.labels[source],
-                                cx,
-                            ))
+                            .child(endpoint_row("FROM", source, snapshot, cx))
                             .child(
                                 div()
                                     .pl_2()
@@ -1328,12 +1376,7 @@ impl StudioView {
                                     .text_sm()
                                     .child("↓"),
                             )
-                            .child(endpoint_row(
-                                "TO",
-                                snapshot.nodes.ids[target],
-                                &snapshot.nodes.labels[target],
-                                cx,
-                            )),
+                            .child(endpoint_row("TO", target, snapshot, cx)),
                     )
                     .child(div().h(px(1.0)).bg(cx.theme().border))
                     .child(
@@ -1349,10 +1392,21 @@ impl StudioView {
                                 )
                             })
                             .children(
-                                properties.iter().take(24).map(|property| {
-                                    property_row(&property.key, &property.value, cx)
-                                }),
-                            ),
+                                properties
+                                    .iter()
+                                    .take(INSPECTOR_PROPERTY_LIMIT)
+                                    .map(|property| {
+                                        property_row(&property.key, &property.value, cx)
+                                    }),
+                            )
+                            .when(properties.len() > INSPECTOR_PROPERTY_LIMIT, |this| {
+                                this.child(more_row(
+                                    properties.len() - INSPECTOR_PROPERTY_LIMIT,
+                                    "property",
+                                    "properties",
+                                    cx,
+                                ))
+                            }),
                     )
                     .into_any_element()
             }
@@ -1655,6 +1709,143 @@ impl StudioView {
 }
 
 impl StudioView {
+    fn render_node_connections(
+        &self,
+        snapshot: &Arc<SceneSnapshot>,
+        index: usize,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let connections = self.inspector_connections(snapshot, index);
+        let mut shown_groups = 0;
+        let mut hidden_groups = 0;
+        let mut hidden_in_groups = 0;
+        let mut groups = Vec::new();
+        for group in &connections.groups {
+            if shown_groups == INSPECTOR_CONNECTION_GROUPS {
+                hidden_groups += 1;
+                hidden_in_groups += group.total;
+                continue;
+            }
+            shown_groups += 1;
+            groups.push(group);
+        }
+        v_flex()
+            .debug_selector(|| "inspector-connections".into())
+            .gap_2()
+            .child(
+                h_flex()
+                    .items_center()
+                    .child(inspector_label("CONNECTIONS"))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{} IN VIEW", format_count(connections.total))),
+                    ),
+            )
+            .when(connections.total == 0, |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No relationships in this view"),
+                )
+            })
+            .children(groups.into_iter().map(|group| {
+                let color = relationship_color(&group.label);
+                let arrow = if group.outgoing { "→" } else { "←" };
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .child(div().text_color(color).child(arrow))
+                            .child(
+                                div()
+                                    .text_color(color)
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(group.label.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if group.outgoing { "out" } else { "in" }),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format_count(group.total)),
+                            ),
+                    )
+                    .children(group.connections.iter().map(|connection| {
+                        let neighbor = connection.neighbor;
+                        let edge = connection.edge;
+                        let edge_id = snapshot.edges.ids[edge];
+                        let title = scene_node_title(snapshot, neighbor);
+                        h_flex()
+                            .id(("inspector-connection", edge_id))
+                            .role(Role::Button)
+                            .aria_label(format!(
+                                "Select {} {} node {}",
+                                group.label,
+                                if group.outgoing { "target" } else { "source" },
+                                title
+                            ))
+                            .gap_2()
+                            .items_center()
+                            .ml_3()
+                            .px_1()
+                            .py_0p5()
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .hover(|style| style.bg(cx.theme().sidebar_accent))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_related_node(neighbor, Some(edge), window, cx);
+                            }))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_sm()
+                                    .truncate()
+                                    .child(title.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .max_w(px(96.0))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(snapshot.nodes.labels[neighbor].to_string()),
+                            )
+                    }))
+                    .when(group.total > group.connections.len(), |this| {
+                        this.child(div().ml_3().child(more_row(
+                            group.total - group.connections.len(),
+                            "relationship",
+                            "relationships",
+                            cx,
+                        )))
+                    })
+            }))
+            .when(hidden_groups > 0, |this| {
+                this.child(more_row(
+                    hidden_in_groups,
+                    "relationship",
+                    "relationships",
+                    cx,
+                ))
+            })
+    }
+
     fn render_live_refresh_toggle(&self, cx: &Context<Self>) -> impl IntoElement {
         let colors = palette();
         let (marker, label, color) = if !self.live_refresh {
@@ -1689,6 +1880,53 @@ impl StudioView {
             }))
             .child(marker)
             .child(label)
+    }
+}
+
+impl StudioView {
+    fn history_button(&self, backward: bool, cx: &Context<Self>) -> impl IntoElement {
+        let (id, glyph, label, keystroke, shortcut) = if backward {
+            ("inspector-back", "←", "Back", "⌘[", "Meta+BracketLeft")
+        } else {
+            (
+                "inspector-forward",
+                "→",
+                "Forward",
+                "⌘]",
+                "Meta+BracketRight",
+            )
+        };
+        let enabled = if backward {
+            !self.selection_back.is_empty()
+        } else {
+            !self.selection_forward.is_empty()
+        };
+        div()
+            .id(id)
+            .debug_selector(move || id.into())
+            .role(Role::Button)
+            .aria_label(label)
+            .aria_keyshortcuts(shortcut)
+            .size(px(22.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .text_sm()
+            .text_color(if enabled {
+                cx.theme().foreground
+            } else {
+                cx.theme().muted_foreground.opacity(0.45)
+            })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.navigate_selection_history(backward, window, cx);
+                    }))
+            })
+            .tooltip(move |window, cx| Tooltip::with_keystroke(label, keystroke, window, cx))
+            .child(glyph)
     }
 }
 
@@ -1800,19 +2038,7 @@ fn path_endpoint_card_data(
 }
 
 fn scene_node_title(snapshot: &SceneSnapshot, index: usize) -> Arc<str> {
-    const PREFERRED_KEYS: [&str; 6] = ["title", "name", "headline", "path", "tag_name", "login"];
-    snapshot.nodes.properties[index]
-        .iter()
-        .find_map(|property| {
-            PREFERRED_KEYS
-                .contains(&property.key.as_ref())
-                .then_some(&property.value)
-        })
-        .and_then(|value| match value {
-            PropertyValue::String(value) if !value.is_empty() => Some(value.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| snapshot.nodes.labels[index].clone())
+    snapshot.node_title(index)
 }
 
 pub(super) const fn path_direction_label(direction: PathDirection) -> &'static str {
@@ -2012,13 +2238,27 @@ fn inspector_label(label: &'static str) -> impl IntoElement {
 
 fn endpoint_row(
     direction: &'static str,
-    id: u64,
-    label: &str,
+    index: usize,
+    snapshot: &SceneSnapshot,
     cx: &Context<StudioView>,
 ) -> impl IntoElement {
+    let id = snapshot.nodes.ids[index];
     h_flex()
+        .id(("inspector-endpoint", id))
+        .role(Role::Button)
+        .aria_label(format!(
+            "Select {} endpoint node {id}",
+            direction.to_lowercase()
+        ))
         .gap_2()
         .items_center()
+        .p_1()
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().sidebar_accent))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.select_related_node(index, None, window, cx);
+        }))
         .child(
             div()
                 .w(px(42.0))
@@ -2030,16 +2270,64 @@ fn endpoint_row(
         )
         .child(
             v_flex()
+                .min_w_0()
                 .gap_0p5()
-                .child(div().text_sm().child(label.to_string()))
+                .child(
+                    div()
+                        .text_sm()
+                        .truncate()
+                        .child(scene_node_title(snapshot, index).to_string()),
+                )
                 .child(
                     div()
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{id}")),
+                        .truncate()
+                        .child(format!("node:{id} · {}", snapshot.nodes.labels[index])),
                 ),
         )
+}
+
+fn copyable_id(
+    element_id: &'static str,
+    text: String,
+    color: gpui::Hsla,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    let copied = text.clone();
+    div()
+        .id(element_id)
+        .role(Role::Button)
+        .aria_label(format!("Copy {text}"))
+        .flex_shrink_0()
+        .rounded(px(3.0))
+        .cursor_pointer()
+        .text_color(color)
+        .hover(|style| style.underline())
+        .tooltip(|window, cx| Tooltip::text("Copy ID", window, cx))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(copied.clone()));
+            this.status = format!("Copied {copied}").into();
+            cx.notify();
+        }))
+        .child(text)
+}
+
+fn more_row(
+    hidden: usize,
+    singular: &'static str,
+    plural: &'static str,
+    cx: &Context<StudioView>,
+) -> impl IntoElement {
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(format!(
+            "+{} more {}",
+            format_count(hidden),
+            if hidden == 1 { singular } else { plural }
+        ))
 }
 
 fn property_row(key: &str, value: &PropertyValue, cx: &Context<StudioView>) -> impl IntoElement {

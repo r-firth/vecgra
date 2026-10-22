@@ -54,7 +54,14 @@ attempt to draw every record as a giant hairball.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout.
 4. Select a node or relationship and inspect its label, properties, vectors,
-   neighbors, and provenance without losing the current view.
+   neighbors, and provenance without losing the current view. A node's
+   heading is its title, name, or path when it has one. Its relationships in
+   the current view are grouped by type and direction; choosing a neighbor,
+   or either endpoint of a selected relationship, selects it and springs the
+   camera to it at the current zoom, so the inspector can walk the graph.
+   `Cmd-[` and `Cmd-]` (or `back` and `forward`) retrace those steps by
+   element ID, skipping anything a reload removed. Clicking an element ID
+   copies it.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.

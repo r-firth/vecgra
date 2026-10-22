@@ -152,6 +152,69 @@ pub struct SceneSnapshot {
     pub sampled: bool,
 }
 
+/// Property keys that name an element, in priority order.
+pub const TITLE_PROPERTY_KEYS: [&str; 8] = [
+    "title", "name", "headline", "path", "command", "tag_name", "login", "key",
+];
+
+/// Descriptive keys that title an element only when nothing names it, such
+/// as a commit or an error that carries just a message.
+pub const FALLBACK_TITLE_PROPERTY_KEYS: [&str; 3] = ["message", "summary", "description"];
+
+/// The most specific human-readable name in an element's properties: the
+/// first non-empty string under a naming key, else the first line of a
+/// descriptive one, truncated to a heading's length.
+pub fn element_title(properties: &[SceneProperty]) -> Option<Arc<str>> {
+    const LIMIT: usize = 120;
+    TITLE_PROPERTY_KEYS
+        .iter()
+        .chain(&FALLBACK_TITLE_PROPERTY_KEYS)
+        .find_map(|key| {
+            properties
+                .iter()
+                .find(|property| &*property.key == *key)
+                .and_then(|property| match &property.value {
+                    Value::String(value) => {
+                        let line = value.lines().map(str::trim).find(|line| !line.is_empty())?;
+                        if line.len() == value.len() && line.chars().count() <= LIMIT {
+                            Some(value.clone())
+                        } else if line.chars().count() <= LIMIT {
+                            Some(Arc::from(line))
+                        } else {
+                            let mut short: String = line.chars().take(LIMIT - 1).collect();
+                            short.push('…');
+                            Some(Arc::from(short))
+                        }
+                    }
+                    _ => None,
+                })
+        })
+}
+
+/// One relationship incident to an inspected node, by scene index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NodeConnection {
+    pub edge: usize,
+    pub neighbor: usize,
+}
+
+/// A node's relationships of one type and direction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectionGroup {
+    pub label: Arc<str>,
+    pub outgoing: bool,
+    /// Every matching relationship in the scene, including any beyond the
+    /// listed `connections`.
+    pub total: usize,
+    pub connections: Vec<NodeConnection>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NodeConnections {
+    pub groups: Vec<ConnectionGroup>,
+    pub total: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SceneSelection {
     Node(usize),
@@ -647,6 +710,70 @@ impl SceneSnapshot {
         snapshot.sampled = snapshot.nodes.ids.len() < snapshot.source_stats.nodes
             || snapshot.edges.ids.len() < snapshot.source_stats.edges;
         Ok(Some(snapshot))
+    }
+
+    /// The node's title (see [`element_title`]), or its label.
+    pub fn node_title(&self, index: usize) -> Arc<str> {
+        element_title(&self.nodes.properties[index])
+            .unwrap_or_else(|| self.nodes.labels[index].clone())
+    }
+
+    /// Groups a node's incident relationships in this scene by type and
+    /// direction for inspection. Groups are ordered by size, then label, with
+    /// outgoing before incoming; each keeps at most `per_group` connections
+    /// in relationship-ID order but reports its full count. A self-loop is
+    /// listed once, as outgoing.
+    pub fn node_connections(&self, index: usize, per_group: usize) -> NodeConnections {
+        let mut groups: Vec<ConnectionGroup> = Vec::new();
+        let mut group_by_key: HashMap<(Arc<str>, bool), usize> = HashMap::new();
+        let mut total = 0;
+        for (edge, (&source, &target)) in self
+            .edges
+            .sources
+            .iter()
+            .zip(&self.edges.targets)
+            .enumerate()
+        {
+            let (source, target) = (source as usize, target as usize);
+            let (outgoing, neighbor) = if source == index {
+                (true, target)
+            } else if target == index {
+                (false, source)
+            } else {
+                continue;
+            };
+            total += 1;
+            let label = self.edges.labels[edge].clone();
+            let group = *group_by_key
+                .entry((label.clone(), outgoing))
+                .or_insert_with(|| {
+                    groups.push(ConnectionGroup {
+                        label,
+                        outgoing,
+                        total: 0,
+                        connections: Vec::new(),
+                    });
+                    groups.len() - 1
+                });
+            let group = &mut groups[group];
+            group.total += 1;
+            if group.connections.len() < per_group {
+                group.connections.push(NodeConnection { edge, neighbor });
+            }
+        }
+        for group in &mut groups {
+            group
+                .connections
+                .sort_unstable_by_key(|connection| self.edges.ids[connection.edge]);
+        }
+        groups.sort_by(|left, right| {
+            right
+                .total
+                .cmp(&left.total)
+                .then_with(|| left.label.cmp(&right.label))
+                .then_with(|| right.outgoing.cmp(&left.outgoing))
+        });
+        NodeConnections { groups, total }
     }
 
     /// Returns a deterministic, bounded one-hop context for a selected graph

@@ -26,9 +26,10 @@ use gpui_component::{
 use vecgra_studio_core::{
     Camera, CameraMotion, DatabaseFingerprint, DetailLevel, EvidenceNode, EvidencePathReport,
     EvidencePathStrategy, EvidencePathTermination, GraphWorkspace, LayoutKind, LayoutOptions,
-    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, PathDirection, PropertyValue, Rect, ReloadedScene,
-    SceneDelta, SceneSelection, SceneSnapshot, SearchMode, SearchReport, SnapshotOptions, Vec2,
-    detail_level, evidence_path_database, hit_test_edges, hit_test_positions, search_database,
+    MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue, Rect,
+    ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode, SearchReport,
+    SnapshotOptions, Vec2, detail_level, evidence_path_database, hit_test_edges,
+    hit_test_positions, search_database,
 };
 
 mod bezel_controls;
@@ -64,9 +65,14 @@ actions!(
         PreviousSearchResult,
         ReloadDatabase,
         ToggleLiveRefresh,
-        OpenDatabase
+        OpenDatabase,
+        SelectionBack,
+        SelectionForward
     ]
 );
+
+/// How many earlier selections Back can return to.
+const SELECTION_HISTORY_LIMIT: usize = 64;
 
 /// How often live refresh checks the database file for new commits. Only file
 /// metadata is read on each tick; the database is reopened when it changes.
@@ -263,7 +269,7 @@ fn interpolate_scores(from: &[f32], target: &[f32], mix: f32) -> Arc<[f32]> {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectedElement {
     Node(u64),
     Edge(u64),
@@ -343,6 +349,16 @@ fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
     format!("{prefix} · {}{suffix}", parts.join(" · "))
 }
 
+/// The selected node's grouped relationships. Grouping scans every scene
+/// edge, so it runs once per selection and scene rather than once per frame;
+/// holding the scene's `Arc` makes the identity check immune to reuse of a
+/// freed snapshot's address.
+struct ConnectionCache {
+    snapshot: Arc<SceneSnapshot>,
+    node: usize,
+    connections: Rc<NodeConnections>,
+}
+
 type ReadyCallback = Box<dyn FnOnce(&mut Window, &mut Context<StudioView>)>;
 
 pub struct StudioView {
@@ -371,6 +387,9 @@ pub struct StudioView {
     bezel_release_focus: FocusHandle,
     bezel_overview_focus: FocusHandle,
     inspector_scroll_handle: ScrollHandle,
+    connection_cache: RefCell<Option<ConnectionCache>>,
+    selection_back: Vec<SelectedElement>,
+    selection_forward: Vec<SelectedElement>,
     generation: u64,
     load_task: Option<Task<()>>,
     fingerprint: Option<DatabaseFingerprint>,
@@ -466,6 +485,9 @@ impl StudioView {
             bezel_release_focus,
             bezel_overview_focus,
             inspector_scroll_handle: ScrollHandle::new(),
+            connection_cache: RefCell::new(None),
+            selection_back: Vec::new(),
+            selection_forward: Vec::new(),
             generation: 0,
             load_task: None,
             fingerprint: None,
@@ -694,6 +716,8 @@ impl StudioView {
         }
         self.retire_transient_presentation();
         self.set_selection(None);
+        self.selection_back.clear();
+        self.selection_forward.clear();
         if self.database_path.is_none() {
             self.live_refresh = live_refresh_default();
         }
@@ -751,6 +775,65 @@ impl StudioView {
             return;
         };
         self.open_database(path, window, cx);
+    }
+
+    fn inspector_connections(
+        &self,
+        snapshot: &Arc<SceneSnapshot>,
+        node: usize,
+    ) -> Rc<NodeConnections> {
+        let mut cache = self.connection_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref()
+            && cached.node == node
+            && Arc::ptr_eq(&cached.snapshot, snapshot)
+        {
+            return cached.connections.clone();
+        }
+        let connections =
+            Rc::new(snapshot.node_connections(node, panels::INSPECTOR_CONNECTIONS_PER_GROUP));
+        *cache = Some(ConnectionCache {
+            snapshot: snapshot.clone(),
+            node,
+            connections: connections.clone(),
+        });
+        connections
+    }
+
+    /// Walks the graph from the inspector: selects a related node and springs
+    /// the camera to it at the current zoom, so the canvas follows along.
+    fn select_related_node(
+        &mut self,
+        index: usize,
+        via_edge: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(snapshot) = self.snapshot().cloned() else {
+            return;
+        };
+        if index >= snapshot.nodes.ids.len() {
+            return;
+        }
+        self.set_selection(Some(SceneSelection::Node(index)));
+        if let Some(position) = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.borrow().position(index))
+        {
+            self.camera_motion.retarget(Camera {
+                center: position,
+                zoom: self.camera.zoom,
+            });
+        }
+        self.status = match via_edge {
+            Some(edge) => format!(
+                "Selected node {} · via {} {}",
+                snapshot.nodes.ids[index], snapshot.edges.labels[edge], snapshot.edges.ids[edge]
+            ),
+            None => format!("Selected node {}", snapshot.nodes.ids[index]),
+        }
+        .into();
+        self.begin_presentation_motion(window, cx);
     }
 
     /// Rereads the open database and swaps in the new scene without moving
@@ -1097,11 +1180,118 @@ impl StudioView {
         }
     }
 
+    /// Every selection change goes through here. Leaving an element records
+    /// it for Back, by ID so the history survives reloads, and a new
+    /// direction clears Forward the way a browser does.
     fn set_selection(&mut self, selection: Option<SceneSelection>) {
         if self.selection != selection {
             self.inspector_scroll_handle.set_offset(Default::default());
+            let previous = self.selected_element(self.selection);
+            if previous.is_some() && previous != self.selected_element(selection) {
+                self.selection_back.extend(previous);
+                if self.selection_back.len() > SELECTION_HISTORY_LIMIT {
+                    self.selection_back.remove(0);
+                }
+                self.selection_forward.clear();
+            }
         }
         self.selection = selection;
+    }
+
+    fn selected_element(&self, selection: Option<SceneSelection>) -> Option<SelectedElement> {
+        let snapshot = self.snapshot()?;
+        match selection? {
+            SceneSelection::Node(index) => snapshot
+                .nodes
+                .ids
+                .get(index)
+                .copied()
+                .map(SelectedElement::Node),
+            SceneSelection::Edge(index) => snapshot
+                .edges
+                .ids
+                .get(index)
+                .copied()
+                .map(SelectedElement::Edge),
+        }
+    }
+
+    /// Steps through selection history. Elements that are no longer in the
+    /// scene, for example after a reload removed them, are skipped.
+    fn navigate_selection_history(
+        &mut self,
+        backward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(snapshot) = self.snapshot().cloned() else {
+            return;
+        };
+        let current = self.selected_element(self.selection);
+        loop {
+            let next = if backward {
+                self.selection_back.pop()
+            } else {
+                self.selection_forward.pop()
+            };
+            let Some(element) = next else {
+                self.status = if backward {
+                    "No earlier selection".into()
+                } else {
+                    "No later selection".into()
+                };
+                cx.notify();
+                return;
+            };
+            let resolved = match element {
+                SelectedElement::Node(id) => snapshot.node_index(id).map(SceneSelection::Node),
+                SelectedElement::Edge(id) => snapshot.edge_index(id).map(SceneSelection::Edge),
+            };
+            let Some(selection) = resolved else {
+                continue;
+            };
+            if let Some(current) = current {
+                if backward {
+                    self.selection_forward.push(current);
+                } else {
+                    self.selection_back.push(current);
+                }
+            }
+            self.inspector_scroll_handle.set_offset(Default::default());
+            self.selection = Some(selection);
+            let focus = match selection {
+                SceneSelection::Node(index) => vec![index],
+                SceneSelection::Edge(index) => vec![
+                    snapshot.edges.sources[index] as usize,
+                    snapshot.edges.targets[index] as usize,
+                ],
+            };
+            if let Some(workspace) = self.workspace.as_ref() {
+                let workspace = workspace.borrow();
+                let points: Vec<_> = focus
+                    .iter()
+                    .filter_map(|&index| workspace.position(index))
+                    .collect();
+                if !points.is_empty() {
+                    self.camera_motion.retarget(Camera {
+                        center: Rect::from_points(&points).center(),
+                        zoom: self.camera.zoom,
+                    });
+                }
+            }
+            self.status = match element {
+                SelectedElement::Node(id) => {
+                    format!("{} · node {id}", if backward { "Back" } else { "Forward" })
+                }
+                SelectedElement::Edge(id) => format!(
+                    "{} · relationship {id}",
+                    if backward { "Back" } else { "Forward" }
+                ),
+            }
+            .into();
+            self.begin_presentation_motion(window, cx);
+            return;
+        }
     }
 
     fn begin_presentation_motion(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -2363,6 +2553,8 @@ impl StudioView {
             }
             Some("clear") => self.clear_selection(cx),
             Some("reload") | Some("refresh") => self.reload(window, cx),
+            Some("back") => self.navigate_selection_history(true, window, cx),
+            Some("forward") => self.navigate_selection_history(false, window, cx),
             Some("open") => {
                 let argument = query.trim_start()["open".len()..].trim();
                 if argument.is_empty() {
@@ -2722,6 +2914,12 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &OpenDatabase, window, cx| {
                 this.prompt_open_database(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SelectionBack, window, cx| {
+                this.navigate_selection_history(true, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SelectionForward, window, cx| {
+                this.navigate_selection_history(false, window, cx);
             }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.on_external_paths_dropped(paths, window, cx);
