@@ -47,19 +47,16 @@ impl HiddenScene {
 
     /// "45 nodes", "117 relationships" or both, for the status bar.
     pub(super) fn summary(&self) -> String {
-        let plural = |count: usize, one: &str, many: &str| {
-            format!(
-                "{} {}",
-                panels::format_count(count),
-                if count == 1 { one } else { many }
-            )
-        };
         let mut parts = Vec::new();
         if self.nodes > 0 {
-            parts.push(plural(self.nodes, "node", "nodes"));
+            parts.push(panels::counted(self.nodes, "node", "nodes"));
         }
         if self.relationships > 0 {
-            parts.push(plural(self.relationships, "relationship", "relationships"));
+            parts.push(panels::counted(
+                self.relationships,
+                "relationship",
+                "relationships",
+            ));
         }
         parts.join(" · ")
     }

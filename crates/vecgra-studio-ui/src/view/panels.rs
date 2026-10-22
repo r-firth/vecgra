@@ -1873,8 +1873,8 @@ impl StudioView {
             .font_family(cx.theme().mono_font_family.clone())
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(format!("{} nodes", format_count(nodes)))
-            .child(format!("{} edges", format_count(edges)))
+            .child(counted(nodes, "node", "nodes"))
+            .child(counted(edges, "relationship", "relationships"))
             .when(sampled, |this| this.child("sampled"))
             .child(format!(
                 "{} layout",
@@ -1905,8 +1905,17 @@ impl StudioView {
             .when(self.database_path.is_some(), |this| {
                 this.child(self.render_live_refresh_toggle(cx))
             })
-            .child(div().flex_1())
-            .child(self.status.clone())
+            // The status message gives way first in a narrow window, so the
+            // timing and help button stay in view.
+            .child(
+                h_flex().flex_1().min_w_0().justify_end().child(
+                    div()
+                        .debug_selector(|| "status-message".into())
+                        .min_w_0()
+                        .truncate()
+                        .child(self.status.clone()),
+                ),
+            )
             .when_some(self.load_ms, |this, load_ms| {
                 this.child(format!("{load_ms:.1} ms load+layout"))
             })
@@ -3316,6 +3325,15 @@ pub(super) fn format_count(value: usize) -> String {
         output.push(character);
     }
     output
+}
+
+/// "1 node", "1,204 relationships": a count with its noun.
+pub(super) fn counted(count: usize, one: &str, many: &str) -> String {
+    format!(
+        "{} {}",
+        format_count(count),
+        if count == 1 { one } else { many }
+    )
 }
 
 pub(super) fn visible_facet_counts(

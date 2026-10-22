@@ -622,9 +622,19 @@ fn toolbar_reflows_without_clipping_at_the_minimum_window_width(cx: &mut TestApp
 
     cx.simulate_resize(size(px(760.0), px(520.0)));
     cx.run_until_parked();
+    view.update(cx, |view, _| {
+        view.status =
+            "Hid 117 READ relationships · ⌘Z undoes · and a long tail that cannot fit".into();
+    });
     cx.update(|window, cx| {
         _ = window.draw(cx);
     });
+
+    // A long status message is cut short rather than pushing the help button
+    // out of the window.
+    let help = cx.debug_bounds("help-toggle").unwrap();
+    assert!(help.right() <= px(760.0), "{help:?}");
+    assert!(cx.debug_bounds("status-message").unwrap().right() <= help.left());
 
     let primary = cx
         .debug_bounds("compact-toolbar-primary")
