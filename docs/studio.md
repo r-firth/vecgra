@@ -207,7 +207,9 @@ preserve that destination-ready state, and both endpoint markers remain on the
 canvas while background search is pending. Escape or Overview cancels the
 draft. These are ordinary focusable buttons, so the workflow does not depend
 on pointer precision, color recognition, or a panel that disappears at the
-760-pixel minimum.
+760-pixel minimum. As a pointer shortcut, Shift-clicking a node traces the path
+to it straight away: from the chosen origin while one is set, otherwise from
+the selected node.
 
 `path-start <node> [both|out|in] [max-hops]` drives the same state for the
 command box and screenshot runner.

@@ -19,6 +19,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
         "Selection",
         &[
             ("⌘[  ⌘]", "Back and forward"),
+            ("⇧ click", "Trace a path from the selection"),
             ("⇧⌘R", "Release a pinned node"),
         ],
     ),

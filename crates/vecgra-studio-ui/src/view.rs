@@ -1927,6 +1927,32 @@ impl StudioView {
         cx.notify();
     }
 
+    /// Shift-click: traces an exact path from the selected node, or from a
+    /// path origin already chosen, to `index`. Returns false, leaving the
+    /// click to select as usual, when there is nothing to trace from.
+    fn trace_path_from_selection(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !matches!(self.path_state, PathState::ChoosingEnd(_)) {
+            let Some(start) = self.selection.and_then(SceneSelection::node) else {
+                return false;
+            };
+            if start == index {
+                return false;
+            }
+            self.choose_path_start(start, window, cx);
+        }
+        if self.path_query_to_node(index).is_none() {
+            // No database to trace in; choosing the origin said so.
+            return true;
+        }
+        self.trace_path_to_node(index, window, cx);
+        true
+    }
+
     fn trace_path_to_node(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(query) = self.path_query_to_node(index) else {
             return;
@@ -2489,6 +2515,11 @@ impl StudioView {
             )
         };
         if let Some(index) = hit {
+            if event.modifiers.shift && self.trace_path_from_selection(index, window, cx) {
+                self.drag = None;
+                cx.stop_propagation();
+                return;
+            }
             if event.click_count >= 2 {
                 self.drag = None;
                 self.focus_node_context(index, window, cx);

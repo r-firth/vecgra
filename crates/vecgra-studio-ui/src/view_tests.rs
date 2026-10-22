@@ -1006,6 +1006,63 @@ fn nodes_a_reload_adds_are_ringed_until_they_fade(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn shift_click_traces_a_path_from_the_selection(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("shift-path");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let end_point = view.update(cx, |view, _| {
+        assert!(view.is_ready(), "{}", view.status);
+        view.settle_presentation_for_capture();
+        let snapshot = view.snapshot().unwrap().clone();
+        let start = snapshot.node_index(live.files[0]).unwrap();
+        let end = snapshot.node_index(live.files[3]).unwrap();
+        view.set_selection(Some(SceneSelection::Node(start)));
+        let bounds = view.canvas_bounds.unwrap();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let local = view.camera.project(
+            view.workspace
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .position(end)
+                .unwrap(),
+            view.world_bounds,
+            viewport,
+        );
+        bounds.origin + point(px(local.x), px(local.y))
+    });
+
+    cx.simulate_click(end_point, Modifiers::shift());
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        let steps = report
+            .path
+            .as_ref()
+            .expect("the files are linked")
+            .steps
+            .len();
+        assert_eq!(
+            (report.start.id, report.end.id),
+            (live.files[0], live.files[3])
+        );
+        assert_eq!(steps, 3);
+        assert!(view.drag.is_none());
+    });
+}
+
+#[gpui::test]
 fn live_refresh_applies_new_commits_and_waits_while_a_lens_is_active(cx: &mut TestAppContext) {
     let live = LiveDatabase::new("live");
     let window = open_live_window(cx, &live.path);
