@@ -279,6 +279,13 @@ fn enter_routes_to_a_ready_path_destination(cx: &mut TestAppContext) {
         );
         assert!(!view.context_focus_active);
     });
+    // While it is traced, or once it fails, the path names its ends as a
+    // found path does.
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    assert!(cx.debug_bounds("path-endpoint:from").is_some());
+    assert!(cx.debug_bounds("path-endpoint:to").is_some());
 }
 
 #[gpui::test]

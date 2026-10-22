@@ -361,6 +361,38 @@ impl StudioView {
         }
     }
 
+    /// The ends of a path being traced, or that could not be, as the cards a
+    /// found path shows them; by ID when the scene does not hold them.
+    fn pending_path_ends(&self, start: u64, end: u64, cx: &Context<Self>) -> gpui::AnyElement {
+        let card = |role, id, color| {
+            let snapshot = self.snapshot()?;
+            let index = snapshot.node_index(id)?;
+            Some(
+                path_endpoint_card_data(
+                    role,
+                    id,
+                    &snapshot.nodes.labels[index],
+                    &scene_node_title(snapshot, index),
+                    color,
+                    cx,
+                )
+                .into_any_element(),
+            )
+        };
+        match (
+            card("FROM", start, palette().celadon),
+            card("TO", end, palette().copper),
+        ) {
+            (Some(from), Some(to)) => v_flex().gap_2().child(from).child(to).into_any_element(),
+            _ => div()
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("node:{start}  →  node:{end}"))
+                .into_any_element(),
+        }
+    }
+
     pub(super) fn render_evidence_path(&self, cx: &Context<Self>) -> gpui::AnyElement {
         match &self.path_state {
             PathState::Idle => div().into_any_element(),
@@ -568,13 +600,7 @@ impl StudioView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child("Tracing exact evidence path"),
                 )
-                .child(
-                    div()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{start}  →  node:{end}")),
-                )
+                .child(self.pending_path_ends(*start, *end, cx))
                 .child(
                     div()
                         .text_xs()
@@ -594,13 +620,7 @@ impl StudioView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child("Could not trace evidence path"),
                 )
-                .child(
-                    div()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("node:{start}  →  node:{end}")),
-                )
+                .child(self.pending_path_ends(*start, *end, cx))
                 .child(
                     div()
                         .text_xs()
