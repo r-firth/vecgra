@@ -149,12 +149,32 @@ enum PathState {
     },
 }
 
+impl ContextSummary {
+    fn counts(&self) -> String {
+        format!(
+            "{} direct · {} two-hop · {}",
+            self.direct,
+            self.indirect,
+            panels::counted(self.relationships, "relationship", "relationships")
+        )
+    }
+}
+
 /// Stepping through earlier commands from the command box.
 struct HistoryBrowse {
     /// The entry in the box.
     index: usize,
     /// What was in the box before the first step back.
     draft: String,
+}
+
+/// What a 2-hop context holds, for the heading of its tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ContextSummary {
+    node: u64,
+    direct: usize,
+    indirect: usize,
+    relationships: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -632,6 +652,8 @@ pub struct StudioView {
     camera_motion: CameraMotion,
     saved_overview_camera: Option<Camera>,
     context_focus_active: bool,
+    /// The last context laid out; shown only while `context_focus_active`.
+    context_summary: Option<ContextSummary>,
     active_facet: Option<FacetLens>,
     lens: Option<LensTransition>,
     world_bounds: Rect,
@@ -772,6 +794,7 @@ impl StudioView {
             camera_motion: CameraMotion::new(Camera::default()),
             saved_overview_camera: None,
             context_focus_active: false,
+            context_summary: None,
             active_facet: None,
             lens: None,
             world_bounds,
@@ -2538,12 +2561,17 @@ impl StudioView {
         if let Some(target) = focus_bounds.and_then(|focus| self.framing(focus, 112.0, 1.4..=9.0)) {
             self.camera_motion.retarget(target);
         }
-        let direct = focus.layers.get(1).map_or(0, Vec::len);
-        let indirect = focus.layers.get(2).map_or(0, Vec::len);
+        let summary = ContextSummary {
+            node: snapshot.nodes.ids[index],
+            direct: focus.layers.get(1).map_or(0, Vec::len),
+            indirect: focus.layers.get(2).map_or(0, Vec::len),
+            relationships: focus.edges.len(),
+        };
+        self.context_summary = Some(summary);
         self.status = format!(
-            "Context · node {} · {direct} direct · {indirect} two-hop · {} relationships · Esc restores overview",
-            snapshot.nodes.ids[index],
-            focus.edges.len()
+            "Context · {} · {} · Esc restores overview",
+            status_node_name(&snapshot, index),
+            summary.counts()
         )
         .into();
         self.begin_presentation_motion(window, cx);

@@ -592,7 +592,14 @@ fn double_click_opens_a_reversible_two_hop_context_without_starting_a_drag(
             assert_eq!(view.selection, Some(SceneSelection::Node(7)));
             assert!(view.context_focus_active);
             assert!(view.drag.is_none());
+            // The status names the node, as the context tab's heading does.
+            assert!(
+                view.status.starts_with("Context · Context element 7 · "),
+                "{}",
+                view.status
+            );
             assert!(view.status.contains("two-hop"));
+            assert_eq!(view.context_summary.map(|summary| summary.node), Some(7));
 
             view.settle_presentation_for_capture();
             assert_ne!(

@@ -235,6 +235,9 @@ impl StudioView {
             .when(showing_path, |this| {
                 this.child(self.render_evidence_path(cx))
             })
+            .when(showing_context, |this| {
+                this.children(self.render_context_heading(cx))
+            })
             .when(!showing_search && !showing_path, |this| {
                 this.child(section_label(
                     "RELATIONSHIPS",
@@ -428,6 +431,46 @@ impl StudioView {
                         .children(self.hidden_label_rows(cx)),
                 )
             })
+    }
+
+    /// The node a 2-hop context is around, and what the context holds.
+    fn render_context_heading(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        let summary = self.context_summary?;
+        let snapshot = self.snapshot()?;
+        let index = snapshot.node_index(summary.node)?;
+        Some(
+            v_flex()
+                .debug_selector(|| "context-heading".into())
+                .px_4()
+                .pt_3()
+                .pb_1()
+                .gap_0p5()
+                .child(
+                    title_line(&snapshot.node_title(index), cx)
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "{} direct · {} two-hop",
+                            summary.direct, summary.indirect
+                        )),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(counted(
+                            summary.relationships,
+                            "relationship",
+                            "relationships",
+                        )),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Rows above the search results for the node and relationship a bare
