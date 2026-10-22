@@ -583,10 +583,24 @@ impl SearchSignals for SignalScores {
     }
 }
 
+/// The element's name, chosen as the scene's [`element_title`] chooses it, so
+/// that search results and evidence paths call it what the canvas does.
 fn preferred_property(read: &ReadGuard<'_>, properties: &[Property]) -> Option<String> {
     TITLE_PROPERTY_KEYS
         .into_iter()
         .find_map(|key| read.property(properties, key).and_then(searchable_value))
+        .or_else(|| {
+            FALLBACK_TITLE_PROPERTY_KEYS.into_iter().find_map(|key| {
+                match read.property(properties, key)? {
+                    Value::String(value) => value
+                        .lines()
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .map(str::to_owned),
+                    _ => None,
+                }
+            })
+        })
 }
 
 fn secondary_property(

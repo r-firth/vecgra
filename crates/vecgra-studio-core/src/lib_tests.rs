@@ -1073,6 +1073,60 @@ fn element_titles_prefer_naming_keys_then_first_lines() {
 }
 
 #[test]
+fn search_and_paths_name_message_only_nodes_by_their_first_line() {
+    let file = TestFile::new();
+    let database = create_test_database(&file);
+    let mut transaction = database.transaction();
+    let source = transaction.create_node(
+        "File",
+        [("path", Value::String("src/reload.rs".into()))],
+        &[],
+    );
+    let commit = transaction.create_node(
+        "Commit",
+        [
+            ("sha", Value::String("abc123".into())),
+            (
+                "message",
+                Value::String("\n  Fix the reload race\n\nLonger body".into()),
+            ),
+        ],
+        &[],
+    );
+    transaction.create_edge(
+        commit,
+        source,
+        "CHANGED",
+        std::iter::empty::<(&str, Value)>(),
+        &[],
+    );
+    transaction.commit().unwrap();
+
+    let report = search_database_with(
+        &file.0,
+        "reload race",
+        SearchMode::Text,
+        "test",
+        8,
+        |dimension, _| Ok(vec![0.0; dimension]),
+    )
+    .unwrap();
+    let hit = report
+        .hits
+        .iter()
+        .find(|hit| hit.element == ElementRef::Node(commit))
+        .unwrap();
+    assert_eq!(hit.title.as_ref(), "Fix the reload race");
+    assert_eq!(hit.detail.as_ref(), "Fix the reload race Longer body");
+
+    let report =
+        evidence_path_database(&file.0, source, commit, Direction::Both, None, 2, 32).unwrap();
+    assert_eq!(report.end.title.as_ref(), "Fix the reload race");
+    let path = report.path.unwrap();
+    assert_eq!(path.nodes[1].title.as_ref(), "Fix the reload race");
+}
+
+#[test]
 fn path_titles_split_into_name_and_directory() {
     assert_eq!(
         split_path_title("crates/vecgra/src/error.rs"),
