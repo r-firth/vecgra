@@ -8,7 +8,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AppContext as _, Bounds, Context, Entity, ExternalPaths, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement as _, PathPromptOptions, PinchEvent, Pixels, Render, Role,
+    MouseUpEvent, ParentElement as _, PathPromptOptions, PinchEvent, Pixels, Point, Render, Role,
     ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled,
     Subscription, Task, Window, actions, div, px, relative, rgb,
 };
@@ -34,8 +34,10 @@ use vecgra_studio_core::{
 
 mod bezel_controls;
 mod help;
+mod node_menu;
 mod panels;
 
+use node_menu::NodeMenu;
 use panels::path_direction_label;
 #[cfg(test)]
 use panels::visible_facet_counts;
@@ -569,6 +571,7 @@ pub struct StudioView {
     /// Searches and commands submitted from the command box, oldest first.
     command_history: Vec<String>,
     history_browse: Option<HistoryBrowse>,
+    node_menu: Option<NodeMenu>,
     help_visible: bool,
     /// The node under the pointer, by ID so a reload cannot point it at
     /// another node.
@@ -694,6 +697,7 @@ impl StudioView {
             selection_forward: Vec::new(),
             command_history: Vec::new(),
             history_browse: None,
+            node_menu: None,
             help_visible: false,
             hovered_node: None,
             hover_camera: None,
@@ -2492,7 +2496,9 @@ impl StudioView {
     }
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.help_visible {
+        if self.node_menu.take().is_some() {
+            cx.notify();
+        } else if self.help_visible {
             self.set_help_visible(false, window, cx);
         } else if self.context_focus_active
             || self.active_facet.is_some()
@@ -2757,6 +2763,26 @@ impl StudioView {
             .ok();
         }));
         cx.notify();
+    }
+
+    /// The node under a window position on the canvas, picked with the
+    /// click radius.
+    fn node_at(&self, position: Point<Pixels>) -> Option<usize> {
+        let bounds = self.canvas_bounds?;
+        let workspace = self.workspace.as_ref()?.borrow();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let local = Vec2::new(
+            (position.x - bounds.origin.x).into(),
+            (position.y - bounds.origin.y).into(),
+        );
+        hit_test_positions(
+            workspace.positions(),
+            self.camera,
+            self.world_bounds,
+            viewport,
+            local,
+            15.0,
+        )
     }
 
     fn on_mouse_down(
@@ -3114,6 +3140,8 @@ impl StudioView {
         if self.snapshot().is_none() {
             return;
         }
+        // The menu stays where it opened; the node it names would not.
+        self.node_menu = None;
         self.camera_motion.cancel_at(self.camera);
         let Some(bounds) = self.canvas_bounds else {
             return;
@@ -3660,6 +3688,7 @@ impl Render for StudioView {
                     .when(show_inspector, |this| this.child(self.render_inspector(cx))),
             )
             .child(self.render_status_bar(cx))
+            .children(self.render_node_menu(cx))
             .when(self.help_visible, |this| {
                 this.child(self.render_help(window, cx))
             })

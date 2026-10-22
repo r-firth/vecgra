@@ -92,7 +92,12 @@ attempt to draw every record as a giant hairball.
    the inspector header, or `Cmd-C` outside the command box, copies the
    selection as text for notes or a prompt: its title, label and ID, its
    properties, and for a node its relationships in view, grouped by type and
-   direction with up to 20 named neighbors each.
+   direction with up to 20 named neighbors each. Right-clicking a node
+   selects it and opens a menu of what can be done with it: open its
+   connected context, trace a path to it from the node selected before (or
+   from the chosen path origin), set it as the path origin, release it when
+   pinned, and copy it as text or by ID. Escape, a click elsewhere, or a
+   scroll closes the menu.
 5. Expand, contract, pin, hide, and compare bounded neighborhoods.
 6. Move smoothly between overview, communities, individual elements, and
    evidence paths using semantic level of detail.

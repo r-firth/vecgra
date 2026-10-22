@@ -2592,3 +2592,137 @@ fn the_selection_copies_as_text(cx: &mut TestAppContext) {
         )
     );
 }
+
+#[gpui::test]
+fn right_clicking_a_node_opens_its_menu(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("node-menu");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let path = live.path.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| StudioView::new(Some(path), window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let (start, end) = (live.files[0], live.files[3]);
+    view.update(cx, |view, _| {
+        let start = view.snapshot().unwrap().node_index(start).unwrap();
+        view.set_selection(Some(SceneSelection::Node(start)));
+    });
+    // Where the end node is now; tracing a path moves the camera.
+    let end_point = |cx: &mut gpui::VisualTestContext| {
+        view.update(cx, |view, _| {
+            view.settle_presentation_for_capture();
+            let end = view.snapshot().unwrap().node_index(end).unwrap();
+            let bounds = view.canvas_bounds.unwrap();
+            let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+            let local = view.camera.project(
+                view.workspace
+                    .as_ref()
+                    .unwrap()
+                    .borrow()
+                    .position(end)
+                    .unwrap(),
+                view.world_bounds,
+                viewport,
+            );
+            bounds.origin + point(px(local.x), px(local.y))
+        })
+    };
+    let right_click = |cx: &mut gpui::VisualTestContext| {
+        let end_point = end_point(cx);
+        cx.simulate_event(gpui::MouseDownEvent {
+            button: MouseButton::Right,
+            position: end_point,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: MouseButton::Right,
+            position: end_point,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+
+    // The right click selects the node and offers a path from the node
+    // selected before it.
+    right_click(cx);
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert_eq!(
+            view.selection,
+            Some(SceneSelection::Node(snapshot.node_index(end).unwrap()))
+        );
+        let labels: Vec<String> = view
+            .node_menu_items()
+            .into_iter()
+            .flatten()
+            .map(|(_, label, _)| label)
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Open connected context",
+                "Trace path from 0.rs",
+                "Set as path origin",
+                "Copy as text",
+                "Copy ID"
+            ]
+        );
+    });
+    let trace = cx
+        .debug_bounds(Box::leak(
+            format!("node-menu:TracePathFrom({start})").into_boxed_str(),
+        ))
+        .unwrap();
+    cx.simulate_click(trace.center(), Modifiers::none());
+    cx.run_until_parked();
+    view.read_with(&*cx, |view, _| {
+        assert!(view.node_menu.is_none());
+        let PathState::Ready(report) = &view.path_state else {
+            panic!("a path is traced, not {:?}", view.status);
+        };
+        assert_eq!((report.start.id, report.end.id), (start, end));
+    });
+
+    // With nothing selected before it, there is nothing to trace from.
+    view.update_in(cx, |view, window, cx| view.show_overview(window, cx));
+    view.update(cx, |view, _| view.set_selection(None));
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    right_click(cx);
+    view.read_with(&*cx, |view, _| {
+        assert!(
+            view.node_menu_items()
+                .into_iter()
+                .flatten()
+                .all(|(item, _, _)| !matches!(item, node_menu::NodeMenuItem::TracePathFrom(_)))
+        );
+    });
+    let copy_id = cx.debug_bounds("node-menu:CopyId").unwrap();
+    cx.simulate_click(copy_id.center(), Modifiers::none());
+    let clipboard = cx.update(|_, cx| cx.read_from_clipboard());
+    assert_eq!(
+        clipboard.and_then(|item| item.text()),
+        Some(format!("node:{end}"))
+    );
+
+    // Escape closes the menu before it leaves anything else.
+    right_click(cx);
+    view.update_in(cx, |view, window, cx| {
+        assert!(view.node_menu.is_some());
+        view.escape(window, cx);
+        assert!(view.node_menu.is_none());
+        assert!(view.selection.is_some());
+    });
+}
