@@ -1,6 +1,7 @@
 //! Hiding elements from view: a hub that touches everything, a node beside
 //! the point, every node of a label, or every relationship of a type can be
-//! taken off the canvas, and shown again later where it was.
+//! taken off the canvas, or everything but one label or type, and shown
+//! again later where it was.
 
 use std::collections::HashMap;
 
@@ -375,9 +376,9 @@ impl StudioView {
                     .count();
                 let kind = match groups.first() {
                     Some(HiddenGroup::Relationship(_)) => {
-                        ("relationship type", "relationship types")
+                        ("other relationship type", "other relationship types")
                     }
-                    _ => ("label", "labels"),
+                    _ => ("other label", "other labels"),
                 };
                 (shown > 0, panels::counted(shown, kind.0, kind.1))
             }

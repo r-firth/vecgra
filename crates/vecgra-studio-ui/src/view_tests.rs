@@ -3187,7 +3187,7 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-z");
     view.read_with(&*cx, |view, _| {
         assert!(view.hidden.is_none());
-        assert_eq!(view.status.as_ref(), "Showing 1 label again");
+        assert_eq!(view.status.as_ref(), "Showing 1 other label again");
     });
 
     // Choosing a hidden search result shows that node again, even while the
