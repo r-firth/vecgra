@@ -1207,6 +1207,46 @@ fn command_words_followed_by_other_words_are_searched() {
 }
 
 #[test]
+fn the_command_box_names_what_enter_will_do() {
+    assert_eq!(enter_hint(""), None);
+    assert_eq!(enter_hint("   "), None);
+    assert_eq!(enter_hint("memory leak"), Some("search"));
+    assert_eq!(enter_hint("layout refresh"), Some("search"));
+    assert_eq!(enter_hint("layout orbit"), Some("layout"));
+    assert_eq!(enter_hint("node 12"), Some("node"));
+    assert_eq!(enter_hint("relationship 4"), Some("edge"));
+    assert_eq!(enter_hint("?"), Some("help"));
+    assert_eq!(enter_hint("text graph"), Some("text search"));
+    assert_eq!(enter_hint("hybrid graph"), Some("search"));
+}
+
+#[gpui::test]
+fn the_command_box_hint_follows_its_text(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    };
+    draw(cx);
+    assert!(cx.debug_bounds("search-enter-hint").is_none());
+    // Typing would focus the box, which test windows cannot draw on macOS,
+    // so the text is set directly.
+    view.update_in(cx, |view, window, cx| {
+        view.query_input
+            .update(cx, |input, cx| input.set_value("layout orbit", window, cx));
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("search-enter-hint").is_some());
+}
+
+#[test]
 fn open_arguments_expand_home_strip_quotes_and_resolve_relative_paths() {
     let home = PathBuf::from(std::env::var_os("HOME").unwrap());
     assert_eq!(

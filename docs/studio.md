@@ -149,6 +149,8 @@ The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
 after the command fit it, so a search such as `release notes`,
 `layout refresh`, or `open dialog for files` still searches; text that names
 a command's IDs but gets the rest wrong reports what the command expected.
+The end of the input says what Enter will do: `↵ search`, the command's
+name, or `↵ go to result` when the search is already showing.
 `node <id>` and `edge <id>` spring the camera to the element, at the current
 zoom, when any of it is off screen.
 `Cmd-/`, `F1`, `help`, or the `?` at the end of

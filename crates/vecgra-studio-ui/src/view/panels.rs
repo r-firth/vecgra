@@ -91,7 +91,7 @@ impl StudioView {
                                         .debug_selector(|| "compact-search-field".into())
                                         .flex_1()
                                         .min_w(px(180.0))
-                                        .child(Input::new(&self.query_input).small()),
+                                        .child(self.render_query_input(cx)),
                                 )
                                 .child(self.render_bezel_zoom_controls(cx)),
                         )
@@ -129,12 +129,41 @@ impl StudioView {
                             .flex_1()
                             .min_w(px(180.0))
                             .max_w(px(620.0))
-                            .child(Input::new(&self.query_input).small()),
+                            .child(self.render_query_input(cx)),
                     )
                     .child(self.render_bezel_search_modes(cx))
                     .child(div().flex_1()),
             )
             .into_any_element()
+    }
+
+    /// The command box, ending in a hint that says what Enter will do: run
+    /// the command typed, search, or go to the selected result of the search
+    /// already shown.
+    fn render_query_input(&self, cx: &Context<Self>) -> Input {
+        let query = self.query_input.read(cx).value();
+        let showing_results = matches!(
+            &self.search_state,
+            SearchState::Ready(report)
+                if report.query.as_ref() == query.trim() && report.mode == self.search_mode
+        );
+        let hint = if showing_results {
+            Some("go to result")
+        } else {
+            enter_hint(&query)
+        };
+        let input = Input::new(&self.query_input).small();
+        let Some(hint) = hint else {
+            return input;
+        };
+        input.suffix(
+            div()
+                .debug_selector(|| "search-enter-hint".into())
+                .flex_none()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("↵ {hint}")),
+        )
     }
 
     pub(super) fn render_left_panel(&self, cx: &Context<Self>) -> impl IntoElement {

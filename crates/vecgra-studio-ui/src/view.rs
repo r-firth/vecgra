@@ -324,6 +324,28 @@ fn reads_as_command(query: &str) -> bool {
     }
 }
 
+/// What Enter will do with command-box text, as the box's hint names it:
+/// the command word for a command, or "search".
+fn enter_hint(query: &str) -> Option<&str> {
+    let query = query.trim();
+    let word = query.split_whitespace().next()?;
+    if !reads_as_command(query) {
+        return Some("search");
+    }
+    Some(match word {
+        "?" | "shortcuts" => "help",
+        "refresh" => "reload",
+        "watch" => "live",
+        "lens" => "facet",
+        "context" => "focus",
+        "relationship" => "edge",
+        "hybrid" => "search",
+        "text" => "text search",
+        "semantic" => "semantic search",
+        word => word,
+    })
+}
+
 fn parse_zoom(factor: &str) -> Option<f32> {
     factor.parse::<f32>().ok().filter(|zoom| zoom.is_finite())
 }
@@ -2802,6 +2824,11 @@ impl StudioView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(event, InputEvent::Change) {
+            // The box's Enter hint depends on its text.
+            cx.notify();
+            return;
+        }
         if !matches!(event, InputEvent::PressEnter { .. }) {
             return;
         }
