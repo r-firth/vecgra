@@ -1581,6 +1581,12 @@ impl StudioView {
                                 dragging: dragging_node,
                                 emphasis: self.lens.as_ref().map(LensTransition::emphasis),
                                 path_endpoints: self.path_endpoints,
+                                hovered_node: self
+                                    .hovered_node
+                                    .and_then(|id| snapshot.node_index(id)),
+                                hovered_edge: self
+                                    .hovered_edge
+                                    .and_then(|hovered| snapshot.edge_index(hovered.id)),
                             },
                         ))
                         .into_any_element()

@@ -57,11 +57,12 @@ attempt to draw every record as a giant hairball.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout. Hovering
    a node shows its title, label, relationship count, and up to three other
-   properties beside it without changing the selection; hovering a node in the inspector's connections,
-   a relationship's endpoints, or the search results shows the same card
-   and rings the node on the canvas. Below the overview, hovering a
-   relationship's line shows its type, both ends, and up to three of its
-   properties, and rings the ends, and the
+   properties beside it, and lights its relationships more faintly than the
+   selection's, without changing the selection; hovering a node in the
+   inspector's connections, a relationship's endpoints, or the search
+   results does the same and rings the node on the canvas. Below the
+   overview, hovering a relationship's line brightens it, shows its type,
+   both ends, and up to three of its properties, and rings the ends, and the
    canvas names the selection (both ends, for a relationship), path
    endpoints and the nodes a path runs through, the selection's
    best-connected neighbors, and the strongest search

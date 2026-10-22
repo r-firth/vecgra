@@ -232,6 +232,8 @@ struct ScenePresentation<'a> {
     dragging: Option<usize>,
     emphasis: Option<&'a GraphEmphasis>,
     path_endpoints: Option<GraphPathEndpoints>,
+    hovered_node: Option<usize>,
+    hovered_edge: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -247,6 +249,10 @@ pub(crate) struct GraphCanvasPresentation {
     pub dragging: Option<usize>,
     pub emphasis: Option<GraphEmphasis>,
     pub path_endpoints: Option<GraphPathEndpoints>,
+    /// The node or relationship under the pointer, or named by a hovered
+    /// list row, whose lines are lit more faintly than the selection's.
+    pub hovered_node: Option<usize>,
+    pub hovered_edge: Option<usize>,
 }
 
 struct NodePaintContext<'a> {
@@ -303,6 +309,8 @@ pub fn graph_canvas(
                     dragging: presentation.dragging,
                     emphasis: presentation.emphasis.as_ref(),
                     path_endpoints: presentation.path_endpoints,
+                    hovered_node: presentation.hovered_node,
+                    hovered_edge: presentation.hovered_edge,
                 },
                 bounds,
             )
@@ -522,6 +530,44 @@ fn prepare_scene(
         }
     }
 
+    // The node or relationship under the pointer lights its lines, more
+    // faintly than the selection, so a neighborhood can be read before
+    // clicking. Lenses that dim the scene keep their own bounded edge set.
+    if emphasis.is_none_or(|lens| lens.dim < 0.35) {
+        if let Some(node_index) = presentation
+            .hovered_node
+            .filter(|&index| selected_node != Some(index))
+        {
+            incident_edge_paths.extend(hover_edge_paths(
+                snapshot,
+                &projected,
+                |source, target| source == node_index || target == node_index,
+                1.4,
+                0.7,
+                bounds,
+                viewport,
+            ));
+        }
+        if let Some(edge_index) = presentation
+            .hovered_edge
+            .filter(|&index| selected_edge != Some(index))
+        {
+            let source = snapshot.edges.sources[edge_index] as usize;
+            let target = snapshot.edges.targets[edge_index] as usize;
+            let mut builder = LinePathBuilder::stroke(px(2.0));
+            builder.segment(
+                absolute_point(bounds, projected[source]),
+                absolute_point(bounds, projected[target]),
+            );
+            if let Some(path) = builder.build() {
+                incident_edge_paths.push(PaintPath {
+                    path,
+                    color: relationship_color(&snapshot.edges.labels[edge_index]),
+                });
+            }
+        }
+    }
+
     let selected_edge_path = selected_edge.and_then(|edge_index| {
         let source = snapshot.edges.sources[edge_index] as usize;
         let target = snapshot.edges.targets[edge_index] as usize;
@@ -666,6 +712,48 @@ fn prepare_scene(
 /// name, the best-connected visible nodes. A name that would overlap one
 /// already placed, or a relationship caption, is skipped, and at most
 /// [`NODE_CAPTION_BUDGET`] are drawn.
+/// Lines for the relationships `include` accepts, batched by color, drawn
+/// `width` wide at `opacity`.
+fn hover_edge_paths(
+    snapshot: &SceneSnapshot,
+    projected: &[Vec2],
+    include: impl Fn(usize, usize) -> bool,
+    width: f32,
+    opacity: f32,
+    bounds: Bounds<Pixels>,
+    viewport: Vec2,
+) -> Vec<PaintPath> {
+    let mut builders: [LinePathBuilder; RELATIONSHIP_COLOR_COUNT] =
+        std::array::from_fn(|_| LinePathBuilder::stroke(px(width)));
+    let mut segment_counts = [0_usize; RELATIONSHIP_COLOR_COUNT];
+    for edge_index in 0..snapshot.edges.ids.len() {
+        let source = snapshot.edges.sources[edge_index] as usize;
+        let target = snapshot.edges.targets[edge_index] as usize;
+        if !include(source, target) {
+            continue;
+        }
+        let (from, to) = (projected[source], projected[target]);
+        if !segment_may_be_visible(from, to, viewport) {
+            continue;
+        }
+        let color_index = relationship_color_index(&snapshot.edges.labels[edge_index]);
+        builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
+        segment_counts[color_index] += 1;
+    }
+    builders
+        .into_iter()
+        .zip(segment_counts)
+        .enumerate()
+        .filter(|&(_, (_, segments))| segments > 0)
+        .filter_map(|(color_index, (builder, _))| {
+            builder.build().map(|path| PaintPath {
+                path,
+                color: relationship_color_for_index(color_index).opacity(opacity),
+            })
+        })
+        .collect()
+}
+
 /// The lens score a traced path gives the nodes between its ends.
 pub(crate) const PATH_INTERIOR_SCORE: f32 = 0.76;
 
@@ -1445,6 +1533,45 @@ mod caption_tests {
             captions.iter().any(|caption| caption.text == interior_name),
             "the path's interior node is named"
         );
+    }
+
+    #[test]
+    fn hovering_lights_the_lines_of_what_is_under_the_pointer() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let workspace = GraphWorkspace::new(&snapshot);
+        let bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(1_200.0), px(900.0)),
+        };
+        let lit = |hovered_node, hovered_edge, selection| {
+            prepare_scene(
+                &snapshot,
+                &workspace,
+                ScenePresentation {
+                    camera: Camera::fit(snapshot.bounds),
+                    world_bounds: snapshot.bounds,
+                    selection,
+                    dragging: None,
+                    emphasis: None,
+                    path_endpoints: None,
+                    hovered_node,
+                    hovered_edge,
+                },
+                bounds,
+            )
+            .incident_edge_paths
+            .len()
+        };
+        assert_eq!(lit(None, None, None), 0);
+        // Node 5's lines are NEXT and SUPPORTS, one batch per color.
+        assert_eq!(lit(Some(5), None, None), 2);
+        assert_eq!(lit(None, Some(0), None), 1);
+        // The selection's lines are already lit.
+        let selection = Some(SceneSelection::Node(5));
+        assert_eq!(lit(Some(5), None, selection), lit(None, None, selection));
+        let selection = Some(SceneSelection::Edge(0));
+        assert_eq!(lit(None, Some(0), selection), lit(None, None, selection));
     }
 
     #[test]
