@@ -140,6 +140,96 @@ impl StudioView {
         cx.notify();
     }
 
+    /// Brings back the nodes hidden by `label`, where they were; nodes also
+    /// hidden one by one stay hidden.
+    pub(super) fn show_hidden_label(&mut self, label: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.snapshot().cloned() else {
+            return;
+        };
+        let before = self.hidden_count();
+        let Some(scene) = self.hidden.as_mut() else {
+            return;
+        };
+        if !scene.hidden.labels.remove(label) {
+            return;
+        }
+        let (shown, places) = if scene.hidden.is_empty() {
+            let Some(scene) = self.hidden.take() else {
+                return;
+            };
+            (Arc::unwrap_or_clone(scene.full), scene.positions)
+        } else {
+            (
+                scene.full.without_nodes(&scene.hidden),
+                scene.positions.clone(),
+            )
+        };
+        self.show_scene(shown, &current, &places);
+        let count = before.saturating_sub(self.hidden_count());
+        self.status = format!(
+            "Showing {count} {label} node{}",
+            if count == 1 { "" } else { "s" }
+        )
+        .into();
+        cx.notify();
+    }
+
+    /// Overview rows for the hidden labels, under the labels in view; each
+    /// shows its label again when chosen.
+    pub(super) fn hidden_label_rows(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        let Some(scene) = &self.hidden else {
+            return Vec::new();
+        };
+        scene
+            .hidden
+            .labels
+            .iter()
+            .map(|label| {
+                let count = scene
+                    .full
+                    .nodes
+                    .labels
+                    .iter()
+                    .filter(|other| *other == label)
+                    .count();
+                let shown = label.clone();
+                let selector = format!("hidden-label:{label}");
+                let button = Button::new(selector.clone())
+                    .ghost()
+                    .small()
+                    .compact()
+                    .w_full()
+                    .label(label.to_string())
+                    .accessibility_id(format!("hidden-label:{label}"))
+                    .tooltip(format!("Show the hidden {label} nodes"))
+                    .cursor_pointer()
+                    .opacity(0.6)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.show_hidden_label(&shown, cx);
+                    }))
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .items_center()
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_xs()
+                                    .text_color(palette().copper)
+                                    .child(format!("{} hidden", panels::format_count(count))),
+                            ),
+                    );
+                div()
+                    .w_full()
+                    .debug_selector(move || selector)
+                    .child(button)
+                    .into_any_element()
+            })
+            .collect()
+    }
+
     /// Replaces the scene in view with one holding fewer or more of the same
     /// elements: those in both stay put, and the rest enter beside their
     /// neighbors, or settle where `places` says they were.

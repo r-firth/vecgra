@@ -346,7 +346,8 @@ impl StudioView {
                                             )
                                         }),
                                 )
-                        })),
+                        }))
+                        .children(self.hidden_label_rows(cx)),
                 )
             })
     }
@@ -3281,7 +3282,7 @@ fn centered_state(
         .into_any_element()
 }
 
-fn format_count(value: usize) -> String {
+pub(super) fn format_count(value: usize) -> String {
     let text = value.to_string();
     let mut output = String::with_capacity(text.len() + text.len() / 3);
     for (index, character) in text.chars().enumerate() {

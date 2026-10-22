@@ -2941,12 +2941,25 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
     let later = live.add_session();
     view.update_in(cx, |view, window, cx| view.reload(window, cx));
     cx.run_until_parked();
-    view.update(cx, |view, cx| {
+    view.read_with(&*cx, |view, _| {
         let snapshot = view.snapshot().unwrap();
         assert_eq!(snapshot.node_index(later), None);
         assert_eq!(snapshot.nodes.ids.len(), 8);
         assert_eq!(view.hidden_count(), 2);
-        view.show_hidden_nodes(cx);
-        assert!(view.snapshot().unwrap().node_index(later).is_some());
+    });
+
+    // The overview lists the hidden label, and choosing it shows its nodes.
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let row = cx.debug_bounds("hidden-label:Session").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let snapshot = view.snapshot().unwrap();
+        assert!(snapshot.node_index(later).is_some());
+        assert!(snapshot.node_index(session).is_some());
+        assert_eq!(view.hidden_count(), 0);
+        assert!(view.hidden.is_none());
+        assert_eq!(view.status.as_ref(), "Showing 2 Session nodes");
     });
 }

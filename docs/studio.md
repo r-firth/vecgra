@@ -111,8 +111,10 @@ attempt to draw every record as a giant hairball.
    canvas, such as a repository hub that every session touches; everything
    else stays where it is. **Hide all N <label> nodes** in the menu, or
    `hide label <label>`, does the same for a whole label, including nodes
-   with it that arrive later. Hidden nodes stay hidden across reloads and
-   live refresh, and the status bar counts them. Clicking that count,
+   with it that arrive later, and lists the label under the overview's
+   labels, where choosing it shows that label again. Hidden nodes stay
+   hidden across reloads and live refresh, and the status bar counts them.
+   Clicking that count,
    `Shift-Cmd-H`, or `unhide` brings them back where they were, ringed like
    nodes a reload adds. Opening another database forgets them.
 6. Move smoothly between overview, communities, individual elements, and
