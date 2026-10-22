@@ -1071,3 +1071,23 @@ fn element_titles_prefer_naming_keys_then_first_lines() {
     snapshot.nodes.properties[0] = Arc::from([]);
     assert_eq!(snapshot.node_title(0), snapshot.nodes.labels[0].clone());
 }
+
+#[test]
+fn path_titles_split_into_name_and_directory() {
+    assert_eq!(
+        split_path_title("crates/vecgra/src/error.rs"),
+        Some(("error.rs", "crates/vecgra/src"))
+    );
+    assert_eq!(
+        split_path_title("crates/vecgra/src/"),
+        Some(("src", "crates/vecgra"))
+    );
+    assert_eq!(
+        split_path_title(r"C:\repo\main.rs"),
+        Some(("main.rs", r"C:\repo"))
+    );
+    assert_eq!(split_path_title("/etc"), None);
+    assert_eq!(split_path_title("README.md"), None);
+    assert_eq!(split_path_title("Fix A/B test flake"), None);
+    assert_eq!(split_path_title("https://example.com/a/b"), None);
+}

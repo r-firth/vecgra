@@ -55,7 +55,9 @@ attempt to draw every record as a giant hairball.
 3. Pan and zoom without waiting for database work or graph layout.
 4. Select a node or relationship and inspect its label, properties, vectors,
    neighbors, and provenance without losing the current view. A node's
-   heading is its title, name, or path when it has one. Its relationships in
+   heading is its title, name, or path when it has one; wherever a path
+   titles an element, the file name leads and the directory follows, muted,
+   so truncated lists of files stay distinguishable. Its relationships in
    the current view are grouped by type and direction; choosing a neighbor,
    or either endpoint of a selected relationship, selects it and springs the
    camera to it at the current zoom, so the inspector can walk the graph.

@@ -29,7 +29,7 @@ use vecgra_studio_core::{
     MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM, NodeConnections, PathDirection, PropertyValue, Rect,
     ReloadedScene, SceneDelta, SceneSelection, SceneSnapshot, SearchMode, SearchReport,
     SnapshotOptions, Vec2, detail_level, evidence_path_database, hit_test_edges,
-    hit_test_positions, search_database,
+    hit_test_positions, search_database, split_path_title,
 };
 
 mod bezel_controls;

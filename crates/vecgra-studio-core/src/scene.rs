@@ -191,6 +191,19 @@ pub fn element_title(properties: &[SceneProperty]) -> Option<Arc<str>> {
         })
 }
 
+/// Splits a path-like title into its last segment and the directory before
+/// it, so a list of files can lead with the part that tells them apart.
+/// Titles with whitespace or a URL scheme are prose or links and stay whole.
+pub fn split_path_title(title: &str) -> Option<(&str, &str)> {
+    if title.contains(char::is_whitespace) || title.contains("://") {
+        return None;
+    }
+    let trimmed = title.trim_end_matches(['/', '\\']);
+    let cut = trimmed.rfind(['/', '\\'])?;
+    let (parent, name) = (&trimmed[..cut], &trimmed[cut + 1..]);
+    (!parent.is_empty() && !name.is_empty()).then_some((name, parent))
+}
+
 /// One relationship incident to an inspected node, by scene index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeConnection {

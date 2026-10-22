@@ -1075,11 +1075,9 @@ impl StudioView {
                                             ),
                                     )
                                     .child(
-                                        div()
+                                        title_line(&hit.title, cx)
                                             .text_sm()
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .truncate()
-                                            .child(hit.title.to_string()),
+                                            .font_weight(gpui::FontWeight::SEMIBOLD),
                                     )
                                     .child(
                                         div()
@@ -1174,14 +1172,33 @@ impl StudioView {
                                             .child(snapshot.nodes.labels[index].to_string()),
                                     ),
                             )
-                            .child(
-                                div()
+                            .child({
+                                let title = scene_node_title(snapshot, index);
+                                let (heading, directory) = match split_path_title(&title) {
+                                    Some((name, parent)) => {
+                                        (name.to_string(), Some(parent.to_string()))
+                                    }
+                                    None => (title.to_string(), None),
+                                };
+                                v_flex()
                                     .debug_selector(|| "inspector-node-title".into())
-                                    .text_lg()
-                                    .line_height(px(24.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(scene_node_title(snapshot, index).to_string()),
-                            )
+                                    .child(
+                                        div()
+                                            .text_lg()
+                                            .line_height(px(24.0))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child(heading),
+                                    )
+                                    .when_some(directory, |this, directory| {
+                                        this.child(
+                                            div()
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(directory),
+                                        )
+                                    })
+                            })
                             .child(
                                 div()
                                     .text_xs()
@@ -1829,14 +1846,7 @@ impl StudioView {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.select_related_node(neighbor, Some(edge), window, cx);
                             }))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_sm()
-                                    .truncate()
-                                    .child(title.to_string()),
-                            )
+                            .child(title_line(&title, cx).flex_1().text_sm())
                             .child(
                                 div()
                                     .flex_shrink_0()
@@ -2048,13 +2058,41 @@ fn path_endpoint_card_data(
                         ),
                 )
                 .child(
-                    div()
+                    title_line(title, cx)
                         .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .truncate()
-                        .child(title.to_string()),
+                        .font_weight(gpui::FontWeight::SEMIBOLD),
                 ),
         )
+}
+
+/// A one-line element title. A path-like title leads with its last segment
+/// and follows with the muted directory, so a list of files that truncates
+/// still shows which file each row is.
+fn title_line(title: &str, cx: &gpui::App) -> gpui::Div {
+    match split_path_title(title) {
+        Some((name, parent)) => h_flex()
+            .min_w_0()
+            .gap_1p5()
+            .items_baseline()
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(relative(0.8))
+                    .truncate()
+                    .child(name.to_string()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(parent.to_string()),
+            ),
+        None => div().min_w_0().truncate().child(title.to_string()),
+    }
 }
 
 fn scene_node_title(snapshot: &SceneSnapshot, index: usize) -> Arc<str> {
@@ -2292,12 +2330,7 @@ fn endpoint_row(
             v_flex()
                 .min_w_0()
                 .gap_0p5()
-                .child(
-                    div()
-                        .text_sm()
-                        .truncate()
-                        .child(scene_node_title(snapshot, index).to_string()),
-                )
+                .child(title_line(&scene_node_title(snapshot, index), cx).text_sm())
                 .child(
                     div()
                         .font_family(cx.theme().mono_font_family.clone())
