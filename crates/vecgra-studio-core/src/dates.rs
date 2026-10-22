@@ -12,15 +12,23 @@ const PLAUSIBLE_MS: std::ops::Range<i64> = 946_684_800_000..4_102_444_800_000;
 /// UTC date and age of a millisecond timestamp whose key ends in `_ms`
 /// ("2026-10-19 14:03 UTC · 3 days ago"). Anything else has none.
 pub fn property_time_hint(key: &str, value: &PropertyValue, now_ms: i64) -> Option<String> {
+    let ms = property_time_ms(key, value)?;
+    Some(match value {
+        PropertyValue::Int(_) => format!(
+            "{} UTC · {}",
+            format_utc_minutes(ms),
+            relative_age(ms, now_ms)
+        ),
+        _ => relative_age(ms, now_ms),
+    })
+}
+
+/// The Unix milliseconds a date-like property names: an ISO 8601 date-time,
+/// or a millisecond timestamp in 2000–2100 whose key ends in `_ms`.
+pub fn property_time_ms(key: &str, value: &PropertyValue) -> Option<i64> {
     match value {
-        PropertyValue::String(text) => Some(relative_age(parse_iso_datetime_ms(text)?, now_ms)),
-        PropertyValue::Int(ms) if key.ends_with("_ms") && PLAUSIBLE_MS.contains(ms) => {
-            Some(format!(
-                "{} UTC · {}",
-                format_utc_minutes(*ms),
-                relative_age(*ms, now_ms)
-            ))
-        }
+        PropertyValue::String(text) => parse_iso_datetime_ms(text),
+        PropertyValue::Int(ms) if key.ends_with("_ms") && PLAUSIBLE_MS.contains(ms) => Some(*ms),
         _ => None,
     }
 }

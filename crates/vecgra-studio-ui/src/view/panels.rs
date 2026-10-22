@@ -2892,27 +2892,23 @@ fn inspector_label(label: &'static str) -> impl IntoElement {
         .child(label)
 }
 
-/// Up to three of an element's properties for a hover card, one line each,
-/// leaving out the one already shown as its title.
+/// The current time in Unix milliseconds, for reading dated properties.
+fn unix_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
+/// Up to three of an element's properties for a hover card, one line each.
 fn hover_properties(
     properties: &[vecgra_studio_core::SceneProperty],
     title: &str,
     cx: &Context<StudioView>,
 ) -> Option<gpui::AnyElement> {
-    const SHOWN: usize = 3;
-    let title_prefix = title.strip_suffix('…').unwrap_or(title);
-    let rows: Vec<_> = properties
-        .iter()
-        .filter_map(|property| {
-            if matches!(property.value, PropertyValue::Bytes(_)) {
-                return None;
-            }
-            let value = format_value(&property.value);
-            let line = value.lines().map(str::trim).find(|line| !line.is_empty())?;
-            let is_title = !title.is_empty() && (line == title || line.starts_with(title_prefix));
-            (!is_title).then(|| (property.key.clone(), line.to_string()))
-        })
-        .take(SHOWN)
+    let rows: Vec<_> = hover_property_lines(properties, title, unix_now_ms())
+        .into_iter()
         .map(|(key, value)| {
             h_flex()
                 .gap_1p5()
@@ -2941,6 +2937,47 @@ fn hover_properties(
             .children(rows)
             .into_any_element()
     })
+}
+
+/// The properties a hover card lists, as key and one-line value: up to
+/// three, leaving out byte strings and the one already shown as the title.
+/// Dates read as ages relative to `now_ms`, and a millisecond twin of a date
+/// (`created_at_ms` beside `created_at`) is left out.
+pub(super) fn hover_property_lines(
+    properties: &[vecgra_studio_core::SceneProperty],
+    title: &str,
+    now_ms: i64,
+) -> Vec<(Arc<str>, String)> {
+    const SHOWN: usize = 3;
+    let title_prefix = title.strip_suffix('…').unwrap_or(title);
+    let is_date = |key: &str| {
+        properties.iter().any(|property| {
+            &*property.key == key
+                && vecgra_studio_core::property_time_ms(key, &property.value).is_some()
+        })
+    };
+    properties
+        .iter()
+        .filter_map(|property| {
+            if matches!(property.value, PropertyValue::Bytes(_)) {
+                return None;
+            }
+            if let Some(ms) = vecgra_studio_core::property_time_ms(&property.key, &property.value) {
+                let twin = property.key.strip_suffix("_ms").is_some_and(is_date);
+                return (!twin).then(|| {
+                    (
+                        property.key.clone(),
+                        vecgra_studio_core::relative_age(ms, now_ms),
+                    )
+                });
+            }
+            let value = format_value(&property.value);
+            let line = value.lines().map(str::trim).find(|line| !line.is_empty())?;
+            let is_title = !title.is_empty() && (line == title || line.starts_with(title_prefix));
+            (!is_title).then(|| (property.key.clone(), line.to_string()))
+        })
+        .take(SHOWN)
+        .collect()
 }
 
 /// A ring around a node on the canvas, at its canvas-local position.
@@ -3139,12 +3176,7 @@ fn property_row(
     let selector = format!("inspector-property:{key}");
     let age_selector = format!("inspector-property-age:{key}");
     let copied_key = key.to_string();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        });
-    let age = vecgra_studio_core::property_time_hint(key, value, now_ms);
+    let age = vecgra_studio_core::property_time_hint(key, value, unix_now_ms());
     v_flex()
         .id(("inspector-property", position))
         .debug_selector(move || selector)

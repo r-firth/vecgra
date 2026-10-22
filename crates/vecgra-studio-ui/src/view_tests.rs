@@ -2785,3 +2785,36 @@ fn dated_properties_show_their_age(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("inspector-property-age:title").is_none());
     assert!(cx.debug_bounds("inspector-property-age:comments").is_none());
 }
+
+#[test]
+fn hover_cards_read_dates_as_ages() {
+    let property = |key: &str, value: PropertyValue| vecgra_studio_core::SceneProperty {
+        key: key.into(),
+        value,
+    };
+    let now = 1_792_620_180_000; // 2026-10-21T22:03:00Z
+    let hour = 3_600_000;
+    let properties = [
+        property("title", PropertyValue::String("Flaky layout test".into())),
+        property(
+            "created_at",
+            PropertyValue::String("2026-10-19T22:03:00Z".into()),
+        ),
+        property("created_at_ms", PropertyValue::Int(now - 48 * hour)),
+        property("updated_at_ms", PropertyValue::Int(now - 3 * hour)),
+        property("comments", PropertyValue::Int(3)),
+    ];
+    let lines: Vec<_> = panels::hover_property_lines(&properties, "Flaky layout test", now)
+        .into_iter()
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect();
+    // `created_at_ms` repeats `created_at`; `updated_at_ms` has no twin.
+    assert_eq!(
+        lines,
+        [
+            "created_at: 2 days ago",
+            "updated_at_ms: 3 hours ago",
+            "comments: 3"
+        ]
+    );
+}

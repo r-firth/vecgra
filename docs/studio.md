@@ -57,7 +57,8 @@ attempt to draw every record as a giant hairball.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout. Hovering
    a node shows its title, label, relationship count, and up to three other
-   properties beside it, and lights its relationships more faintly than the
+   properties beside it (dates as ages, without a millisecond copy of a date
+   already shown), and lights its relationships more faintly than the
    selection's, without changing the selection; hovering a node in the
    inspector's connections, a relationship's endpoints, a path's ends, or
    the search results does the same and rings the node on the canvas, and
