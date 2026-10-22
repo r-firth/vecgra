@@ -371,6 +371,36 @@ fn taxonomy_facets_create_a_reversible_graph_lens(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn titles_that_start_with_a_command_word_are_searched(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let window = cx.add_window(|window, cx| StudioView::new(None, window, cx));
+    window
+        .update(cx, |view, window, cx| {
+            view.execute_command("node 3", window, cx);
+            view.execute_command("node 5", window, cx);
+            let layout = view.layout_kind;
+            view.execute_command("back pressure", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(5)));
+            assert!(matches!(
+                &view.search_state,
+                SearchState::Failed { query, .. } if query.as_ref() == "back pressure"
+            ));
+            view.execute_command("layout refresh", window, cx);
+            assert_eq!(view.layout_kind, layout);
+            assert!(matches!(
+                &view.search_state,
+                SearchState::Failed { query, .. } if query.as_ref() == "layout refresh"
+            ));
+            view.execute_command("back", window, cx);
+            assert_eq!(view.selection, Some(SceneSelection::Node(3)));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
 fn commands_select_relationships_and_nodes_without_ambiguous_state(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
@@ -1023,6 +1053,55 @@ fn dropping_a_database_file_opens_it(cx: &mut TestAppContext) {
             assert_eq!(view.database_path.as_deref(), Some(live.path.as_path()));
         })
         .unwrap();
+}
+
+#[test]
+fn command_words_followed_by_other_words_are_searched() {
+    for command in [
+        "fit",
+        "back",
+        "release",
+        "zoom 2.5",
+        "live",
+        "live off",
+        "layout orbit",
+        "node 12",
+        "focus 3",
+        "edge 0",
+        "path 1 2",
+        "path 1 2 sideways",
+        "path-start 4 in 2",
+        "facet node File",
+        "facet relationship READ",
+        "open",
+        "open ~/graphs/agents.vg",
+        "open notes.vg",
+        "open \"with space.vg\"",
+        "open /tmp/missing",
+        "text graph",
+        "semantic",
+    ] {
+        assert!(reads_as_command(command), "{command} is a command");
+    }
+    for search in [
+        "",
+        "memory leak",
+        "fit test",
+        "back pressure",
+        "release notes",
+        "zoom level",
+        "zoom nan",
+        "live refresh",
+        "layout refresh",
+        "node degree",
+        "focus mode bug",
+        "edge cases",
+        "path rail keyboard focus",
+        "facet lens accessibility",
+        "open dialog for files",
+    ] {
+        assert!(!reads_as_command(search), "{search} is a search");
+    }
 }
 
 #[test]

@@ -284,6 +284,50 @@ fn live_refresh_default() -> bool {
 /// Resolves the argument of the `open` command: surrounding quotes are
 /// stripped, `~` expands to the home directory, and relative paths resolve
 /// against the working directory Studio was started from.
+/// Whether command-box text is a command rather than a search. A command
+/// word followed by words that do not fit that command, such as
+/// "layout refresh", "release notes", or "open dialog for files", is
+/// searched instead, so titles that start with a command word stay
+/// searchable. Text that names a command's IDs but gets the rest wrong is
+/// still a command, so it can say what was expected.
+fn reads_as_command(query: &str) -> bool {
+    let mut words = query.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    let rest: Vec<&str> = words.collect();
+    let is_id = |word: &str| word.parse::<u64>().is_ok();
+    match first {
+        "fit" | "clear" | "reload" | "refresh" | "help" | "?" | "shortcuts" | "back"
+        | "forward" | "release" => rest.is_empty(),
+        "zoom" => matches!(rest.as_slice(), [factor] if parse_zoom(factor).is_some()),
+        "live" | "watch" => matches!(rest.as_slice(), [] | ["on" | "off"]),
+        "layout" => matches!(rest.as_slice(), ["auto" | "force" | "structure" | "orbit"]),
+        "node" | "center" | "focus" | "context" | "edge" | "relationship" => {
+            matches!(rest.as_slice(), [id] if is_id(id))
+        }
+        "path" | "path-start" => rest.first().is_some_and(|id| is_id(id)),
+        "facet" | "lens" => matches!(
+            rest.as_slice(),
+            ["node" | "label" | "edge" | "relationship", _, ..]
+        ),
+        "open" => {
+            let argument = query.trim_start()["open".len()..].trim();
+            argument.is_empty()
+                || argument.starts_with(['"', '\'', '~'])
+                || argument.contains(['/', '\\'])
+                || argument.ends_with(".vg")
+                || resolve_open_argument(argument).is_some_and(|path| path.exists())
+        }
+        "text" | "semantic" | "hybrid" | "search" => true,
+        _ => false,
+    }
+}
+
+fn parse_zoom(factor: &str) -> Option<f32> {
+    factor.parse::<f32>().ok().filter(|zoom| zoom.is_finite())
+}
+
 fn resolve_open_argument(argument: &str) -> Option<PathBuf> {
     let argument = argument.trim();
     let argument = argument
@@ -2645,11 +2689,17 @@ impl StudioView {
     }
 
     pub fn execute_command(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !reads_as_command(query) {
+            if !query.trim().is_empty() {
+                self.start_search(query.trim().to_string(), self.search_mode, window, cx);
+            }
+            return;
+        }
         let mut parts = query.split_whitespace();
         match parts.next() {
             Some("fit") => self.fit(cx),
             Some("zoom") => {
-                let Some(zoom) = parts.next().and_then(|zoom| zoom.parse::<f32>().ok()) else {
+                let Some(zoom) = parts.next().and_then(parse_zoom) else {
                     self.status =
                         format!("Expected: zoom <{MIN_CAMERA_ZOOM}..{MAX_CAMERA_ZOOM}>").into();
                     cx.notify();

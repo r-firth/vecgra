@@ -139,7 +139,11 @@ failures are visible, and Hybrid can retain text results with an explicit
 warning if its remote embedding provider is unavailable.
 
 The same input runs commands (`node <id>`, `path <from> <to>`, `facet`,
-`layout`, `open`, and others). `Cmd-/`, `F1`, `help`, or the `?` at the end of
+`layout`, `open`, and others). Text runs as a command only when the words
+after the command fit it, so a search such as `release notes`,
+`layout refresh`, or `open dialog for files` still searches; text that names
+a command's IDs but gets the rest wrong reports what the command expected.
+`Cmd-/`, `F1`, `help`, or the `?` at the end of
 the status bar opens a dialog listing every shortcut and command; clicking a
 command closes the dialog and starts that command in the input. While the
 dialog is open, Escape and Enter dismiss it rather than acting on the graph
