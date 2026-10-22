@@ -478,6 +478,16 @@ impl StudioView {
                             summary.direct, summary.indirect
                         )),
                 )
+                .when(!summary.labels.is_empty(), |this| {
+                    let (shown, others) = summary.label_mix();
+                    this.child(self.render_context_mix(
+                        "context-label-mix",
+                        shown,
+                        (others > 0).then(|| counted(others, "more label", "more labels")),
+                        |label| self.label_colors.color(label),
+                        cx,
+                    ))
+                })
                 .child(
                     div()
                         .text_xs()
@@ -488,36 +498,44 @@ impl StudioView {
                             "relationships",
                         )),
                 )
-                .when(!summary.labels.is_empty(), |this| {
-                    let (shown, others) = summary.label_mix();
-                    // Each label carries its legend colour, and the line
-                    // wraps between labels rather than inside one.
-                    this.child(
-                        h_flex()
-                            .debug_selector(|| "context-label-mix".into())
-                            .flex_wrap()
-                            .gap_x_2()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .children(shown.iter().map(|(label, count)| {
-                                h_flex()
-                                    .gap_1()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .size(px(6.0))
-                                            .rounded_full()
-                                            .bg(self.label_colors.color(label)),
-                                    )
-                                    .child(format!("{count} {label}"))
-                            }))
-                            .when(others > 0, |this| {
-                                this.child(counted(others, "more label", "more labels"))
-                            }),
-                    )
+                .when(!summary.types.is_empty(), |this| {
+                    let (shown, others) = summary.type_mix();
+                    this.child(self.render_context_mix(
+                        "context-type-mix",
+                        shown,
+                        (others > 0).then(|| counted(others, "more type", "more types")),
+                        |label| self.label_colors.relationship(label),
+                        cx,
+                    ))
                 })
                 .into_any_element(),
         )
+    }
+
+    /// The commonest labels or types in a context, each beside its legend
+    /// colour. The line wraps between entries rather than inside one.
+    fn render_context_mix(
+        &self,
+        selector: &'static str,
+        shown: &[(Arc<str>, usize)],
+        more: Option<String>,
+        color: impl Fn(&str) -> gpui::Hsla,
+        cx: &Context<Self>,
+    ) -> gpui::Div {
+        h_flex()
+            .debug_selector(move || selector.into())
+            .flex_wrap()
+            .gap_x_2()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .children(shown.iter().map(|(label, count)| {
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(div().size(px(6.0)).rounded_full().bg(color(label)))
+                    .child(format!("{count} {label}"))
+            }))
+            .children(more)
     }
 
     /// Rows above the search results for the node and relationship a bare

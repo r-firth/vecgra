@@ -163,10 +163,33 @@ impl ContextSummary {
     /// The commonest labels around the focus, and how many other labels
     /// there are.
     fn label_mix(&self) -> (&[(Arc<str>, usize)], usize) {
-        const SHOWN: usize = 3;
-        let shown = self.labels.len().min(SHOWN);
-        (&self.labels[..shown], self.labels.len() - shown)
+        commonest(&self.labels)
     }
+
+    /// The commonest relationship types in the context, and how many other
+    /// types there are.
+    fn type_mix(&self) -> (&[(Arc<str>, usize)], usize) {
+        commonest(&self.types)
+    }
+}
+
+/// The first three of a most-common-first count list, and how many more
+/// there are.
+fn commonest(counts: &[(Arc<str>, usize)]) -> (&[(Arc<str>, usize)], usize) {
+    const SHOWN: usize = 3;
+    let shown = counts.len().min(SHOWN);
+    (&counts[..shown], counts.len() - shown)
+}
+
+/// Counts each label, most common first and then by name.
+fn counted_labels<'a>(labels: impl IntoIterator<Item = &'a Arc<str>>) -> Arc<[(Arc<str>, usize)]> {
+    let mut counts: BTreeMap<Arc<str>, usize> = BTreeMap::new();
+    for label in labels {
+        *counts.entry(label.clone()).or_default() += 1;
+    }
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    counts.into()
 }
 
 /// Stepping through earlier commands from the command box.
@@ -186,6 +209,8 @@ struct ContextSummary {
     relationships: usize,
     /// The labels of the nodes around the focus, most common first.
     labels: Arc<[(Arc<str>, usize)]>,
+    /// The types of the context's relationships, most common first.
+    types: Arc<[(Arc<str>, usize)]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2572,20 +2597,20 @@ impl StudioView {
         if let Some(target) = focus_bounds.and_then(|focus| self.framing(focus, 112.0, 1.4..=9.0)) {
             self.camera_motion.retarget(target);
         }
-        let mut labels: BTreeMap<Arc<str>, usize> = BTreeMap::new();
-        for &node in focus.layers.iter().skip(1).flatten() {
-            *labels
-                .entry(snapshot.nodes.labels[node].clone())
-                .or_default() += 1;
-        }
-        let mut labels: Vec<_> = labels.into_iter().collect();
-        labels.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
         let summary = ContextSummary {
             node: snapshot.nodes.ids[index],
             direct: focus.layers.get(1).map_or(0, Vec::len),
             indirect: focus.layers.get(2).map_or(0, Vec::len),
             relationships: focus.edges.len(),
-            labels: labels.into(),
+            labels: counted_labels(
+                focus
+                    .layers
+                    .iter()
+                    .skip(1)
+                    .flatten()
+                    .map(|&node| &snapshot.nodes.labels[node]),
+            ),
+            types: counted_labels(focus.edges.iter().map(|&edge| &snapshot.edges.labels[edge])),
         };
         self.status = format!(
             "Context · {} · {} · Esc restores overview",

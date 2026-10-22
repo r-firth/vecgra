@@ -238,8 +238,9 @@ preserved. Escape or the
 Overview row springs positions, camera, and emphasis back to that saved
 presentation. Reduced Motion snaps to the same semantic endpoints. While a
 context is open, its tab is headed by the focus node's title, how many nodes
-sit one and two hops away, how many relationships it shows, and the commonest
-labels among those nodes, each with its legend colour. Clicking the title
+sit one and two hops away and their commonest labels, and how many
+relationships it shows and their commonest types, each label or type with its
+legend colour. Clicking the title
 selects the focus node again after walking away from it within the context.
 
 The relationship and node-label taxonomies are controls as well as the

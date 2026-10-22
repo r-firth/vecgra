@@ -31,31 +31,33 @@ fn active_outlier_facet_stays_in_the_bounded_taxonomy() {
 }
 
 #[test]
-fn context_label_mix_shows_the_commonest_labels() {
-    let summary = |labels: &[(&str, usize)]| ContextSummary {
-        node: 0,
-        direct: 0,
-        indirect: 0,
-        relationships: 0,
-        labels: labels
+fn context_mixes_show_the_commonest_labels() {
+    let labels: Vec<Arc<str>> = [
+        "File", "Session", "File", "Agent", "Commit", "Session", "File",
+    ]
+    .into_iter()
+    .map(Arc::from)
+    .collect();
+    let counts = counted_labels(&labels);
+    assert_eq!(
+        counts
             .iter()
-            .map(|&(label, count)| (Arc::from(label), count))
-            .collect(),
-    };
-    let empty = summary(&[]);
-    assert_eq!(empty.label_mix(), (&[][..], 0));
-    let two = summary(&[("Session", 6), ("Commit", 3)]);
-    assert_eq!(two.label_mix(), (&two.labels[..], 0));
-    let four = summary(&[("Session", 6), ("Commit", 3), ("File", 2), ("Agent", 1)]);
-    let (shown, others) = four.label_mix();
+            .map(|(label, count)| (label.as_ref(), *count))
+            .collect::<Vec<_>>(),
+        [("File", 3), ("Session", 2), ("Agent", 1), ("Commit", 1)]
+    );
+    let (shown, others) = commonest(&counts);
     assert_eq!(
         shown
             .iter()
             .map(|(label, _)| label.as_ref())
             .collect::<Vec<_>>(),
-        ["Session", "Commit", "File"]
+        ["File", "Session", "Agent"]
     );
     assert_eq!(others, 1);
+    let two = counted_labels(&labels[..2]);
+    assert_eq!(commonest(&two), (&two[..], 0));
+    assert_eq!(commonest(&[]), (&[][..], 0));
 }
 
 #[gpui::test]
@@ -635,6 +637,12 @@ fn double_click_opens_a_reversible_two_hop_context_without_starting_a_drag(
                 summary.direct + summary.indirect
             );
             assert!(!summary.label_mix().0.is_empty());
+            // So does the type mix for every relationship it shows.
+            assert_eq!(
+                summary.types.iter().map(|(_, count)| count).sum::<usize>(),
+                summary.relationships
+            );
+            assert!(!summary.type_mix().0.is_empty());
 
             view.settle_presentation_for_capture();
             assert_ne!(
