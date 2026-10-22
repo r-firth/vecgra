@@ -95,6 +95,12 @@ attempt to draw every record as a giant hairball.
 7. Make query cost, result count, vector score, and structural distance
    inspectable without turning the main canvas into a monitoring dashboard.
 
+`Shift-Cmd-E`, **File > Export View as SVG…**, or `export <file.svg>` in the
+command box saves the canvas as it stands as an SVG image the size of the
+canvas: relationships weighted and colored as drawn, their arrowheads and
+captions, nodes with their selection and path rings, and the names on show,
+without the minimap, controls, or hover cards.
+
 Direct manipulation has a separate presentation model from graph truth. A
 press on a node wins over canvas pan, preserves the exact world-space grab
 offset, and follows the pointer without easing. Crossing the drag threshold

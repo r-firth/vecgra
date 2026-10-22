@@ -1583,10 +1583,6 @@ impl StudioView {
     ) -> impl IntoElement {
         let entity = cx.entity().clone();
         let navigator_entity = entity.clone();
-        let dragging_node = match self.drag {
-            Some(DragState::Node { index, .. }) => Some(index),
-            Some(DragState::Canvas { .. }) | None => None,
-        };
         let scene = match &self.state {
             LoadState::Ready(snapshot) => self.workspace.as_ref().map_or_else(
                 || {
@@ -1603,20 +1599,7 @@ impl StudioView {
                         .child(graph_canvas(
                             snapshot.clone(),
                             workspace.clone(),
-                            GraphCanvasPresentation {
-                                camera: self.camera,
-                                world_bounds: self.world_bounds,
-                                selection: self.selection,
-                                dragging: dragging_node,
-                                emphasis: self.lens.as_ref().map(LensTransition::emphasis),
-                                path_endpoints: self.path_endpoints,
-                                hovered_node: self
-                                    .hovered_node
-                                    .and_then(|id| snapshot.node_index(id)),
-                                hovered_edge: self
-                                    .hovered_edge
-                                    .and_then(|hovered| snapshot.edge_index(hovered.id)),
-                            },
+                            self.canvas_presentation(snapshot),
                         ))
                         .into_any_element()
                 },

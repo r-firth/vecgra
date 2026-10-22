@@ -35,6 +35,7 @@ const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
         "Database",
         &[
             ("⌘O", "Open a database"),
+            ("⇧⌘E", "Export the view as SVG"),
             ("⌘R", "Reload from disk"),
             ("⇧⌘L", "Turn live refresh on or off"),
             ("⌘/", "Show or hide this help"),
@@ -70,6 +71,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ),
     ("zoom <factor>  ·  fit", "zoom ", "Set the zoom"),
     ("open <path>", "open ", "Open a .vg database"),
+    (
+        "export <path.svg>",
+        "export ",
+        "Save the view as an SVG image",
+    ),
     (
         "reload  ·  live on|off",
         "live ",

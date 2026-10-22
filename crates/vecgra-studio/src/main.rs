@@ -9,9 +9,9 @@ use gpui::{Entity, Window};
 use gpui_component::{ActiveTheme as _, Root, TitleBar};
 use vecgra_studio_ui::{
     ActivateSelection, ArrangeAuto, ArrangeForce, ArrangeOrbit, ArrangeStructure, ClearSelection,
-    FitView, FocusSearch, NextSearchResult, OpenDatabase, PreviousSearchResult, ReleaseSelected,
-    ReloadDatabase, SelectionBack, SelectionForward, StudioView, ToggleHelp, ToggleLiveRefresh,
-    ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
+    ExportView, FitView, FocusSearch, NextSearchResult, OpenDatabase, PreviousSearchResult,
+    ReleaseSelected, ReloadDatabase, SelectionBack, SelectionForward, StudioView, ToggleHelp,
+    ToggleLiveRefresh, ZoomIn, ZoomOut, apply_studio_theme, init_bezel,
 };
 
 actions!(vecgra_studio_desktop, [Quit]);
@@ -66,6 +66,7 @@ fn main() {
             KeyBinding::new("cmd-shift-r", ReleaseSelected, Some("VecgraStudio")),
             KeyBinding::new("cmd-r", ReloadDatabase, Some("VecgraStudio")),
             KeyBinding::new("cmd-o", OpenDatabase, Some("VecgraStudio")),
+            KeyBinding::new("cmd-shift-e", ExportView, Some("VecgraStudio")),
             KeyBinding::new("cmd-[", SelectionBack, Some("VecgraStudio")),
             KeyBinding::new("cmd-]", SelectionForward, Some("VecgraStudio")),
             KeyBinding::new("cmd-shift-l", ToggleLiveRefresh, Some("VecgraStudio")),
@@ -136,6 +137,8 @@ fn app_menus() -> Vec<Menu> {
             MenuItem::action("Open…", OpenDatabase),
             MenuItem::action("Reload", ReloadDatabase),
             MenuItem::action("Live Refresh", ToggleLiveRefresh),
+            MenuItem::separator(),
+            MenuItem::action("Export View as SVG…", ExportView),
         ]),
         Menu::new("View").items([
             MenuItem::action("Search", FocusSearch),

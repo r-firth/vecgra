@@ -1472,6 +1472,9 @@ fn command_words_followed_by_other_words_are_searched() {
         "open notes.vg",
         "open \"with space.vg\"",
         "open /tmp/missing",
+        "export",
+        "export ~/graph.svg",
+        "export view.svg",
         "text graph",
         "semantic",
     ] {
@@ -1493,6 +1496,7 @@ fn command_words_followed_by_other_words_are_searched() {
         "path rail keyboard focus",
         "facet lens accessibility",
         "open dialog for files",
+        "export controls",
     ] {
         assert!(!reads_as_command(search), "{search} is a search");
     }
@@ -2281,6 +2285,40 @@ fn inspector_rows_can_be_reached_and_activated_from_the_keyboard(cx: &mut TestAp
     cx.update(|window, cx| {
         assert_eq!(view.read(cx).selection, Some(SceneSelection::Node(5)));
         assert!(view.read(cx).focus_handle.is_focused(window));
+    });
+}
+
+#[gpui::test]
+fn the_view_exports_as_an_svg_file(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let directory = std::env::temp_dir().join(format!("vecgra-export-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    // A path without an extension is saved as SVG.
+    let command = format!("export {}", directory.join("view").display());
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command(&command, window, cx)
+    });
+
+    let svg = std::fs::read_to_string(directory.join("view.svg")).unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.contains("<circle "));
+    view.read_with(&*cx, |view, _| {
+        assert!(
+            view.status.starts_with("Exported the view to"),
+            "{}",
+            view.status
+        )
     });
 }
 

@@ -42,7 +42,7 @@ use panels::visible_facet_counts;
 
 use crate::graph_canvas::{
     GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, PATH_INTERIOR_SCORE, graph_canvas,
-    label_color,
+    label_color, scene_svg,
 };
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
@@ -70,7 +70,8 @@ actions!(
         OpenDatabase,
         SelectionBack,
         SelectionForward,
-        ToggleHelp
+        ToggleHelp,
+        ExportView
     ]
 );
 
@@ -351,6 +352,13 @@ fn reads_as_command(query: &str) -> bool {
                 || argument.contains(['/', '\\'])
                 || argument.ends_with(".vg")
                 || resolve_open_argument(argument).is_some_and(|path| path.exists())
+        }
+        "export" => {
+            let argument = query.trim_start()["export".len()..].trim();
+            argument.is_empty()
+                || argument.starts_with(['"', '\'', '~'])
+                || argument.contains(['/', '\\'])
+                || argument.ends_with(".svg")
         }
         "text" | "semantic" | "hybrid" | "search" => true,
         _ => false,
@@ -959,6 +967,71 @@ impl StudioView {
                 .ok();
         })
         .detach();
+    }
+
+    /// What the canvas draws now, for the canvas itself and for export.
+    fn canvas_presentation(&self, snapshot: &SceneSnapshot) -> GraphCanvasPresentation {
+        GraphCanvasPresentation {
+            camera: self.camera,
+            world_bounds: self.world_bounds,
+            selection: self.selection,
+            dragging: match self.drag {
+                Some(DragState::Node { index, .. }) => Some(index),
+                Some(DragState::Canvas { .. }) | None => None,
+            },
+            emphasis: self.lens.as_ref().map(LensTransition::emphasis),
+            path_endpoints: self.path_endpoints,
+            hovered_node: self.hovered_node.and_then(|id| snapshot.node_index(id)),
+            hovered_edge: self
+                .hovered_edge
+                .and_then(|hovered| snapshot.edge_index(hovered.id)),
+        }
+    }
+
+    fn prompt_export_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let directory = self
+            .database_path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(std::path::Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default();
+        let name = self
+            .database_path
+            .as_deref()
+            .and_then(std::path::Path::file_stem)
+            .map_or_else(|| "graph".into(), |stem| stem.to_string_lossy());
+        let path = cx.prompt_for_new_path(&directory, Some(&format!("{name}.svg")));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = path.await else {
+                return;
+            };
+            this.update(cx, |this, cx| this.export_view(&path, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// Saves the graph view as drawn, at the canvas's size, as an SVG image.
+    fn export_view(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let (Some(snapshot), Some(workspace), Some(bounds)) =
+            (self.snapshot(), self.workspace.as_ref(), self.canvas_bounds)
+        else {
+            self.status = "Open a graph to export its view".into();
+            cx.notify();
+            return;
+        };
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let svg = scene_svg(
+            snapshot,
+            &workspace.borrow(),
+            &self.canvas_presentation(snapshot),
+            viewport,
+        );
+        self.status = match std::fs::write(path, svg) {
+            Ok(()) => format!("Exported the view to {}", path.display()).into(),
+            Err(error) => format!("Could not export to {}: {error}", path.display()).into(),
+        };
+        cx.notify();
     }
 
     fn on_external_paths_dropped(
@@ -3027,6 +3100,25 @@ impl StudioView {
                     }
                 }
             }
+            Some("export") => {
+                let argument = query.trim_start()["export".len()..].trim();
+                if argument.is_empty() {
+                    self.prompt_export_view(window, cx);
+                    return;
+                }
+                match resolve_open_argument(argument) {
+                    Some(mut path) => {
+                        if path.extension().is_none() {
+                            path.set_extension("svg");
+                        }
+                        self.export_view(&path, cx);
+                    }
+                    None => {
+                        self.status = "Expected: export <path.svg>".into();
+                        cx.notify();
+                    }
+                }
+            }
             Some("live") | Some("watch") => match parts.next() {
                 None => self.set_live_refresh(!self.live_refresh, window, cx),
                 Some("on") => self.set_live_refresh(true, window, cx),
@@ -3387,6 +3479,9 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &ToggleLiveRefresh, window, cx| {
                 this.set_live_refresh(!this.live_refresh, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExportView, window, cx| {
+                this.prompt_export_view(window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenDatabase, window, cx| {
                 this.prompt_open_database(window, cx);

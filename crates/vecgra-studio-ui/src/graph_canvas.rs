@@ -20,6 +20,10 @@ use crate::theme::{
     relationship_color_index,
 };
 
+mod svg;
+
+pub(crate) use svg::scene_svg;
+
 const EDGE_PATH_CHUNK: usize = 6_000;
 const COMMUNITY_EDGE_BUDGET: usize = 18_000;
 const REPRESENTATIVE_CAPTION_BUDGET: usize = 10;
@@ -197,6 +201,8 @@ fn line_intersection_f64(
 
 struct PaintArrow {
     path: Path<Pixels>,
+    /// Tip, then the two back corners, for drawing it outside GPUI.
+    corners: [Point<Pixels>; 3],
     color: Hsla,
     selected: bool,
 }
@@ -449,10 +455,11 @@ fn prepare_scene(
                 emphasis_edge_paths.push(PaintPath { path, color });
             }
             if arrows.len() < LOCAL_ARROW_BUDGET
-                && let Some(path) = arrowhead(bounds, from, to)
+                && let Some((path, corners)) = arrowhead(bounds, from, to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color,
                     selected: score > 0.9,
                 });
@@ -497,10 +504,11 @@ fn prepare_scene(
             builders[color_index].segment(absolute_point(bounds, from), absolute_point(bounds, to));
             segment_counts[color_index] += 1;
             if arrows.len() < LOCAL_ARROW_BUDGET
-                && let Some(path) = arrowhead(bounds, from, to)
+                && let Some((path, corners)) = arrowhead(bounds, from, to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color: relationship_color_for_index(color_index).opacity(0.92),
                     selected: false,
                 });
@@ -577,9 +585,10 @@ fn prepare_scene(
         let color = relationship_color(label);
         let mut builder = LinePathBuilder::stroke(px(2.5));
         builder.segment(absolute_point(bounds, from), absolute_point(bounds, to));
-        if let Some(path) = arrowhead(bounds, from, to) {
+        if let Some((path, corners)) = arrowhead(bounds, from, to) {
             arrows.push(PaintArrow {
                 path,
+                corners,
                 color,
                 selected: true,
             });
@@ -606,10 +615,11 @@ fn prepare_scene(
                 caption_center(bounds, candidate.from, candidate.to),
                 color,
                 false,
-            ) && let Some(path) = arrowhead(bounds, candidate.from, candidate.to)
+            ) && let Some((path, corners)) = arrowhead(bounds, candidate.from, candidate.to)
             {
                 arrows.push(PaintArrow {
                     path,
+                    corners,
                     color: color.opacity(0.86),
                     selected: false,
                 });
@@ -1214,7 +1224,11 @@ fn caption_center(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Point<Pixels>
     absolute_point(bounds, (from + to) * 0.5 + perpendicular * 10.0)
 }
 
-fn arrowhead(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Option<Path<Pixels>> {
+fn arrowhead(
+    bounds: Bounds<Pixels>,
+    from: Vec2,
+    to: Vec2,
+) -> Option<(Path<Pixels>, [Point<Pixels>; 3])> {
     let delta = to - from;
     let length = delta.length();
     if length < 22.0 {
@@ -1224,12 +1238,17 @@ fn arrowhead(bounds: Bounds<Pixels>, from: Vec2, to: Vec2) -> Option<Path<Pixels
     let perpendicular = Vec2::new(-direction.y, direction.x);
     let tip = to - direction * 7.0;
     let base = tip - direction * 7.5;
+    let corners = [
+        absolute_point(bounds, tip),
+        absolute_point(bounds, base + perpendicular * 3.8),
+        absolute_point(bounds, base - perpendicular * 3.8),
+    ];
     let mut builder = PathBuilder::fill();
-    builder.move_to(absolute_point(bounds, tip));
-    builder.line_to(absolute_point(bounds, base + perpendicular * 3.8));
-    builder.line_to(absolute_point(bounds, base - perpendicular * 3.8));
+    builder.move_to(corners[0]);
+    builder.line_to(corners[1]);
+    builder.line_to(corners[2]);
     builder.close();
-    builder.build().ok()
+    builder.build().ok().map(|path| (path, corners))
 }
 
 pub(crate) fn circle(center: Point<Pixels>, radius: f32, color: Hsla) -> PaintQuad {
