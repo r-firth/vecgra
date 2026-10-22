@@ -494,6 +494,9 @@ pub struct StudioView {
     /// another node.
     hovered_node: Option<u64>,
     hovered_edge: Option<HoveredEdge>,
+    /// The camera the pointer's hover was found under. Once the view moves
+    /// under a still pointer, the hover no longer names what is under it.
+    hover_camera: Option<Camera>,
     fresh_nodes: Option<FreshNodes>,
     recent: RecentDatabases,
     /// Where the recent list is saved; `None` keeps it in memory, as tests do.
@@ -611,6 +614,7 @@ impl StudioView {
             selection_forward: Vec::new(),
             help_visible: false,
             hovered_node: None,
+            hover_camera: None,
             hovered_edge: None,
             fresh_nodes: None,
             recent: recent_file
@@ -2722,6 +2726,7 @@ impl StudioView {
             }
             None => self.set_hovered_node(None, cx),
         }
+        self.hover_camera = Some(self.camera);
     }
 
     /// Points out a node on the canvas while a list row that names it is
@@ -2736,6 +2741,7 @@ impl StudioView {
 
     /// Sets the hovered node, which also ends any relationship hover.
     fn set_hovered_node(&mut self, node: Option<u64>, cx: &mut Context<Self>) {
+        self.hover_camera = None;
         if self.hovered_node != node || self.hovered_edge.is_some() {
             self.hovered_node = node;
             self.hovered_edge = None;
@@ -2823,6 +2829,7 @@ impl StudioView {
             self.camera
                 .pan_screen(Vec2::new(-delta_x, -delta_y), self.world_bounds, viewport);
         }
+        self.update_hover(event.position, cx);
         cx.notify();
     }
 
@@ -2845,6 +2852,7 @@ impl StudioView {
             self.world_bounds,
             viewport,
         );
+        self.update_hover(event.position, cx);
         cx.notify();
     }
 
@@ -3211,6 +3219,14 @@ impl Render for StudioView {
             }
         } else {
             self.last_motion_frame = None;
+        }
+        if self
+            .hover_camera
+            .is_some_and(|camera| camera != self.camera)
+        {
+            self.hovered_node = None;
+            self.hovered_edge = None;
+            self.hover_camera = None;
         }
         if let Some(fresh) = &self.fresh_nodes {
             if fresh.since.elapsed() >= FRESH_NODE_DURATION {

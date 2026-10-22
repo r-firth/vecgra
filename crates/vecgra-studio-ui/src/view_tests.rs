@@ -1748,6 +1748,62 @@ fn hovering_a_node_names_it_beside_the_pointer(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn hovers_end_when_the_view_moves_under_a_still_pointer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    let (node_point, id) = view.read_with(&*cx, |view, _| {
+        let bounds = view.canvas_bounds.unwrap();
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let workspace = view.workspace.as_ref().unwrap().borrow();
+        let local =
+            view.camera
+                .project(workspace.position(4).unwrap(), view.world_bounds, viewport);
+        (
+            bounds.origin + point(px(local.x), px(local.y)),
+            view.snapshot().unwrap().nodes.ids[4],
+        )
+    });
+    cx.simulate_mouse_move(node_point, None, Modifiers::none());
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, Some(id)));
+
+    // Wheel zoom keeps the point under the pointer, so the hover stays.
+    let camera_before = view.read_with(&*cx, |view, _| view.camera);
+    cx.simulate_event(ScrollWheelEvent {
+        position: node_point,
+        delta: ScrollDelta::Lines(point(0.0, 1.0)),
+        ..Default::default()
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    view.read_with(&*cx, |view, _| {
+        assert_ne!(view.camera, camera_before);
+        assert_eq!(view.hovered_node, Some(id));
+    });
+    assert!(cx.debug_bounds("graph-hover-card").is_some());
+
+    // A command that moves the view leaves the pointer over something else.
+    view.update_in(cx, |view, window, cx| {
+        view.execute_command("zoom 3", window, cx)
+    });
+    view.update_in(cx, |view, _, _| view.settle_presentation_for_capture());
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    view.read_with(&*cx, |view, _| assert_eq!(view.hovered_node, None));
+    assert!(cx.debug_bounds("graph-hover-card").is_none());
+}
+
+#[gpui::test]
 fn hovering_a_relationship_names_its_type_and_ends(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
