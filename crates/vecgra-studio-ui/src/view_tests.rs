@@ -955,3 +955,99 @@ fn reload_status_names_every_kind_of_change() {
         "Reloaded · +2 nodes · −1 node · +1 relationship · 4 updated · new layout"
     );
 }
+
+#[gpui::test]
+fn open_replaces_the_demo_scene_and_retires_its_presentation(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("open");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let window = cx.add_window(|window, cx| StudioView::new(None, window, cx));
+    let missing = live.path.with_extension("missing.vg");
+
+    window
+        .update(cx, |view, window, cx| {
+            assert!(!view.live_refresh);
+            view.execute_command(&format!("open {}", missing.display()), window, cx);
+            assert!(view.status.starts_with("No database at "));
+            assert!(view.is_ready(), "a bad path keeps the current scene");
+
+            view.execute_command("facet node Document", window, cx);
+            view.set_selection(Some(SceneSelection::Node(3)));
+            view.execute_command(&format!("open \"{}\"", live.path.display()), window, cx);
+            assert!(!view.is_ready());
+            assert!(view.active_facet.is_none());
+            assert!(view.lens.is_none());
+            assert_eq!(view.selection, None);
+            assert!(
+                view.live_refresh,
+                "opening a database turns live refresh on"
+            );
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert!(view.is_ready());
+            let snapshot = view.snapshot().unwrap();
+            assert_eq!(snapshot.nodes.ids.len(), live.files.len());
+            assert_eq!(view.database_path.as_deref(), Some(live.path.as_path()));
+            assert!(view.fingerprint.is_some());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn dropping_a_database_file_opens_it(cx: &mut TestAppContext) {
+    let live = LiveDatabase::new("drop");
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let window = cx.add_window(|window, cx| StudioView::new(None, window, cx));
+    window
+        .update(cx, |view, window, cx| {
+            let paths = ExternalPaths(
+                [PathBuf::from("/tmp/notes.txt"), live.path.clone()]
+                    .into_iter()
+                    .collect(),
+            );
+            view.on_external_paths_dropped(&paths, window, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert!(view.is_ready());
+            assert_eq!(view.database_path.as_deref(), Some(live.path.as_path()));
+        })
+        .unwrap();
+}
+
+#[test]
+fn open_arguments_expand_home_strip_quotes_and_resolve_relative_paths() {
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    assert_eq!(
+        resolve_open_argument("~/graphs/agents.vg"),
+        Some(home.join("graphs/agents.vg"))
+    );
+    assert_eq!(
+        resolve_open_argument("'/tmp/with space.vg'"),
+        Some(PathBuf::from("/tmp/with space.vg"))
+    );
+    assert_eq!(
+        resolve_open_argument("\"/tmp/a.vg\""),
+        Some(PathBuf::from("/tmp/a.vg"))
+    );
+    assert_eq!(
+        resolve_open_argument("relative.vg"),
+        Some(std::env::current_dir().unwrap().join("relative.vg"))
+    );
+    assert_eq!(resolve_open_argument("  "), None);
+    assert!(
+        openable_database_path(&std::env::temp_dir())
+            .unwrap_err()
+            .contains("is a folder")
+    );
+}

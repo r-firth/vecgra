@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
-    PinchEvent, Pixels, Render, Role, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div, px,
-    relative, rgb,
+    AppContext as _, Bounds, Context, Entity, ExternalPaths, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement as _, PathPromptOptions, PinchEvent, Pixels, Render, Role,
+    ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, Task, Window, actions, div, px, relative, rgb,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, ElementExt as _, InteractiveElementExt as _,
@@ -63,7 +63,8 @@ actions!(
         NextSearchResult,
         PreviousSearchResult,
         ReloadDatabase,
-        ToggleLiveRefresh
+        ToggleLiveRefresh,
+        OpenDatabase
     ]
 );
 
@@ -268,6 +269,56 @@ enum SelectedElement {
     Edge(u64),
 }
 
+fn live_refresh_default() -> bool {
+    std::env::var("VECGRA_STUDIO_LIVE").map_or(true, |value| value != "0")
+}
+
+/// Resolves the argument of the `open` command: surrounding quotes are
+/// stripped, `~` expands to the home directory, and relative paths resolve
+/// against the working directory Studio was started from.
+fn resolve_open_argument(argument: &str) -> Option<PathBuf> {
+    let argument = argument.trim();
+    let argument = argument
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| {
+            argument
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        })
+        .unwrap_or(argument);
+    if argument.is_empty() {
+        return None;
+    }
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let path = if argument == "~" {
+        home()?
+    } else if let Some(rest) = argument.strip_prefix("~/") {
+        home()?.join(rest)
+    } else {
+        PathBuf::from(argument)
+    };
+    Some(if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().map_or(path.clone(), |directory| directory.join(path))
+    })
+}
+
+fn openable_database_path(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Err(format!(
+            "{} is a folder, not a .vg database",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(format!("No database at {}", path.display()))
+        }
+        Err(error) => Err(format!("Cannot open {} · {error}", path.display())),
+    }
+}
+
 fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
     let prefix = if live { "Live" } else { "Reloaded" };
     if delta.is_empty() {
@@ -418,8 +469,7 @@ impl StudioView {
             generation: 0,
             load_task: None,
             fingerprint: None,
-            live_refresh: path.is_some()
-                && std::env::var("VECGRA_STUDIO_LIVE").map_or(true, |value| value != "0"),
+            live_refresh: path.is_some() && live_refresh_default(),
             live_task: None,
             reload_in_progress: false,
             reload_waiting: false,
@@ -444,7 +494,7 @@ impl StudioView {
             status: if path.is_some() {
                 "Opening database…".into()
             } else {
-                "Demo scene · pass a .vg path to inspect a database".into()
+                "Demo scene · ⌘O opens a .vg database, or drop one here".into()
             },
             on_ready: None,
             on_search_ready: None,
@@ -583,6 +633,10 @@ impl StudioView {
                 match snapshot {
                     Ok(snapshot) => {
                         this.fingerprint = fingerprint;
+                        window.set_window_title(&format!(
+                            "{} — Vecgra Studio",
+                            snapshot.database_name
+                        ));
                         let snapshot = Arc::new(snapshot);
                         this.camera = Camera::fit(snapshot.bounds);
                         this.camera_motion.cancel_at(this.camera);
@@ -621,6 +675,82 @@ impl StudioView {
             })
             .ok();
         }));
+    }
+
+    /// Replaces the current scene with another database. Every presentation
+    /// state that indexes the old scene is retired before the load starts, so
+    /// nothing from the previous graph can be applied to the new one.
+    fn open_database(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let name: SharedString = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("database")
+            .to_string()
+            .into();
+        if let Err(problem) = openable_database_path(&path) {
+            self.status = problem.into();
+            cx.notify();
+            return;
+        }
+        self.retire_transient_presentation();
+        self.set_selection(None);
+        if self.database_path.is_none() {
+            self.live_refresh = live_refresh_default();
+        }
+        self.database_path = Some(path.clone());
+        self.workspace = None;
+        self.graph_navigator_cache.borrow_mut().clear();
+        self.node_label_counts = Arc::from([]);
+        self.relationship_counts = Arc::from([]);
+        self.fingerprint = None;
+        self.reload_in_progress = false;
+        self.reload_waiting = false;
+        self.load_ms = None;
+        self.status = format!("Opening {name}…").into();
+        self.state = LoadState::Loading { name };
+        self.open(path, window, cx);
+        if self.live_refresh && self.live_task.is_none() {
+            self.start_live_refresh(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn prompt_open_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| this.open_database(path, window, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    fn on_external_paths_dropped(
+        &mut self,
+        paths: &ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = paths
+            .paths()
+            .iter()
+            .find(|path| path.extension().is_some_and(|extension| extension == "vg"))
+            .or_else(|| paths.paths().first())
+            .cloned()
+        else {
+            return;
+        };
+        self.open_database(path, window, cx);
     }
 
     /// Rereads the open database and swaps in the new scene without moving
@@ -2233,6 +2363,20 @@ impl StudioView {
             }
             Some("clear") => self.clear_selection(cx),
             Some("reload") | Some("refresh") => self.reload(window, cx),
+            Some("open") => {
+                let argument = query.trim_start()["open".len()..].trim();
+                if argument.is_empty() {
+                    self.prompt_open_database(window, cx);
+                    return;
+                }
+                match resolve_open_argument(argument) {
+                    Some(path) => self.open_database(path, window, cx),
+                    None => {
+                        self.status = "Expected: open <path-to-database.vg>".into();
+                        cx.notify();
+                    }
+                }
+            }
             Some("live") | Some("watch") => match parts.next() {
                 None => self.set_live_refresh(!self.live_refresh, window, cx),
                 Some("on") => self.set_live_refresh(true, window, cx),
@@ -2575,6 +2719,12 @@ impl Render for StudioView {
             }))
             .on_action(cx.listener(|this, _: &ToggleLiveRefresh, window, cx| {
                 this.set_live_refresh(!this.live_refresh, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenDatabase, window, cx| {
+                this.prompt_open_database(window, cx);
+            }))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.on_external_paths_dropped(paths, window, cx);
             }))
             .child(self.render_top_bar(compact_toolbar, cx))
             .child(

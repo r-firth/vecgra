@@ -47,7 +47,10 @@ require the desktop stack, so they remain the workspace default members.
 The unit of exploration is a query result or bounded expansion, not an
 attempt to draw every record as a giant hairball.
 
-1. Open a `.vg` file and show useful structure immediately.
+1. Open a `.vg` file and show useful structure immediately. Pass it on the
+   command line, press `Cmd-O`, type `open <path>` in the command box, or
+   drop the file on the window. Opening another file retires every search,
+   path, lens, and selection from the previous one before the load starts.
 2. Search semantically, structurally, or with both in one command box.
 3. Pan and zoom without waiting for database work or graph layout.
 4. Select a node or relationship and inspect its label, properties, vectors,

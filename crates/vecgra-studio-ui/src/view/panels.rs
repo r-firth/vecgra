@@ -1373,7 +1373,8 @@ impl StudioView {
                             .gap_2()
                             .child(inspector_shortcut(&theme, "↵", "Open connected context"))
                             .child(inspector_shortcut(&theme, "⌘K", "Search the graph"))
-                            .child(inspector_shortcut(&theme, "esc", "Return to overview")),
+                            .child(inspector_shortcut(&theme, "esc", "Return to overview"))
+                            .child(inspector_shortcut(&theme, "⌘O", "Open a database")),
                     )
                     .into_any_element()
             }
@@ -1448,7 +1449,11 @@ impl StudioView {
                 format!("Mapping {name}, building a bounded scene, then laying it out."),
                 cx,
             ),
-            LoadState::Failed(error) => centered_state("Could not open graph", error.clone(), cx),
+            LoadState::Failed(error) => centered_state(
+                "Could not open graph",
+                format!("{error}\n⌘O opens another database."),
+                cx,
+            ),
         };
         let main_viewport = self
             .canvas_bounds
