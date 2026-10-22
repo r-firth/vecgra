@@ -41,7 +41,8 @@ use panels::path_direction_label;
 use panels::visible_facet_counts;
 
 use crate::graph_canvas::{
-    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, graph_canvas, label_color,
+    GraphCanvasPresentation, GraphEmphasis, GraphPathEndpoints, PATH_INTERIOR_SCORE, graph_canvas,
+    label_color,
 };
 use crate::graph_navigator::{
     GraphNavigatorCache, GraphNavigatorPresentation, graph_navigator, navigator_world_position,
@@ -2036,7 +2037,7 @@ impl StudioView {
         for (position, id) in path_nodes.iter().copied().enumerate() {
             if let Some(index) = snapshot.node_index(id) {
                 let endpoint = position == 0 || position + 1 == path_nodes.len();
-                node_scores[index] = if endpoint { 1.0 } else { 0.76 };
+                node_scores[index] = if endpoint { 1.0 } else { PATH_INTERIOR_SCORE };
                 if let Some(point) = workspace.position(index) {
                     focus_points.push(point);
                 }

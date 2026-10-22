@@ -666,6 +666,9 @@ fn prepare_scene(
 /// name, the best-connected visible nodes. A name that would overlap one
 /// already placed, or a relationship caption, is skipped, and at most
 /// [`NODE_CAPTION_BUDGET`] are drawn.
+/// The lens score a traced path gives the nodes between its ends.
+pub(crate) const PATH_INTERIOR_SCORE: f32 = 0.76;
+
 fn node_captions(
     snapshot: &SceneSnapshot,
     projected: &[Vec2],
@@ -692,6 +695,15 @@ fn node_captions(
         push(endpoints.start, true);
         if let Some(end) = endpoints.end {
             push(end, true);
+        }
+        // The nodes a traced path runs through come before the start's
+        // neighbors, which would otherwise fill the budget first.
+        if let Some(lens) = context.emphasis {
+            for index in 0..projected.len() {
+                if lens.node_score(index) >= PATH_INTERIOR_SCORE {
+                    push(index, false);
+                }
+            }
         }
     }
     if let Some(selected) = context.selected {
@@ -1358,6 +1370,81 @@ mod caption_tests {
             "a selected relationship names both of its ends"
         );
         assert!(ends.iter().all(|caption| caption.strong));
+    }
+
+    #[test]
+    fn a_traced_path_names_the_nodes_it_runs_through() {
+        let mut snapshot = SceneSnapshot::demo();
+        snapshot.layout(vecgra_studio_core::LayoutOptions::default());
+        let viewport = Vec2::new(1_200.0, 900.0);
+        let camera = Camera::fit(snapshot.bounds);
+        let mut projected: Vec<Vec2> = snapshot
+            .nodes
+            .positions
+            .iter()
+            .map(|&position| camera.project(position, snapshot.bounds, viewport))
+            .collect();
+        // The path starts at the best-connected node, whose neighbors alone
+        // would fill the caption budget.
+        let start = (0..projected.len())
+            .max_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+        let interior = (0..projected.len())
+            .filter(|&index| index != start)
+            .min_by_key(|&index| snapshot.nodes.degrees[index])
+            .unwrap();
+        let end = (0..projected.len())
+            .find(|&index| index != start && index != interior)
+            .unwrap();
+        for other in 0..projected.len() {
+            if ![start, interior, end].contains(&other) {
+                snapshot.edges.ids.push(snapshot.edges.ids.len() as u64);
+                snapshot.edges.sources.push(start as u32);
+                snapshot.edges.targets.push(other as u32);
+                snapshot.edges.labels.push("SUPPORTS".into());
+                snapshot.edges.vector_counts.push(0);
+                snapshot.edges.properties.push(Arc::from([]));
+                snapshot.nodes.degrees[start] += 1;
+                snapshot.nodes.degrees[other] += 1;
+            }
+        }
+        projected[start] = Vec2::new(80.0, 80.0);
+        projected[end] = Vec2::new(80.0, 820.0);
+        projected[interior] = Vec2::new(600.0, 450.0);
+        let mut scores = vec![0.0; projected.len()];
+        scores[start] = 1.0;
+        scores[end] = 1.0;
+        scores[interior] = PATH_INTERIOR_SCORE;
+        let scores: Arc<[f32]> = scores.into();
+        let edges: Arc<[f32]> = vec![0.0; snapshot.edges.ids.len()].into();
+        let lens = GraphEmphasis {
+            from_nodes: scores.clone(),
+            target_nodes: scores,
+            from_edges: edges.clone(),
+            target_edges: edges,
+            mix: 1.0,
+            dim: 0.96,
+        };
+        let mut context = context(Some(start), viewport);
+        context.emphasis = Some(&lens);
+        context.path_endpoints = Some(GraphPathEndpoints {
+            start,
+            end: Some(end),
+        });
+
+        let captions = node_captions(
+            &snapshot,
+            &projected,
+            &[],
+            None,
+            &context,
+            DetailLevel::Communities,
+        );
+        let interior_name = node_caption_text(&snapshot.node_title(interior));
+        assert!(
+            captions.iter().any(|caption| caption.text == interior_name),
+            "the path's interior node is named"
+        );
     }
 
     #[test]

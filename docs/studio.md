@@ -62,8 +62,9 @@ attempt to draw every record as a giant hairball.
    and rings the node on the canvas. Below the overview, hovering a
    relationship's line shows its type, both ends, and up to three of its
    properties, and rings the ends, and the
-   canvas names the selection (both ends, for a relationship), its
-   best-connected neighbors, path endpoints, and the strongest search
+   canvas names the selection (both ends, for a relationship), path
+   endpoints and the nodes a path runs through, the selection's
+   best-connected neighbors, and the strongest search
    matches; zoomed in to individual elements with nothing selected, it
    names the best-connected nodes in view. Names never overlap one another
    or relationship captions.
