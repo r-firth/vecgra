@@ -1135,3 +1135,66 @@ fn recent_databases_keep_the_newest_existing_files_once() {
     assert_eq!(forgotten.paths().len(), RecentDatabases::LIMIT - 2);
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+#[test]
+fn snapshots_find_every_relationship_after_a_checkpointed_database_changes() {
+    let original = TestFile::new();
+    let compacted = TestFile::new();
+    let database = Database::create(
+        &original.0,
+        DatabaseOptions {
+            vector_dimension: 4,
+            similarity: Similarity::Cosine,
+            vector_encoding: VectorEncoding::F32,
+            sync_on_commit: false,
+        },
+    )
+    .unwrap();
+    let mut transaction = database.transaction();
+    let nodes: Vec<_> = (0..4)
+        .map(|_| transaction.create_node("Item", std::iter::empty::<(&str, Value)>(), &[]))
+        .collect();
+    let edges: Vec<_> = nodes
+        .windows(2)
+        .map(|pair| {
+            transaction.create_edge(
+                pair[0],
+                pair[1],
+                "NEXT",
+                std::iter::empty::<(&str, Value)>(),
+                &[],
+            )
+        })
+        .collect();
+    transaction.commit().unwrap();
+    database
+        .compact_to(&compacted.0, VectorEncoding::F32)
+        .unwrap();
+    drop(database);
+
+    // Changing the first relationship of a compacted file moves it after the
+    // rest in the database's own listing.
+    let database = Database::open(&compacted.0).unwrap();
+    let mut transaction = database.transaction();
+    transaction
+        .update_edge(
+            edges[0],
+            nodes[0],
+            nodes[1],
+            "NEXT",
+            [("weight", Value::Int(2))],
+            &[],
+        )
+        .unwrap();
+    transaction.commit().unwrap();
+
+    let snapshot = SceneSnapshot::from_database(&database, SnapshotOptions::default()).unwrap();
+    assert!(snapshot.edges.ids.is_sorted());
+    for &edge in &edges {
+        let index = snapshot
+            .edge_index(edge)
+            .expect("every relationship is found by ID");
+        assert_eq!(snapshot.edges.ids[index], edge);
+    }
+    assert_eq!(snapshot.relationship_counts(), vec![(Arc::from("NEXT"), 3)]);
+}

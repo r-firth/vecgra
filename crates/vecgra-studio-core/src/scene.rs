@@ -432,6 +432,12 @@ impl SceneSnapshot {
             nodes.degrees[source as usize] = nodes.degrees[source as usize].saturating_add(1);
             nodes.degrees[target as usize] = nodes.degrees[target as usize].saturating_add(1);
         }
+        // `edge_index` binary-searches by ID. The database lists checkpointed
+        // relationships before ones changed since, so its order is not
+        // ascending once a compacted file has been written to.
+        if !edges.ids.is_sorted() {
+            sort_scene_edges(&mut edges);
+        }
 
         let database_name = database
             .path()
