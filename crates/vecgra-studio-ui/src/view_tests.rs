@@ -3521,6 +3521,12 @@ fn the_context_heading_selects_its_node_again(cx: &mut TestAppContext) {
     });
 
     let title = cx.debug_bounds("context-heading-title").unwrap();
+    // Hovering the title points the focus out on the canvas.
+    cx.simulate_mouse_move(title.center(), None, Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        let focus = view.snapshot().unwrap().nodes.ids[7];
+        assert_eq!(view.hovered_node, Some(focus));
+    });
     cx.simulate_click(title.center(), Modifiers::none());
     view.read_with(&*cx, |view, _| {
         assert_eq!(view.selection, Some(SceneSelection::Node(7)));

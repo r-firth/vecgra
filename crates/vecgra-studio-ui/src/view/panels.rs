@@ -452,8 +452,9 @@ impl StudioView {
     /// The node a 2-hop context is around, and what the context holds.
     fn render_context_heading(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
         let summary = self.context_summary.as_ref()?;
+        let summary_node = summary.node;
         let snapshot = self.snapshot()?;
-        let index = snapshot.node_index(summary.node)?;
+        let index = snapshot.node_index(summary_node)?;
         Some(
             v_flex()
                 .debug_selector(|| "context-heading".into())
@@ -461,8 +462,8 @@ impl StudioView {
                 .pt_3()
                 .pb_1()
                 .gap_0p5()
-                // The title selects the node again after walking away from
-                // it inside the context.
+                // The title points the node out and selects it again after
+                // walking away from it inside the context.
                 .child(
                     div()
                         .id("context-heading-title")
@@ -470,14 +471,16 @@ impl StudioView {
                         .role(Role::Button)
                         .aria_label(format!("Select {}", snapshot.node_title(index)))
                         .mx(px(-4.0))
-                        .px_1()
+                        .px(px(3.0))
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().sidebar_accent))
                         .tooltip(|window, cx| Tooltip::text("Select this node", window, cx))
-                        .on_click(cx.listener(move |this, event, window, cx| {
-                            this.focus_graph_after(event, window, cx);
+                        .on_activate(cx, move |this, window, cx| {
                             this.go_to_id_match(SceneSelection::Node(index), window, cx);
+                        })
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            this.preview_node(summary_node, *hovered, cx);
                         }))
                         .child(
                             title_line(&snapshot.node_title(index), cx)

@@ -240,8 +240,9 @@ presentation. Reduced Motion snaps to the same semantic endpoints. While a
 context is open, its tab is headed by the focus node's title, how many nodes
 sit one and two hops away and their commonest labels, and how many
 relationships it shows and their commonest types, each label or type with its
-legend colour. Clicking the title
-selects the focus node again after walking away from it within the context.
+legend colour. Hovering the title
+points the focus node out on the canvas, and clicking it, or Enter once Tab
+reaches it, selects the focus again after walking away within the context.
 Overview rows for labels and types the context holds none of recede meanwhile.
 
 The relationship and node-label taxonomies are controls as well as the
