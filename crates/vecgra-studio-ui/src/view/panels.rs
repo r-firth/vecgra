@@ -445,10 +445,29 @@ impl StudioView {
                 .pt_3()
                 .pb_1()
                 .gap_0p5()
+                // The title selects the node again after walking away from
+                // it inside the context.
                 .child(
-                    title_line(&snapshot.node_title(index), cx)
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD),
+                    div()
+                        .id("context-heading-title")
+                        .debug_selector(|| "context-heading-title".into())
+                        .role(Role::Button)
+                        .aria_label(format!("Select {}", snapshot.node_title(index)))
+                        .mx(px(-4.0))
+                        .px_1()
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().sidebar_accent))
+                        .tooltip(|window, cx| Tooltip::text("Select this node", window, cx))
+                        .on_click(cx.listener(move |this, event, window, cx| {
+                            this.focus_graph_after(event, window, cx);
+                            this.go_to_id_match(SceneSelection::Node(index), window, cx);
+                        }))
+                        .child(
+                            title_line(&snapshot.node_title(index), cx)
+                                .text_sm()
+                                .font_weight(gpui::FontWeight::SEMIBOLD),
+                        ),
                 )
                 .child(
                     div()

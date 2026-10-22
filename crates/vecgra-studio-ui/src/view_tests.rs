@@ -3479,3 +3479,30 @@ fn searching_a_bare_id_offers_what_it_names(cx: &mut TestAppContext) {
     view.read_with(&*cx, |view, _| assert!(view.id_matches("4096").is_empty()));
     assert!(cx.debug_bounds("search-id-match:node").is_none());
 }
+
+#[gpui::test]
+fn the_context_heading_selects_its_node_again(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::apply_studio_theme(cx);
+    });
+    let (view, cx) = cx.add_window_view(|window, cx| StudioView::new(None, window, cx));
+    cx.simulate_resize(size(px(1_400.0), px(900.0)));
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| {
+        view.focus_node_context(7, window, cx);
+        // Walk away from the focus inside the context.
+        view.set_selection(Some(SceneSelection::Node(0)));
+    });
+    cx.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+
+    let title = cx.debug_bounds("context-heading-title").unwrap();
+    cx.simulate_click(title.center(), Modifiers::none());
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.selection, Some(SceneSelection::Node(7)));
+        assert!(view.context_focus_active);
+        assert_eq!(view.status.as_ref(), "Selected Context element 7");
+    });
+}
