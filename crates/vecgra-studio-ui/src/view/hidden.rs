@@ -379,7 +379,8 @@ fn hidden_group_row(
         .tooltip(format!("Show the hidden {label} {what}"))
         .cursor_pointer()
         .opacity(0.6)
-        .on_click(cx.listener(move |this, _, _, cx| {
+        .on_click(cx.listener(move |this, event, window, cx| {
+            this.focus_graph_after(event, window, cx);
             this.show_hidden_group(group.clone(), cx);
         }))
         .child(

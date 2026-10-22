@@ -3096,4 +3096,27 @@ fn hidden_nodes_leave_the_view_and_come_back(cx: &mut TestAppContext) {
         assert!(view.hidden.is_none());
         assert_eq!(view.status.as_ref(), "Showing IMPORTS relationships again");
     });
+
+    // Clicking an overview row while typing hands the keys to the graph, so
+    // Backspace hides the type its lens is on rather than editing the box.
+    view.update(cx, |view, _| view.set_selection(None));
+    cx.update(|window, cx| {
+        let input = view.read(cx).query_input.read(cx).focus_handle(cx);
+        window.focus(&input, cx);
+        _ = window.draw(cx);
+    });
+    let row = cx.debug_bounds("relationship-facet:IMPORTS").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    cx.update(|window, cx| {
+        let view = view.read(cx);
+        assert!(view.focus_handle.is_focused(window));
+        assert_eq!(
+            view.active_facet,
+            Some(FacetLens::Relationship("IMPORTS".into()))
+        );
+    });
+    cx.simulate_keystrokes("backspace");
+    view.read_with(&*cx, |view, _| {
+        assert_eq!(view.hidden_summary().as_deref(), Some("7 relationships"));
+    });
 }

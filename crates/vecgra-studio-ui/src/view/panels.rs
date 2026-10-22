@@ -166,6 +166,21 @@ impl StudioView {
         )
     }
 
+    /// A panel row clicked with the pointer hands keyboard focus to the
+    /// graph, so Backspace, Enter and the arrows act on what it showed rather
+    /// than on the command box; a row chosen by keyboard keeps focus for the
+    /// next one.
+    pub(super) fn focus_graph_after(
+        &self,
+        event: &gpui::ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, gpui::ClickEvent::Keyboard(_)) {
+            window.focus(&self.focus_handle, cx);
+        }
+    }
+
     pub(super) fn render_left_panel(&self, cx: &Context<Self>) -> impl IntoElement {
         let label_counts = self.node_label_counts.clone();
         let relationship_counts = self.relationship_counts.clone();
@@ -229,59 +244,63 @@ impl StudioView {
                             let active = self.active_facet.as_ref()
                                 == Some(&FacetLens::Relationship(label.clone()));
                             let facet = FacetLens::Relationship(label.clone());
-                            Button::new(format!("relationship-facet:{label}"))
-                                .ghost()
-                                .small()
-                                .compact()
-                                .w_full()
-                                .label(label.to_string())
-                                .accessibility_id(format!("relationship-facet:{label}"))
-                                .toggled(active)
-                                .selected(active)
-                                .cursor_pointer()
-                                .when(active, |this| {
-                                    this.border_l_2().border_color(cx.theme().ring)
-                                })
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.activate_facet(facet.clone(), window, cx);
-                                }))
-                                .child(
-                                    h_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap_1()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .size(px(7.0))
-                                                .rounded_full()
-                                                .bg(relationship_color(label)),
-                                        )
-                                        .child(div().flex_1())
-                                        .when(active, |this| {
-                                            this.child(
+                            let selector = format!("relationship-facet:{label}");
+                            div().w_full().debug_selector(move || selector).child(
+                                Button::new(format!("relationship-facet:{label}"))
+                                    .ghost()
+                                    .small()
+                                    .compact()
+                                    .w_full()
+                                    .label(label.to_string())
+                                    .accessibility_id(format!("relationship-facet:{label}"))
+                                    .toggled(active)
+                                    .selected(active)
+                                    .cursor_pointer()
+                                    .when(active, |this| {
+                                        this.border_l_2().border_color(cx.theme().ring)
+                                    })
+                                    .on_click(cx.listener(move |this, event, window, cx| {
+                                        this.focus_graph_after(event, window, cx);
+                                        this.activate_facet(facet.clone(), window, cx);
+                                    }))
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(
                                                 div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .font_weight(gpui::FontWeight::BOLD)
-                                                    .text_color(cx.theme().ring)
-                                                    .child("LENS"),
+                                                    .size(px(7.0))
+                                                    .rounded_full()
+                                                    .bg(relationship_color(label)),
                                             )
-                                        })
-                                        .when(!active, |this| {
-                                            this.child(
-                                                div()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(format_count(*count)),
-                                            )
-                                        }),
-                                )
+                                            .child(div().flex_1())
+                                            .when(active, |this| {
+                                                this.child(
+                                                    div()
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_xs()
+                                                        .font_weight(gpui::FontWeight::BOLD)
+                                                        .text_color(cx.theme().ring)
+                                                        .child("LENS"),
+                                                )
+                                            })
+                                            .when(!active, |this| {
+                                                this.child(
+                                                    div()
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_xs()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child(format_count(*count)),
+                                                )
+                                            }),
+                                    ),
+                            )
                         }))
                         .children(self.hidden_relationship_rows(cx)),
                 )
@@ -313,7 +332,8 @@ impl StudioView {
                                 .when(active, |this| {
                                     this.border_l_2().border_color(cx.theme().ring)
                                 })
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                                .on_click(cx.listener(move |this, event, window, cx| {
+                                    this.focus_graph_after(event, window, cx);
                                     this.activate_facet(facet.clone(), window, cx);
                                 }))
                                 .child(
@@ -3049,9 +3069,7 @@ impl ActivatableRow for gpui::Stateful<gpui::Div> {
             .focus_visible(move |style| style.border_color(ring))
             .on_click(
                 cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                    if !matches!(event, gpui::ClickEvent::Keyboard(_)) {
-                        window.focus(&this.focus_handle, cx);
-                    }
+                    this.focus_graph_after(event, window, cx);
                     activate(this, window, cx);
                 }),
             )
