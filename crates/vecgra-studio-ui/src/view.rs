@@ -399,6 +399,14 @@ fn reload_status(delta: SceneDelta, relaid: bool, live: bool) -> String {
 /// edge, so it runs once per selection and scene rather than once per frame;
 /// holding the scene's `Arc` makes the identity check immune to reuse of a
 /// freed snapshot's address.
+/// The relationship under the pointer, by ID, and where on the canvas the
+/// pointer first found it, which is where its card opens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HoveredEdge {
+    id: u64,
+    anchor: Vec2,
+}
+
 struct ConnectionCache {
     snapshot: Arc<SceneSnapshot>,
     node: usize,
@@ -443,6 +451,7 @@ pub struct StudioView {
     /// The node under the pointer, by ID so a reload cannot point it at
     /// another node.
     hovered_node: Option<u64>,
+    hovered_edge: Option<HoveredEdge>,
     recent: RecentDatabases,
     /// Where the recent list is saved; `None` keeps it in memory, as tests do.
     recent_file: Option<PathBuf>,
@@ -559,6 +568,7 @@ impl StudioView {
             selection_forward: Vec::new(),
             help_visible: false,
             hovered_node: None,
+            hovered_edge: None,
             recent: recent_file
                 .as_deref()
                 .map(RecentDatabases::load)
@@ -2562,6 +2572,10 @@ impl StudioView {
     /// Tracks the node under a pointer that is not dragging, within the same
     /// radius a click would select it.
     fn update_hover(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        enum Hit {
+            Node(u64),
+            Edge(u64, Vec2),
+        }
         let hovered = self
             .canvas_bounds
             .filter(|bounds| bounds.contains(&position))
@@ -2572,17 +2586,45 @@ impl StudioView {
                     (position.x - bounds.origin.x).into(),
                     (position.y - bounds.origin.y).into(),
                 );
-                hit_test_positions(
-                    workspace.borrow().positions(),
+                let workspace = workspace.borrow();
+                if let Some(index) = hit_test_positions(
+                    workspace.positions(),
                     self.camera,
                     self.world_bounds,
                     viewport,
                     local,
                     15.0,
-                )
-                .map(|index| snapshot.nodes.ids[index])
+                ) {
+                    return Some(Hit::Node(snapshot.nodes.ids[index]));
+                }
+                // Relationships are only drawn individually below the
+                // overview, and are picked with the same radius as a click.
+                (detail_level(self.camera, snapshot.nodes.ids.len()) != DetailLevel::Overview)
+                    .then(|| {
+                        hit_test_edges(
+                            workspace.positions(),
+                            &snapshot.edges,
+                            self.camera,
+                            self.world_bounds,
+                            viewport,
+                            local,
+                            7.0,
+                        )
+                    })
+                    .flatten()
+                    .map(|index| Hit::Edge(snapshot.edges.ids[index], local))
             });
-        self.set_hovered_node(hovered, cx);
+        match hovered {
+            Some(Hit::Node(node)) => self.set_hovered_node(Some(node), cx),
+            Some(Hit::Edge(id, anchor)) => {
+                if self.hovered_edge.is_none_or(|hovered| hovered.id != id) {
+                    self.hovered_node = None;
+                    self.hovered_edge = Some(HoveredEdge { id, anchor });
+                    cx.notify();
+                }
+            }
+            None => self.set_hovered_node(None, cx),
+        }
     }
 
     /// Points out a node on the canvas while a list row that names it is
@@ -2595,9 +2637,11 @@ impl StudioView {
         }
     }
 
+    /// Sets the hovered node, which also ends any relationship hover.
     fn set_hovered_node(&mut self, node: Option<u64>, cx: &mut Context<Self>) {
-        if self.hovered_node != node {
+        if self.hovered_node != node || self.hovered_edge.is_some() {
             self.hovered_node = node;
+            self.hovered_edge = None;
             cx.notify();
         }
     }

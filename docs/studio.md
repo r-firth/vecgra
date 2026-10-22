@@ -59,11 +59,13 @@ attempt to draw every record as a giant hairball.
    a node shows its title, label, and relationship count beside it without
    changing the selection; hovering a node in the inspector's connections,
    a relationship's endpoints, or the search results shows the same card
-   and rings the node on the canvas. Below the overview, the canvas names the
-   selection, its best-connected neighbors, path endpoints, and the
-   strongest search matches; zoomed in to individual elements with nothing
-   selected, it names the best-connected nodes in view. Names never overlap
-   one another or relationship captions.
+   and rings the node on the canvas. Below the overview, hovering a
+   relationship's line shows its type and both ends and rings them, and the
+   canvas names the selection (both ends, for a relationship), its
+   best-connected neighbors, path endpoints, and the strongest search
+   matches; zoomed in to individual elements with nothing selected, it
+   names the best-connected nodes in view. Names never overlap one another
+   or relationship captions.
 4. Select a node or relationship and inspect its label, properties, vectors,
    neighbors, and provenance without losing the current view. A node's
    heading is its title, name, or path when it has one; wherever a path

@@ -1579,7 +1579,10 @@ impl StudioView {
             .bg(palette().graphite)
             .track_focus(&self.focus_handle)
             .cursor_grab()
-            .when(self.hovered_node.is_some(), |this| this.cursor_pointer())
+            .when(
+                self.hovered_node.is_some() || self.hovered_edge.is_some(),
+                |this| this.cursor_pointer(),
+            )
             .when(self.drag.is_some(), |this| this.cursor_grabbing())
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                 if !hovered {
@@ -1976,14 +1979,94 @@ impl StudioView {
     /// node pointed at from a list can be found on the canvas. Nothing is
     /// drawn for a node outside the visible canvas.
     fn render_hover_card(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
-        self.hover_card_elements(cx)
-            .map_or_else(Vec::new, Vec::from)
+        if let Some(elements) = self.hover_card_elements(cx) {
+            return Vec::from(elements);
+        }
+        self.edge_hover_elements(cx).unwrap_or_default()
+    }
+
+    /// The hovered relationship's card, opened where the pointer found it,
+    /// and rings on whichever of its ends are on the canvas.
+    fn edge_hover_elements(&self, cx: &Context<Self>) -> Option<Vec<gpui::AnyElement>> {
+        const WIDTH: f32 = 280.0;
+        const OFFSET: f32 = 14.0;
+        if self.drag.is_some() {
+            return None;
+        }
+        let hovered = self.hovered_edge?;
+        let snapshot = self.snapshot()?;
+        let edge = snapshot.edge_index(hovered.id)?;
+        let bounds = self.canvas_bounds?;
+        let viewport = Vec2::new(bounds.size.width.into(), bounds.size.height.into());
+        let source = snapshot.edges.sources[edge] as usize;
+        let target = snapshot.edges.targets[edge] as usize;
+        let mut elements: Vec<gpui::AnyElement> = {
+            let workspace = self.workspace.as_ref()?.borrow();
+            [source, target]
+                .into_iter()
+                .filter_map(|index| workspace.position(index))
+                .map(|world| self.camera.project(world, self.world_bounds, viewport))
+                .filter(|anchor| {
+                    anchor.x >= 0.0
+                        && anchor.y >= 0.0
+                        && anchor.x <= viewport.x
+                        && anchor.y <= viewport.y
+                })
+                .map(hover_ring)
+                .collect()
+        };
+        let anchor = hovered.anchor;
+        let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
+            anchor.x + OFFSET
+        } else {
+            (anchor.x - OFFSET - WIDTH).max(8.0)
+        };
+        let top = (anchor.y + OFFSET).clamp(8.0, (viewport.y - 84.0).max(8.0));
+        let label = snapshot.edges.labels[edge].clone();
+        let color = relationship_color(&label);
+        elements.push(
+            v_flex()
+                .debug_selector(|| "graph-hover-edge-card".into())
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .max_w(px(WIDTH))
+                .px_2p5()
+                .py_1p5()
+                .gap_0p5()
+                .rounded(px(8.0))
+                .bg(rgb(0x10181e).opacity(0.94))
+                .border_1()
+                .border_color(cx.theme().border)
+                .shadow_md()
+                .child(
+                    div()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(color)
+                        .child(label.to_string()),
+                )
+                .child(title_line(&scene_node_title(snapshot, source), cx).text_sm())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .min_w_0()
+                        .child(div().text_sm().text_color(color).child("→"))
+                        .child(
+                            title_line(&scene_node_title(snapshot, target), cx)
+                                .flex_1()
+                                .text_sm(),
+                        ),
+                )
+                .into_any_element(),
+        );
+        Some(elements)
     }
 
     fn hover_card_elements(&self, cx: &Context<Self>) -> Option<[gpui::AnyElement; 2]> {
         const WIDTH: f32 = 260.0;
         const OFFSET: f32 = 14.0;
-        const RING: f32 = 22.0;
         if self.drag.is_some() {
             return None;
         }
@@ -1996,16 +2079,7 @@ impl StudioView {
         if anchor.x < 0.0 || anchor.y < 0.0 || anchor.x > viewport.x || anchor.y > viewport.y {
             return None;
         }
-        let ring = div()
-            .debug_selector(|| "graph-hover-ring".into())
-            .absolute()
-            .left(px(anchor.x - RING / 2.0))
-            .top(px(anchor.y - RING / 2.0))
-            .size(px(RING))
-            .rounded_full()
-            .border_2()
-            .border_color(palette().mist.opacity(0.85))
-            .into_any_element();
+        let ring = hover_ring(anchor);
         // Open to the right of the node unless that would leave the canvas.
         let left = if anchor.x + OFFSET + WIDTH <= viewport.x - 8.0 {
             anchor.x + OFFSET
@@ -2466,6 +2540,21 @@ fn inspector_label(label: &'static str) -> impl IntoElement {
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(rgb(0x70838e))
         .child(label)
+}
+
+/// A ring around a node on the canvas, at its canvas-local position.
+fn hover_ring(anchor: Vec2) -> gpui::AnyElement {
+    const RING: f32 = 22.0;
+    div()
+        .debug_selector(|| "graph-hover-ring".into())
+        .absolute()
+        .left(px(anchor.x - RING / 2.0))
+        .top(px(anchor.y - RING / 2.0))
+        .size(px(RING))
+        .rounded_full()
+        .border_2()
+        .border_color(palette().mist.opacity(0.85))
+        .into_any_element()
 }
 
 fn endpoint_row(
